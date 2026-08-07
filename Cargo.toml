@@ -1,0 +1,16 @@
+[package]
+name = "indium"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+description = "An archive manager for Linux on Wayland where the metadata is the main event."
+
+[dependencies]
+eframe = { version = "0.36.1", default-features = false, features = ["glow", "wayland"] }
+egui_extras = "0.36.1"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.4"
+
+[profile.release]
+lto = true
+strip = true
