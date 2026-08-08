@@ -20,17 +20,25 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
         )
         .show(root, |ui| {
             ui.vertical(|ui| {
-                ui.label(
-                    egui::RichText::new("INDIUM")
-                        .size(23.0)
-                        .color(theme::TEXT)
-                        .family(theme::bold()),
-                );
-                ui.label(
-                    egui::RichText::new("archive manager")
-                        .size(13.0)
-                        .color(theme::TEXT_MUTED),
-                );
+                // CORE §4 draws this zone "(family style)", and the family puts the mark
+                // above the wordmark, centred, with the sections left-aligned beneath it.
+                // The header block is the only centred thing in the window.
+                ui.vertical_centered(|ui| {
+                    ui.add_space(2.0);
+                    ui.add(theme::mark(84.0));
+                    ui.add_space(8.0);
+                    ui.label(
+                        egui::RichText::new("INDIUM")
+                            .size(23.0)
+                            .color(theme::TEXT)
+                            .family(theme::bold()),
+                    );
+                    ui.label(
+                        egui::RichText::new("archive manager")
+                            .size(13.0)
+                            .color(theme::TEXT_MUTED),
+                    );
+                });
                 ui.add_space(18.0);
 
                 section_item(ui, app, Section::Recents, "Recent files", "1", true);

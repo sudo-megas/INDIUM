@@ -58,6 +58,29 @@ pub fn hairline() -> Stroke {
     Stroke::new(1.0, HAIRLINE)
 }
 
+/// The maker's mark, embedded once and drawn in two places.
+///
+/// CORE §4's sixth popup asks for "**the mark**, the maker, the version and date" — the word
+/// has been in the document since P1 and the popup never drew one. CORE §4 also calls the
+/// sidebar "(family style)", and the family — JADEITE — puts the mark above the wordmark.
+/// Both are that sentence being kept rather than a new idea.
+///
+/// **1024, and not the 2048 or 4096 masters**, for a reason that is not aesthetic: those two
+/// are gitignored (P5 Deviation 6, 21 MB between them), and `build/package/PKGBUILD` builds
+/// from a *git clone of the tag*. `include_bytes!` on a file git does not carry would fail
+/// the build for every person who ever packages INDIUM, and would fail it at `cargo build`
+/// with a missing-file error rather than anywhere informative. 1024 is the largest master the
+/// repository actually holds. It is drawn at 84px in the sidebar and 150px in About, so even
+/// a 2× display asks for less than a third of it.
+pub const MARK: &[u8] = include_bytes!("../build/icons/indium-1024.png");
+
+/// The mark, at a given edge length. The URI is what egui's texture cache keys on, so it is
+/// fixed rather than derived from the size — one decode, one texture, both call sites.
+pub fn mark(size: f32) -> egui::Image<'static> {
+    egui::Image::from_bytes("bytes://indium-mark.png", MARK)
+        .fit_to_exact_size(egui::vec2(size, size))
+}
+
 /// "This mode is active", in Aubergine, for every `selectable_label` in this `Ui`.
 ///
 /// CORE §6 gives Aubergine "selection context, active sidebar item", and reserves orange for

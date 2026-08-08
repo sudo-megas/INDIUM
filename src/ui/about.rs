@@ -30,19 +30,26 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .open(&mut open)
         .show(ctx, |ui| {
-            ui.label(
-                egui::RichText::new("INDIUM")
-                    .size(28.0)
-                    .color(theme::TEXT)
-                    .family(theme::bold()),
-            );
-            ui.label(
-                egui::RichText::new(
-                    "An archive manager for Linux on Wayland where the metadata is the main event.",
-                )
-                .color(theme::TEXT_SECONDARY),
-            );
-            ui.add_space(10.0);
+            // "The mark, the maker, the version and date" — CORE §4.6, in that order. The
+            // mark was named in the document from P1 and drawn here for the first time in P6.
+            ui.vertical_centered(|ui| {
+                ui.add_space(4.0);
+                ui.add(theme::mark(150.0));
+                ui.add_space(10.0);
+                ui.label(
+                    egui::RichText::new("INDIUM")
+                        .size(28.0)
+                        .color(theme::TEXT)
+                        .family(theme::bold()),
+                );
+                ui.label(
+                    egui::RichText::new(
+                        "An archive manager for Linux on Wayland where the metadata is the main event.",
+                    )
+                    .color(theme::TEXT_SECONDARY),
+                );
+            });
+            ui.add_space(14.0);
 
             egui::Grid::new("about-grid")
                 .num_columns(2)
