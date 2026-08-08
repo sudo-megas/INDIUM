@@ -24,107 +24,118 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
     let mut submit = false;
     let mut cancel = false;
 
-    egui::Modal::new(egui::Id::new("password-prompt")).show(ctx, |ui| {
-        ui.set_width(400.0);
-        ui.label(
-            egui::RichText::new("Password")
-                .size(17.0)
-                .color(theme::TEXT),
-        );
-        ui.add_space(4.0);
-        ui.label(
-            egui::RichText::new(match &app.pending {
-                Some(PendingAction::List(_)) => {
-                    "This archive's file names are encrypted. A password is needed to list it."
-                }
-                Some(PendingAction::Crc { .. })
-                | Some(PendingAction::OpenWith { .. })
-                | Some(PendingAction::Preview { .. }) => {
-                    "This entry is encrypted. A password is needed to read it."
-                }
-                Some(PendingAction::CopyOut) => {
-                    "This selection is encrypted. A password is needed to copy it out."
-                }
-                Some(PendingAction::Apply) => {
-                    "Choose the password for this archive. INDIUM never stores it, so \
-                     there is no way to recover it if you forget it."
-                }
-                _ => "This selection is encrypted. A password is needed to extract it.",
-            })
-            .size(13.0)
-            .color(theme::TEXT_SECONDARY),
-        );
-        ui.add_space(10.0);
-
-        let resp = ui.add(
-            egui::TextEdit::singleline(&mut app.password_input)
-                .password(true)
-                .font(egui::TextStyle::Monospace)
-                .desired_width(f32::INFINITY),
-        );
-        resp.request_focus();
-
-        // A fresh encrypted archive is asked twice. There is nothing to check a typo
-        // against — no existing archive to try the password on — and a typo would build
-        // something nobody, including its author, can ever open.
-        let confirming = app.pending == Some(PendingAction::Apply) && app.tasks.creates_encrypted();
-        if confirming {
-            ui.add_space(6.0);
-            ui.add(
-                egui::TextEdit::singleline(&mut app.password_confirm)
-                    .password(true)
-                    .font(egui::TextStyle::Monospace)
-                    .hint_text("confirm")
-                    .desired_width(f32::INFINITY),
-            );
-            if !app.password_confirm.is_empty() && app.password_confirm != app.password_input {
-                ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new("The two passwords are not the same.")
-                        .size(13.0)
-                        .color(theme::WARNING),
-                );
-            }
-        }
-
-        if app.password_attempts > 0 {
-            let left = MAX_ATTEMPTS.saturating_sub(app.password_attempts);
+    // egui's default backdrop is `from_black_alpha(100)`, and pure black over an aubergine
+    // window pulls the whole thing grey at the exact moment the user is being asked for a
+    // secret. `SCRIM` is `VOID` at 78%, so the window stays in its own family and the dimming
+    // is nearly twice as deep — which is what "everything else is unavailable" should look
+    // like. The `Frame` is left alone deliberately: `Modal` defaults to `Frame::popup`, which
+    // reads `window_fill`, `window_stroke` and `menu_corner_radius` from `install_visuals`,
+    // so the modal already takes the new POPUP ground without an override here. P7 §3.
+    egui::Modal::new(egui::Id::new("password-prompt"))
+        .backdrop_color(theme::SCRIM)
+        .show(ctx, |ui| {
+            ui.set_width(400.0);
+            // A `Modal` draws no title bar, so this label *is* the title, and it takes the
+            // Heading style every other popup's title is drawn in rather than a hand-typed 17.0
+            // that would drift the moment the scale moved. Not `theme::section_bare`: a section
+            // heading is 14.0 with a gap above it, which would make the one popup that cannot
+            // draw its own title bar wear the smallest title in the program.
+            ui.label(egui::RichText::new("Password").heading().color(theme::TEXT));
             ui.add_space(4.0);
             ui.label(
-                egui::RichText::new(format!(
-                    "Wrong password. {left} {} left.",
-                    if left == 1 { "attempt" } else { "attempts" }
-                ))
+                egui::RichText::new(match &app.pending {
+                    Some(PendingAction::List(_)) => {
+                        "This archive's file names are encrypted. A password is needed to list it."
+                    }
+                    Some(PendingAction::Crc { .. })
+                    | Some(PendingAction::OpenWith { .. })
+                    | Some(PendingAction::Preview { .. }) => {
+                        "This entry is encrypted. A password is needed to read it."
+                    }
+                    Some(PendingAction::CopyOut) => {
+                        "This selection is encrypted. A password is needed to copy it out."
+                    }
+                    Some(PendingAction::Apply) => {
+                        "Choose the password for this archive. INDIUM never stores it, so \
+                     there is no way to recover it if you forget it."
+                    }
+                    _ => "This selection is encrypted. A password is needed to extract it.",
+                })
                 .size(13.0)
-                .color(theme::WARNING),
+                .color(theme::TEXT_SECONDARY),
             );
-        }
+            ui.add_space(10.0);
 
-        ui.add_space(10.0);
-        let ready = !confirming
-            || (!app.password_input.is_empty() && app.password_confirm == app.password_input);
-        ui.horizontal(|ui| {
-            let label = if confirming { "Set" } else { "Unlock" };
-            if ui.add_enabled(ready, egui::Button::new(label)).clicked() {
+            let resp = ui.add(
+                egui::TextEdit::singleline(&mut app.password_input)
+                    .password(true)
+                    .font(egui::TextStyle::Monospace)
+                    .desired_width(f32::INFINITY),
+            );
+            resp.request_focus();
+
+            // A fresh encrypted archive is asked twice. There is nothing to check a typo
+            // against — no existing archive to try the password on — and a typo would build
+            // something nobody, including its author, can ever open.
+            let confirming =
+                app.pending == Some(PendingAction::Apply) && app.tasks.creates_encrypted();
+            if confirming {
+                ui.add_space(6.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut app.password_confirm)
+                        .password(true)
+                        .font(egui::TextStyle::Monospace)
+                        .hint_text("confirm")
+                        .desired_width(f32::INFINITY),
+                );
+                if !app.password_confirm.is_empty() && app.password_confirm != app.password_input {
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new("The two passwords are not the same.")
+                            .size(13.0)
+                            .color(theme::WARNING),
+                    );
+                }
+            }
+
+            if app.password_attempts > 0 {
+                let left = MAX_ATTEMPTS.saturating_sub(app.password_attempts);
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Wrong password. {left} {} left.",
+                        if left == 1 { "attempt" } else { "attempts" }
+                    ))
+                    .size(13.0)
+                    .color(theme::WARNING),
+                );
+            }
+
+            ui.add_space(10.0);
+            let ready = !confirming
+                || (!app.password_input.is_empty() && app.password_confirm == app.password_input);
+            ui.horizontal(|ui| {
+                let label = if confirming { "Set" } else { "Unlock" };
+                if theme::button(ui, egui::RichText::new(label), ready).clicked() {
+                    submit = true;
+                }
+                if theme::button(ui, egui::RichText::new("Cancel"), true).clicked() {
+                    cancel = true;
+                }
+                ui.label(
+                    egui::RichText::new("Never stored — used once, then wiped.")
+                        .size(12.0)
+                        .color(theme::TEXT_MUTED),
+                );
+            });
+
+            if ready && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 submit = true;
             }
-            if ui.button("Cancel").clicked() {
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 cancel = true;
             }
-            ui.label(
-                egui::RichText::new("Never stored — used once, then wiped.")
-                    .size(12.0)
-                    .color(theme::TEXT_MUTED),
-            );
         });
-
-        if ready && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            submit = true;
-        }
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            cancel = true;
-        }
-    });
 
     if cancel {
         dismiss(app);

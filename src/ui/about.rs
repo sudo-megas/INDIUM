@@ -85,9 +85,14 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             );
 
             ui.add_space(10.0);
+            // The separator stays and belongs to the popup, not to the heading: it divides
+            // "who made this" from "what it is licensed under". The heading itself is
+            // `section_bare`, because CORE's rule is that a heading takes a rule when it
+            // opens a *list of siblings* and none when it names a single object — and the
+            // licence is one document, not a list. The centred "INDIUM" above is a value
+            // rather than a heading, so it keeps its own size and is left alone. P7 §4.
             ui.separator();
-            ui.label(egui::RichText::new("The licence, in full").color(theme::TEXT_SECONDARY));
-            ui.add_space(4.0);
+            theme::section_bare(ui, "The licence, in full");
 
             egui::ScrollArea::vertical()
                 .max_height(240.0)

@@ -60,12 +60,15 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             let subdir = beside.join(archive_stem(&archive));
 
             ui.horizontal(|ui| {
-                if ui.button("Extract here").clicked() {
+                if theme::button(ui, egui::RichText::new("Extract here"), true).clicked() {
                     go = Some(beside.clone());
                 }
-                if ui
-                    .button(format!("Extract to {}/", archive_stem(&archive)))
-                    .clicked()
+                if theme::button(
+                    ui,
+                    egui::RichText::new(format!("Extract to {}/", archive_stem(&archive))),
+                    true,
+                )
+                .clicked()
                 {
                     go = Some(subdir.clone());
                 }
@@ -85,8 +88,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
 
                 // P2 §2: "a small ☆ beside the popover's path field pins the typed
                 // path (prompting only for a name)".
-                if ui
-                    .small_button("+")
+                if theme::small_button(ui, egui::RichText::new("+"), true)
                     .on_hover_text("Pin this path as a bookmark")
                     .clicked()
                 {
@@ -132,7 +134,10 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 ui.label(egui::RichText::new("Bookmarks").color(theme::TEXT_MUTED));
                 ui.horizontal_wrapped(|ui| {
                     for b in app.settings.bookmarks.clone() {
-                        if ui.small_button(&b.name).on_hover_text(&b.path).clicked() {
+                        if theme::small_button(ui, egui::RichText::new(&b.name), true)
+                            .on_hover_text(&b.path)
+                            .clicked()
+                        {
                             app.extract_path = b.path.clone();
                         }
                     }
@@ -142,7 +147,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if ui.button("Extract").clicked() || enter {
+                if theme::button(ui, egui::RichText::new("Extract"), true).clicked() || enter {
                     let typed = app.extract_path.trim();
                     if !typed.is_empty() {
                         go = Some(PathBuf::from(expand_tilde(typed)));

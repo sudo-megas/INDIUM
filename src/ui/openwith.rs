@@ -81,46 +81,44 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     for c in &visible {
-                        let inner = egui::Frame::NONE
-                            .inner_margin(egui::Margin::symmetric(8, 5))
-                            .show(ui, |ui| {
-                                ui.set_width(ui.available_width());
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(&c.app.name).color(theme::TEXT));
-                                    if c.is_default {
+                        // Through `theme::row`, which reads its own `Response`. These rows
+                        // had no fill in any state and no cursor at all, so a list built to
+                        // be clicked gave no sign that it could be. P7 §2.
+                        //
+                        // `active` is always false: Aubergine means *the active item*, and
+                        // nothing in this picker is chosen yet. The default application is
+                        // already named by its own chip, which is the honest place for it.
+                        let r = theme::row(ui, false, egui::Margin::symmetric(8, 5), |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(&c.app.name).color(theme::TEXT));
+                                if c.is_default {
+                                    ui.label(
+                                        egui::RichText::new("default")
+                                            .size(12.0)
+                                            .family(theme::MONO)
+                                            .color(theme::TEXT),
+                                    );
+                                }
+                                if c.app.terminal {
+                                    ui.label(
+                                        egui::RichText::new("terminal")
+                                            .size(12.0)
+                                            .color(theme::TEXT_MUTED),
+                                    );
+                                }
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
                                         ui.label(
-                                            egui::RichText::new("default")
+                                            egui::RichText::new(&c.app.id)
                                                 .size(12.0)
                                                 .family(theme::MONO)
-                                                .color(theme::TEXT),
-                                        );
-                                    }
-                                    if c.app.terminal {
-                                        ui.label(
-                                            egui::RichText::new("terminal")
-                                                .size(12.0)
                                                 .color(theme::TEXT_MUTED),
                                         );
-                                    }
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            ui.label(
-                                                egui::RichText::new(&c.app.id)
-                                                    .size(12.0)
-                                                    .family(theme::MONO)
-                                                    .color(theme::TEXT_MUTED),
-                                            );
-                                        },
-                                    );
-                                });
+                                    },
+                                );
                             });
-
-                        let r = ui.interact(
-                            inner.response.rect,
-                            ui.id().with(("ow", &c.app.id)),
-                            egui::Sense::click(),
-                        );
+                        });
                         if r.clicked() {
                             launch = Some((*c).clone());
                         }

@@ -66,7 +66,9 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                                 |ui| {
                                     // `×` U+00D7, which the embedded face carries and
                                     // which `settings.rs` already uses for the same job.
-                                    if ui.small_button("×").clicked() {
+                                    if theme::small_button(ui, egui::RichText::new("×"), true)
+                                        .clicked()
+                                    {
                                         remove = Some(i);
                                     }
                                 },
@@ -96,15 +98,16 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             ui.add_space(8.0);
             ui.separator();
             ui.horizontal(|ui| {
-                discard = ui.button("Discard all").clicked();
+                discard = theme::button(ui, egui::RichText::new("Discard all"), true).clicked();
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    apply = ui
-                        .button(
-                            egui::RichText::new("Apply")
-                                .color(theme::ORANGE)
-                                .family(theme::bold()),
-                        )
-                        .clicked();
+                    apply = theme::button(
+                        ui,
+                        egui::RichText::new("Apply")
+                            .color(theme::ORANGE)
+                            .family(theme::bold()),
+                        true,
+                    )
+                    .clicked();
                 });
             });
             ui.label(

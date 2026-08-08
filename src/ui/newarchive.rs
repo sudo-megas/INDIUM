@@ -94,8 +94,10 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 }
             }
 
-            ui.add_space(10.0);
-            group(ui, "PRESET");
+            // No `add_space` before either heading any more: `theme::section` carries
+            // `SECTION_ABOVE` itself, so the gap is declared in `theme.rs` rather than
+            // hand-tuned here. P7 §1.
+            theme::section(ui, "PRESET");
             ui.horizontal_wrapped(|ui| {
                 // The method rows below already paint Aubergine by hand for this same
                 // "which one is chosen" meaning; the chips painted orange for it. Two
@@ -125,8 +127,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 }
             });
 
-            ui.add_space(10.0);
-            group(ui, "METHOD");
+            theme::section(ui, "METHOD");
             egui::ScrollArea::vertical()
                 .max_height(210.0)
                 .auto_shrink([false, false])
@@ -209,12 +210,15 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let ready = !app.new_name.trim().is_empty() && !app.new_dir.trim().is_empty();
-                create = ui
-                    .add_enabled(
-                        ready,
-                        egui::Button::new(egui::RichText::new("Create").color(theme::ORANGE)),
-                    )
-                    .clicked();
+                // Orange while it can be pressed, and the helper's muted ghost when it
+                // cannot: CORE §6 gives orange to "something *will* happen", and a Create
+                // with no name and no directory is exactly the case where nothing will.
+                create = theme::button(
+                    ui,
+                    egui::RichText::new("Create").color(theme::ORANGE),
+                    ready,
+                )
+                .clicked();
                 ui.label(
                     egui::RichText::new("Nothing is written until you Apply · Esc closes")
                         .size(12.0)
@@ -237,18 +241,15 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
 }
 
 /// One method, with its CORE §5 verdict underneath.
+///
+/// Through `theme::row`, which reads its own `Response`. The hand-rolled version painted
+/// its fill from `app.new_method` alone, so eight rows sat there taking the pointer and
+/// answering nothing — and the unselected fill was `PANEL`, which used to be the popup's
+/// own ground, so an unselected row was a box you could not see. P7 §2.
 fn method_row(ui: &mut egui::Ui, app: &mut Indium, method: Method) {
     let selected = app.new_method == method;
-    let frame = egui::Frame::NONE
-        .inner_margin(egui::Margin::symmetric(8, 5))
-        .fill(if selected {
-            theme::AUBERGINE
-        } else {
-            theme::PANEL
-        });
 
-    let inner = frame.show(ui, |ui| {
-        ui.set_width(ui.available_width());
+    let response = theme::row(ui, selected, egui::Margin::symmetric(8, 5), |ui| {
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
                 ui.label(
@@ -276,11 +277,6 @@ fn method_row(ui: &mut egui::Ui, app: &mut Indium, method: Method) {
         });
     });
 
-    let response = ui.interact(
-        inner.response.rect,
-        ui.id().with(("method", method.label())),
-        egui::Sense::click(),
-    );
     if response.clicked() {
         app.new_method = method;
         app.new_level = method.default_level();
@@ -290,7 +286,6 @@ fn method_row(ui: &mut egui::Ui, app: &mut Indium, method: Method) {
         }
         app.new_preset = preset_for(method, app.new_encrypt);
     }
-    response.on_hover_cursor(egui::CursorIcon::PointingHand);
 }
 
 /// Which preset a hand-picked method corresponds to, so the chips stay honest about what
@@ -334,16 +329,6 @@ fn recipe_of(app: &Indium) -> Recipe {
         level: app.new_method.clamp_level(app.new_level),
         encrypt: app.new_encrypt && app.new_method == Method::Lzma2,
     }
-}
-
-fn group(ui: &mut egui::Ui, title: &str) {
-    ui.label(
-        egui::RichText::new(title)
-            .size(12.0)
-            .color(theme::TEXT)
-            .family(theme::bold()),
-    );
-    ui.add_space(3.0);
 }
 
 impl Indium {

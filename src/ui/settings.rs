@@ -35,11 +35,13 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     .size(13.0)
                     .color(theme::WARNING),
                 );
-                ui.add_space(8.0);
             }
 
             // --- 1. Extract ---------------------------------------------------
-            group(ui, "Extract");
+            // No `add_space` before any of the three headings any more: `theme::section`
+            // carries `SECTION_ABOVE` itself, so the gap is declared once in `theme.rs`
+            // rather than hand-tuned three times here. P7 §1.
+            theme::section(ui, "Extract");
             let mut changed = false;
             ui.horizontal(|ui| {
                 // Which default is chosen is "this mode is active", not "something will
@@ -77,8 +79,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             }
 
             // --- 2. Bookmarks -------------------------------------------------
-            ui.add_space(14.0);
-            group(ui, "Bookmarks");
+            theme::section(ui, "Bookmarks");
 
             let mut remove: Option<usize> = None;
             for (i, b) in app.settings.bookmarks.clone().iter().enumerate() {
@@ -96,7 +97,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                             .color(theme::TEXT_MUTED),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("×").clicked() {
+                        if theme::small_button(ui, egui::RichText::new("×"), true).clicked() {
                             remove = Some(i);
                         }
                     });
@@ -122,7 +123,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 );
                 let ready =
                     !app.bookmark_name.trim().is_empty() && !app.bookmark_path.trim().is_empty();
-                if ui.add_enabled(ready, egui::Button::new("Add")).clicked() {
+                if theme::button(ui, egui::RichText::new("Add"), ready).clicked() {
                     app.settings.bookmarks.push(Bookmark {
                         name: app.bookmark_name.trim().to_string(),
                         path: app.bookmark_path.trim().to_string(),
@@ -134,15 +135,14 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             });
 
             // --- 3. Recent files ----------------------------------------------
-            ui.add_space(14.0);
-            group(ui, "Recent files");
+            theme::section(ui, "Recent files");
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(format!("{} remembered", app.recents.items.len()))
                         .size(13.0)
                         .color(theme::TEXT_MUTED),
                 );
-                if ui.button("Clear list").clicked() {
+                if theme::button(ui, egui::RichText::new("Clear list"), true).clicked() {
                     app.recents.items.clear();
                     // Status first, save last, so a refusal or a write error is what the
                     // status bar carries rather than a cheerful line about a file that is
@@ -172,14 +172,4 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
     if !open {
         app.popup = None;
     }
-}
-
-fn group(ui: &mut egui::Ui, title: &str) {
-    ui.label(
-        egui::RichText::new(title)
-            .size(12.0)
-            .color(theme::TEXT)
-            .family(theme::bold()),
-    );
-    ui.add_space(3.0);
 }
