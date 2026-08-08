@@ -19,4 +19,4 @@ indium (1.0.0-1) unstable; urgency=medium
   * Packaged without dpkg-deb. The build machine is Arch and has none; a .deb is
     an ar archive of three members, so build/package/make-deb.sh writes it out.
 
- -- sudo-megas <sudo-megas@users.noreply.github.com>  Sat, 08 Aug 2026 17:41:31 +0300
+ -- sudo-megas <sudo-megas@users.noreply.github.com>  Sun, 09 Aug 2026 01:05:57 +0300

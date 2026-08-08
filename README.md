@@ -4,7 +4,7 @@
 
 <p>
   <img alt="Version"      src="https://img.shields.io/badge/version-1.0.0-E95420?style=for-the-badge">
-  <img alt="Release date" src="https://img.shields.io/badge/released-2026--08--08-E95420?style=for-the-badge">
+  <img alt="Release date" src="https://img.shields.io/badge/released-2026--08--09-E95420?style=for-the-badge">
   <img alt="Licence"      src="https://img.shields.io/badge/licence-GPL--3.0--only-772953?style=for-the-badge">
 </p>
 
