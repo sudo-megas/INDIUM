@@ -83,14 +83,18 @@ impl Method {
 
     /// The levels this method accepts, or `None` where a level is meaningless.
     ///
-    /// The libarchive ranges are `archive_write_set_options(3)`'s, read from the manual
-    /// on the build machine rather than remembered: gzip, xz and lz4 take 0–9, bzip2
-    /// takes 1–9, and zstd's "supported values depend on the library version, common
-    /// values are from 1 to 22". LZMA2's range is `sevenz-rust2`'s.
+    /// The libarchive ranges come from `archive_write_set_options(3)` on the build
+    /// machine, and then from asking libarchive itself, because on one filter the two
+    /// disagree: the manual gives **lz4** as 0–9, and libarchive refuses
+    /// `lz4:compression-level=0` outright. Every range below has been offered to
+    /// libarchive at both ends and accepted — `every_level_a_method_offers_is_one_
+    /// libarchive_accepts` in `tests/write_path.rs` is what keeps that true, and it is
+    /// the test that caught the lz4 case. LZMA2's range is `sevenz-rust2`'s, where an
+    /// out-of-range level is clamped rather than refused.
     pub fn levels(self) -> Option<std::ops::RangeInclusive<u32>> {
         match self {
             Method::Store => None,
-            Method::Lz4 => Some(0..=9),
+            Method::Lz4 => Some(1..=9),
             Method::Gzip => Some(0..=9),
             Method::Zstd => Some(1..=22),
             Method::Bzip2 => Some(1..=9),
@@ -709,6 +713,78 @@ fn out_path_for(entry: &Entry, staged: &str) -> String {
     } else {
         staged.to_string()
     }
+}
+
+// ---------------------------------------------------------------------------
+// What a backend is asked to write — P4 §3
+// ---------------------------------------------------------------------------
+
+/// One member, as handed to a writer.
+///
+/// This is `Entry` minus everything only a reader can know — no packed size, no stored
+/// method, no encryption flag. Kept and added members reach the rebuild loop in the same
+/// shape, which is what lets that loop stay four lines long.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Meta {
+    pub out_path: String,
+    pub size: u64,
+    pub is_dir: bool,
+    pub mode: u32,
+    pub mtime: Option<i64>,
+    pub atime: Option<i64>,
+    pub ctime: Option<i64>,
+    pub uid: i64,
+    pub gid: i64,
+    pub uname: Option<String>,
+    pub gname: Option<String>,
+    pub symlink: Option<String>,
+    pub hardlink: Option<String>,
+}
+
+impl Meta {
+    /// A member copied out of the source archive, under the name the plan gave it and
+    /// with its hardlink already retargeted.
+    pub fn from_entry(entry: &Entry, out_path: &str, hardlink: Option<&str>) -> Meta {
+        Meta {
+            out_path: out_path.to_string(),
+            size: entry.size,
+            is_dir: entry.is_dir,
+            mode: entry.mode,
+            mtime: entry.mtime,
+            atime: entry.atime,
+            ctime: entry.ctime,
+            uid: entry.uid,
+            gid: entry.gid,
+            uname: entry.uname.clone(),
+            gname: entry.gname.clone(),
+            symlink: entry.symlink.clone(),
+            hardlink: hardlink.map(|h| h.to_string()),
+        }
+    }
+
+    /// Does this member carry a data stream?
+    pub fn has_data(&self) -> bool {
+        !self.is_dir && self.symlink.is_none() && self.hardlink.is_none() && self.size > 0
+    }
+}
+
+/// What Apply writes into. One of these per container.
+///
+/// Two implementations: `arch::Writer` over libarchive for tar and zip, and
+/// `sevenz::Writer` over `sevenz-rust2` for 7z, which is the only one that can write
+/// AES-256. Apply never learns which it holds.
+pub trait Sink {
+    /// Write one member. `data` is `None` for a directory, a symlink, a hardlink, or an
+    /// empty file.
+    fn put(&mut self, meta: &Meta, data: Option<&mut dyn std::io::Read>) -> Result<(), String>;
+
+    /// Close the archive out. Errors here are as fatal as errors anywhere else — a
+    /// half-flushed archive must never be renamed over a good one.
+    fn finish(&mut self) -> Result<(), String>;
+
+    /// Abandon the build without flushing. Called on cancel and on failure, before the
+    /// temp file is removed.
+    fn abandon(&mut self);
 }
 
 // ---------------------------------------------------------------------------

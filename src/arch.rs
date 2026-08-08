@@ -10,7 +10,7 @@
 
 use std::collections::HashSet;
 use std::ffi::{CStr, CString};
-use std::os::raw::{c_char, c_int, c_void};
+use std::os::raw::{c_char, c_int, c_long, c_void};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,6 +18,7 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
 use crate::secret::Secret;
+use crate::tasks::{Container, Meta, Method, Recipe, Sink};
 use crate::util::{self, Crc32};
 
 // ---------------------------------------------------------------------------
@@ -60,6 +61,13 @@ const ARCHIVE_FORMAT_RAR_V5: c_int = 0x0010_0000;
 
 const AE_IFMT: u32 = 0o170000;
 const AE_IFDIR: u32 = 0o040000;
+const AE_IFREG: u32 = 0o100000;
+const AE_IFLNK: u32 = 0o120000;
+
+/// P4 §3: a refused option is `ARCHIVE_FAILED`, not a hard failure — which is exactly
+/// why `set_options` must be checked. A mistyped level would otherwise be swallowed and
+/// the archive built at the default, with nobody told.
+const ARCHIVE_FAILED: c_int = -25;
 
 /// The exact sentence CORE §5 requires. Nothing else may be shown for a RAR file.
 pub const RAR_REFUSAL: &str = "RAR is not supported.";
@@ -113,6 +121,62 @@ extern "C" {
     fn archive_entry_symlink(e: *mut ArchiveEntry) -> *const c_char;
     fn archive_entry_hardlink(e: *mut ArchiveEntry) -> *const c_char;
     fn archive_entry_is_encrypted(e: *mut ArchiveEntry) -> c_int;
+}
+
+// The write half, added by P4 §3. Same rule as above: every declaration is one INDIUM
+// uses, checked by hand against the installed headers. Four of these are easy to get
+// subtly wrong, so they are called out where they are declared.
+#[link(name = "archive")]
+extern "C" {
+    fn archive_write_new() -> *mut Archive;
+    fn archive_write_set_format_pax_restricted(a: *mut Archive) -> c_int;
+    fn archive_write_set_format_zip(a: *mut Archive) -> c_int;
+    fn archive_write_add_filter_none(a: *mut Archive) -> c_int;
+    fn archive_write_add_filter_gzip(a: *mut Archive) -> c_int;
+    fn archive_write_add_filter_bzip2(a: *mut Archive) -> c_int;
+    fn archive_write_add_filter_xz(a: *mut Archive) -> c_int;
+    fn archive_write_add_filter_zstd(a: *mut Archive) -> c_int;
+    fn archive_write_add_filter_lz4(a: *mut Archive) -> c_int;
+    fn archive_write_set_options(a: *mut Archive, opts: *const c_char) -> c_int;
+    /// Two arguments, not three. `archive_read_open_filename` takes a block size and
+    /// this does not; the EXAMPLES section of `archive_write_set_options(3)` shows a
+    /// third argument and is simply wrong about it.
+    fn archive_write_open_filename(a: *mut Archive, file: *const c_char) -> c_int;
+    fn archive_write_header(a: *mut Archive, e: *mut ArchiveEntry) -> c_int;
+    /// `*const c_void` here; the read side's equivalent is `*mut`. Returns the count
+    /// written, or a negative error — check `< 0`, never `!= len`, because libarchive
+    /// 3.x sometimes answers a successful write with zero.
+    fn archive_write_data(a: *mut Archive, buf: *const c_void, size: usize) -> isize;
+    fn archive_write_finish_entry(a: *mut Archive) -> c_int;
+    /// Marks the handle fatal so a later free does not flush a partial archive. This is
+    /// the cancel path: a cancelled Apply must not leave a half-built file behind.
+    fn archive_write_fail(a: *mut Archive) -> c_int;
+    fn archive_write_close(a: *mut Archive) -> c_int;
+    fn archive_write_free(a: *mut Archive) -> c_int;
+
+    fn archive_entry_new() -> *mut ArchiveEntry;
+    fn archive_entry_free(e: *mut ArchiveEntry);
+    /// Returns the entry, not `void`. The return is unused, but declaring it wrong
+    /// would be a signature mismatch.
+    fn archive_entry_clear(e: *mut ArchiveEntry) -> *mut ArchiveEntry;
+    fn archive_entry_set_size(e: *mut ArchiveEntry, size: i64);
+    fn archive_entry_set_filetype(e: *mut ArchiveEntry, t: u32);
+    fn archive_entry_set_perm(e: *mut ArchiveEntry, m: u32);
+    /// Seconds *and* nanoseconds — two value parameters, the second a C `long`.
+    fn archive_entry_set_mtime(e: *mut ArchiveEntry, sec: i64, nsec: c_long);
+    fn archive_entry_set_atime(e: *mut ArchiveEntry, sec: i64, nsec: c_long);
+    fn archive_entry_set_ctime(e: *mut ArchiveEntry, sec: i64, nsec: c_long);
+    fn archive_entry_set_uid(e: *mut ArchiveEntry, uid: i64);
+    fn archive_entry_set_gid(e: *mut ArchiveEntry, gid: i64);
+    fn archive_entry_set_uname(e: *mut ArchiveEntry, n: *const c_char);
+    fn archive_entry_set_gname(e: *mut ArchiveEntry, n: *const c_char);
+    fn archive_entry_set_symlink(e: *mut ArchiveEntry, p: *const c_char);
+    fn archive_entry_set_hardlink(e: *mut ArchiveEntry, p: *const c_char);
+
+    /// Preferred over `archive_read_data_block` for the rebuild's reader: it fills a
+    /// caller buffer in one call, and it materialises sparse holes as zeros, which is
+    /// exactly right when copying an entry into a new archive.
+    fn archive_read_data(a: *mut Archive, buf: *mut c_void, size: usize) -> isize;
 }
 
 // ---------------------------------------------------------------------------
@@ -832,6 +896,312 @@ pub fn has_encrypted_entries(path: &Path) -> Option<bool> {
         -1 => None, // ENCRYPTION_DONT_KNOW
         0 => Some(false),
         _ => Some(true),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The write half — P4 §3
+// ---------------------------------------------------------------------------
+
+/// An open archive being written. Freed on drop; never sent between threads.
+///
+/// Mirrors `Reader`: the same hand-written FFI, the same RAII, the same refusal to
+/// interpret a non-`ARCHIVE_OK` return as success. It reuses one `archive_entry` across
+/// every member, cleared each time, because allocating one per member would be a wasted
+/// call in an archive with a hundred thousand of them.
+pub struct Writer {
+    raw: *mut Archive,
+    entry: *mut ArchiveEntry,
+    finished: bool,
+}
+
+impl Writer {
+    /// Open `path` for writing under `recipe`.
+    ///
+    /// Order matters and is fixed by the header's own comment: format and filters and
+    /// options are all set before the file is opened, because opening "freezes the
+    /// settings".
+    pub fn create(path: &Path, recipe: &Recipe) -> Result<Writer, String> {
+        // SAFETY: a fresh handle; every early return frees it before leaving.
+        let raw = unsafe { archive_write_new() };
+        if raw.is_null() {
+            return Err("libarchive would not allocate a writer".to_string());
+        }
+
+        let mut writer = Writer {
+            raw,
+            entry: std::ptr::null_mut(),
+            finished: false,
+        };
+
+        writer.configure(recipe)?;
+
+        let cpath = path_to_cstring(path)?;
+        // SAFETY: `raw` is live and `cpath` outlives the call.
+        let rc = unsafe { archive_write_open_filename(writer.raw, cpath.as_ptr()) };
+        writer.check(rc, "open the archive for writing")?;
+
+        // SAFETY: allocation only; checked immediately.
+        writer.entry = unsafe { archive_entry_new() };
+        if writer.entry.is_null() {
+            return Err("libarchive would not allocate an entry".to_string());
+        }
+        Ok(writer)
+    }
+
+    /// Select the container, the filter and the compression level.
+    fn configure(&mut self, recipe: &Recipe) -> Result<(), String> {
+        // SAFETY: `self.raw` is live for every call in this function.
+        unsafe {
+            let rc = match recipe.container() {
+                Container::Tar => archive_write_set_format_pax_restricted(self.raw),
+                Container::Zip => archive_write_set_format_zip(self.raw),
+                Container::SevenZ => {
+                    return Err(
+                        "7z is written by sevenz-rust2, not by libarchive — CORE §2".to_string()
+                    )
+                }
+            };
+            self.check(rc, "set the archive format")?;
+
+            let rc = match recipe.method {
+                Method::Store | Method::Deflate => archive_write_add_filter_none(self.raw),
+                Method::Gzip => archive_write_add_filter_gzip(self.raw),
+                Method::Bzip2 => archive_write_add_filter_bzip2(self.raw),
+                Method::Xz => archive_write_add_filter_xz(self.raw),
+                Method::Zstd => archive_write_add_filter_zstd(self.raw),
+                Method::Lz4 => archive_write_add_filter_lz4(self.raw),
+                Method::Lzma2 => unreachable!("LZMA2 is 7z, refused above"),
+            };
+            self.check(rc, "set the compression filter")?;
+        }
+
+        // A refused option is `ARCHIVE_FAILED`, which is not fatal to libarchive but is
+        // fatal to honesty: silently dropping the level the user chose would build a
+        // different archive from the one the popup promised.
+        if let Some(opts) = write_options(recipe) {
+            let copts = CString::new(opts.clone())
+                .map_err(|_| "compression options contained a NUL".to_string())?;
+            // SAFETY: `self.raw` is live and `copts` outlives the call.
+            let rc = unsafe { archive_write_set_options(self.raw, copts.as_ptr()) };
+            if rc == ARCHIVE_FAILED {
+                return Err(format!(
+                    "libarchive refused the compression options ({opts})"
+                ));
+            }
+            self.check(rc, "set the compression options")?;
+        }
+        Ok(())
+    }
+
+    fn check(&self, rc: c_int, what: &str) -> Result<(), String> {
+        if rc == ARCHIVE_OK || rc == ARCHIVE_WARN {
+            return Ok(());
+        }
+        let msg = last_error(self.raw);
+        if msg.is_empty() {
+            Err(format!("could not {what}"))
+        } else {
+            Err(format!("could not {what}: {msg}"))
+        }
+    }
+}
+
+/// The `archive_write_set_options` string for a recipe, or `None` where a level would
+/// mean nothing.
+///
+/// Ranges are `archive_write_set_options(3)`'s, and the level is clamped into them
+/// before it gets here. zip's level `0` is deliberately not special-cased away: the
+/// manual says it switches the method to "store", which is what the user asked for.
+fn write_options(recipe: &Recipe) -> Option<String> {
+    match recipe.method {
+        Method::Store => None,
+        Method::Deflate => Some(format!(
+            "zip:compression=deflate,zip:compression-level={}",
+            recipe.method.clamp_level(recipe.level)
+        )),
+        Method::Gzip | Method::Bzip2 | Method::Xz | Method::Zstd | Method::Lz4 => {
+            let filter = match recipe.method {
+                Method::Gzip => "gzip",
+                Method::Bzip2 => "bzip2",
+                Method::Xz => "xz",
+                Method::Zstd => "zstd",
+                Method::Lz4 => "lz4",
+                _ => unreachable!(),
+            };
+            Some(format!(
+                "{filter}:compression-level={}",
+                recipe.method.clamp_level(recipe.level)
+            ))
+        }
+        Method::Lzma2 => None,
+    }
+}
+
+impl Sink for Writer {
+    fn put(&mut self, meta: &Meta, data: Option<&mut dyn std::io::Read>) -> Result<(), String> {
+        let cpath = CString::new(meta.out_path.as_bytes())
+            .map_err(|_| format!("{} contains a NUL byte", meta.out_path))?;
+
+        // Held until after `archive_write_header`, because libarchive copies strings out
+        // of them during that call and not before.
+        let cuname = meta.uname.as_deref().and_then(|s| CString::new(s).ok());
+        let cgname = meta.gname.as_deref().and_then(|s| CString::new(s).ok());
+        let csymlink = meta.symlink.as_deref().and_then(|s| CString::new(s).ok());
+        let chardlink = meta.hardlink.as_deref().and_then(|s| CString::new(s).ok());
+
+        let filetype = if meta.is_dir {
+            AE_IFDIR
+        } else if meta.symlink.is_some() {
+            AE_IFLNK
+        } else {
+            AE_IFREG
+        };
+
+        // A hardlink and a symlink carry no data of their own, and a directory has none;
+        // giving libarchive a size for them would make it expect bytes that never come.
+        let size = if meta.is_dir || meta.symlink.is_some() || meta.hardlink.is_some() {
+            0
+        } else {
+            meta.size as i64
+        };
+
+        // SAFETY: `self.entry` is live for the writer's lifetime, and every `CString`
+        // above outlives the header call below.
+        unsafe {
+            archive_entry_clear(self.entry);
+            archive_entry_set_pathname(self.entry, cpath.as_ptr());
+            archive_entry_set_filetype(self.entry, filetype);
+            archive_entry_set_perm(self.entry, meta.mode & 0o7777);
+            archive_entry_set_size(self.entry, size);
+            archive_entry_set_uid(self.entry, meta.uid);
+            archive_entry_set_gid(self.entry, meta.gid);
+            if let Some(n) = cuname.as_ref() {
+                archive_entry_set_uname(self.entry, n.as_ptr());
+            }
+            if let Some(n) = cgname.as_ref() {
+                archive_entry_set_gname(self.entry, n.as_ptr());
+            }
+            if let Some(t) = csymlink.as_ref() {
+                archive_entry_set_symlink(self.entry, t.as_ptr());
+            }
+            if let Some(t) = chardlink.as_ref() {
+                archive_entry_set_hardlink(self.entry, t.as_ptr());
+            }
+            // Only set a timestamp that was actually read. An entry whose mtime the
+            // source never recorded must not acquire one here.
+            if let Some(t) = meta.mtime {
+                archive_entry_set_mtime(self.entry, t, 0);
+            }
+            if let Some(t) = meta.atime {
+                archive_entry_set_atime(self.entry, t, 0);
+            }
+            if let Some(t) = meta.ctime {
+                archive_entry_set_ctime(self.entry, t, 0);
+            }
+
+            let rc = archive_write_header(self.raw, self.entry);
+            self.check(rc, &format!("write the header for {}", meta.out_path))?;
+        }
+
+        if let Some(reader) = data {
+            let mut buf = vec![0u8; 65536];
+            loop {
+                let n = reader
+                    .read(&mut buf)
+                    .map_err(|e| format!("could not read {}: {e}", meta.out_path))?;
+                if n == 0 {
+                    break;
+                }
+                // SAFETY: `buf[..n]` is initialised and `self.raw` is live.
+                let written =
+                    unsafe { archive_write_data(self.raw, buf.as_ptr() as *const c_void, n) };
+                // Negative means error. Zero does **not**: libarchive 3.x sometimes
+                // answers a successful write with zero, so `!= n` is the wrong test.
+                if written < 0 {
+                    let msg = last_error(self.raw);
+                    return Err(format!("could not write {}: {msg}", meta.out_path));
+                }
+            }
+        }
+
+        // SAFETY: `self.raw` is live.
+        let rc = unsafe { archive_write_finish_entry(self.raw) };
+        self.check(rc, &format!("finish {}", meta.out_path))
+    }
+
+    fn finish(&mut self) -> Result<(), String> {
+        if self.finished {
+            return Ok(());
+        }
+        self.finished = true;
+        // SAFETY: `self.raw` is live and has not been closed.
+        let rc = unsafe { archive_write_close(self.raw) };
+        self.check(rc, "close the archive")
+    }
+
+    fn abandon(&mut self) {
+        if self.finished {
+            return;
+        }
+        self.finished = true;
+        // Marking the handle fatal is what stops the drop below from flushing a partial
+        // archive out to the temp file on the way past.
+        // SAFETY: `self.raw` is live.
+        unsafe {
+            archive_write_fail(self.raw);
+        }
+    }
+}
+
+impl Drop for Writer {
+    fn drop(&mut self) {
+        // SAFETY: both pointers were allocated by libarchive and are freed once. `free`
+        // implicitly closes an open handle, which is why `finish` is called explicitly
+        // elsewhere — an error that surfaces only here would have nowhere to go.
+        unsafe {
+            if !self.entry.is_null() {
+                archive_entry_free(self.entry);
+            }
+            if !self.finished {
+                archive_write_fail(self.raw);
+            }
+            archive_write_free(self.raw);
+        }
+    }
+}
+
+/// The current entry's data, as a `Read`.
+///
+/// Streams straight out of libarchive so a rebuild never holds a member in memory.
+/// `archive_read_data` is used rather than `archive_read_data_block` because it fills a
+/// caller buffer in one call and materialises sparse holes as zeros — which is what a
+/// copy into a new archive wants.
+pub struct EntryData<'r> {
+    reader: &'r mut Reader,
+}
+
+impl<'r> EntryData<'r> {
+    pub fn new(reader: &'r mut Reader) -> EntryData<'r> {
+        EntryData { reader }
+    }
+}
+
+impl std::io::Read for EntryData<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        // SAFETY: the reader is live and positioned on an entry whose header has been
+        // read; `buf` is a valid writable slice of `buf.len()` bytes.
+        let n = unsafe {
+            archive_read_data(self.reader.raw, buf.as_mut_ptr() as *mut c_void, buf.len())
+        };
+        if n < 0 {
+            let msg = last_error(self.reader.raw);
+            return Err(std::io::Error::other(msg));
+        }
+        Ok(n as usize)
     }
 }
 
