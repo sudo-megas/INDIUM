@@ -1,0 +1,11 @@
+[Default Applications]
+image/png=normal.desktop;tryexec-present.desktop;
+image/jpeg=normal.desktop
+text/plain=terminal.desktop
+
+[Added Associations]
+image/png=normal.desktop;tryexec-present.desktop;terminal.desktop;quoting.desktop;
+image/jpeg=normal.desktop;quoting.desktop;
+
+[Removed Associations]
+image/png=nodisplay.desktop;

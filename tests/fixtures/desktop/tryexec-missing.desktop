@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Fixture TryExec Missing Viewer
+GenericName=Image Viewer
+Comment=TryExec names a binary that is not on PATH. A parser must SKIP this one.
+TryExec=/nonexistent/binary/definitely-not-here
+Exec=cat %f
+Icon=image-x-generic
+Terminal=false
+Categories=Graphics;Viewer;
+MimeType=image/png;image/jpeg;text/plain;

@@ -253,3 +253,53 @@ python3 -c "open('/home/megas/INDIUM/tests/fixtures/notrar.rar','wb').write(
   for the tar fixtures — it is not a boolean, so compare against `1` explicitly.
 - `meta.tar` is 10240 bytes because tar pads to its 20-block default. Only 5 headers
   are real; the rest is the zero padding.
+
+---
+
+## P3 desktop fixtures
+
+`desktop/` holds the committed `.desktop` inputs P3 §5 asks for — *".desktop parsing
+against committed fixture files in `tests/fixtures/desktop/`"* — plus a `mimeapps.list`
+for the ranking test. All seven `.desktop` files pass `desktop-file-validate`, and each
+carries `[Desktop Entry]`, `Type=Application`, `Name=` and `Exec=`.
+
+Every fixture's `Exec` names a binary that really is on `$PATH` (`cat`, `sh`, `env`), so
+the only thing differing between them is the field under test. That is deliberate: GLib's
+own loader *also* rejects an entry whose `Exec` binary is missing — behaviour P3 §3 does
+not ask for — and pinning `Exec` to a real binary keeps that from masking the actual
+discriminator.
+
+| File | Expected | Why |
+| --- | --- | --- |
+| `normal.desktop` | **kept** | Ordinary entry; `Terminal=false`, `MimeType` includes `image/png`. The baseline every other row is a delta from. |
+| `nodisplay.desktop` | **skipped** | `NoDisplay=true`, which P3 §3 honours. |
+| `hidden.desktop` | **skipped** | `Hidden=true` — the spec calls this "strictly equivalent to the .desktop file not existing at all". |
+| `tryexec-missing.desktop` | **skipped** | `TryExec=/nonexistent/binary/definitely-not-here` is not on `$PATH`, which P3 §3 says disqualifies. Its `Exec` is valid, so `TryExec` is the sole cause. |
+| `tryexec-present.desktop` | **kept** | `TryExec=sh` resolves on `$PATH`, so the `TryExec` check must not disqualify it. |
+| `terminal.desktop` | **kept** | `Terminal=true`. P3 §3: "Terminal=true entries are listed" — kept, with no special launch handling. |
+| `quoting.desktop` | **kept** | Pathological wine-style `Exec`: partial quoting, a quoted argument with spaces, escaped quotes and literal backslashes inside quotes, and `%i`/`%c`/`%k` to strip. Feeds the tokenizer test, not the keep/skip test. |
+| `mimeapps.list` | — | `[Default Applications]` maps `image/png` to `normal.desktop` first, so the ranking test can assert the default is first and tagged. |
+
+`quoting.desktop`'s `Exec` unescapes in two passes — the general string-value rules
+(`\\` → `\`) first, then the `Exec` quoting rules — and with `%f` = `/tmp/scratch/file.png`
+and `%i`/`%c`/`%k` stripped it must tokenize to exactly these five arguments:
+
+```
+env
+WINEPREFIX=/home/megas/.wine
+wine
+C:\Program Files\Acme "Deluxe" Viewer\view.exe
+/tmp/scratch/file.png
+```
+
+Verified against GLib (`g_key_file_get_string` then `g_shell_parse_argv`). One caveat for
+whoever writes the tokenizer: `WINEPREFIX="/home/megas/.wine"` opens its quote *mid*
+argument, and the spec only says arguments "may be quoted in whole" — it does not define
+partial quoting. Every real implementation reads it shell-style and drops the quotes, as
+above; a tokenizer recognising a quote only at argument start would instead yield
+`WINEPREFIX="/home/megas/.wine"`, quotes intact. The fixture is written so that this is
+the single token on which the two readings differ.
+
+`mimeapps.list` also carries `[Added Associations]` and `[Removed Associations]` for
+realism. P3 §3 consumes only `[Default Applications]`; nothing here requires the other
+two to be read.

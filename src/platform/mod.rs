@@ -4,6 +4,9 @@
 //! default-app registration, XDG paths". P1 and P2 need only the paths and the TOML
 //! store; the rest arrives with P3.
 
+pub mod apps;
+pub mod clipboard;
+pub mod scratch;
 pub mod store;
 
 use std::path::PathBuf;

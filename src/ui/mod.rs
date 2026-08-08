@@ -7,6 +7,7 @@ pub mod about;
 pub mod extract;
 pub mod filter;
 pub mod inspector;
+pub mod openwith;
 pub mod password;
 pub mod settings;
 pub mod sidebar;
@@ -22,6 +23,9 @@ use eframe::egui;
 
 use crate::arch::{self, ArchiveError, ArchiveInfo, Entry, ExtractMsg, ListMsg};
 use crate::model::{self, Row};
+use crate::platform::apps::{self, Candidate};
+use crate::platform::clipboard;
+use crate::platform::scratch::{self, Scratch};
 use crate::platform::store::{self, ExtractDefault, Recents, Settings, Store};
 use crate::secret::Secret;
 use crate::theme;
@@ -51,6 +55,7 @@ pub enum Popup {
     Settings,
     OpenPath,
     Password,
+    OpenWith,
 }
 
 /// What a password, once typed, is for.
@@ -62,6 +67,10 @@ pub enum PendingAction {
     Extract { dest: PathBuf },
     /// Compute a CRC for one entry.
     Crc { entry: String },
+    /// Copy the current selection out to the clipboard.
+    CopyOut,
+    /// Extract one entry and offer it to an application.
+    OpenWith { entry: String },
 }
 
 pub struct Progress {
@@ -101,6 +110,17 @@ pub struct Indium {
     pub pending: Option<PendingAction>,
     pub bookmark_name: String,
     pub bookmark_path: String,
+
+    // --- Open With (P3) ---------------------------------------------------
+    pub openwith_candidates: Vec<Candidate>,
+    pub openwith_filter: String,
+    pub openwith_show_all: bool,
+    pub openwith_path: Option<PathBuf>,
+    pub openwith_name: String,
+    pub openwith_mime: String,
+
+    /// Where copies handed to the outside world live. Dropping it removes them.
+    pub scratch: Scratch,
 
     // --- worker -----------------------------------------------------------
     pub cancel: Arc<AtomicBool>,
@@ -162,6 +182,14 @@ impl Indium {
             bookmark_name: String::new(),
             bookmark_path: String::new(),
 
+            openwith_candidates: Vec::new(),
+            openwith_filter: String::new(),
+            openwith_show_all: false,
+            openwith_path: None,
+            openwith_name: String::new(),
+            openwith_mime: String::new(),
+            scratch: Scratch::new(),
+
             cancel: Arc::new(AtomicBool::new(false)),
             list_rx: None,
             extract_rx: None,
@@ -177,6 +205,10 @@ impl Indium {
             crc_of: None,
             passphrase: None,
         };
+
+        // P3 §1: "Stale `scratch/` cache entries are swept at launch." The runtime
+        // dir has the session's logout wipe as a backstop; the disk cache has nothing.
+        app.scratch.sweep_stale();
 
         if let Some(path) = open {
             app.open_archive(&cc.egui_ctx, path, None);
@@ -479,6 +511,175 @@ impl Indium {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // P3: out into the system
+    // -----------------------------------------------------------------------
+
+    /// What `Ctrl+C` and Open With operate on: the selection, or the focused row when
+    /// nothing is selected.
+    fn subject_paths(&self, rows: &[Row]) -> Vec<String> {
+        if !self.selection.is_empty() {
+            return self.selection.iter().cloned().collect();
+        }
+        rows.get(self.cursor)
+            .map(|r| r.path.clone())
+            .into_iter()
+            .collect()
+    }
+
+    /// Total uncompressed size of a set of entries, including anything beneath a
+    /// selected directory — this is what decides RAM versus disk (P3 §1).
+    fn uncompressed_total(&self, wanted: &std::collections::HashSet<String>) -> u64 {
+        self.entries
+            .iter()
+            .filter(|e| arch::selection_matches(&e.path, wanted))
+            .map(|e| e.size)
+            .sum()
+    }
+
+    fn any_encrypted(&self, wanted: &std::collections::HashSet<String>) -> bool {
+        self.entries
+            .iter()
+            .filter(|e| arch::selection_matches(&e.path, wanted))
+            .any(|e| e.encrypted)
+    }
+
+    /// `Ctrl+C` — extract to scratch, then offer `file://` URIs on the clipboard.
+    ///
+    /// P3 §2: "it must feel better than drag, not apologetic about it."
+    pub fn copy_out(&mut self, rows: &[Row]) {
+        let paths = self.subject_paths(rows);
+        if paths.is_empty() {
+            self.status = "Nothing selected.".to_string();
+            return;
+        }
+        let wanted: std::collections::HashSet<String> = paths.into_iter().collect();
+
+        if self.passphrase.is_none() && self.any_encrypted(&wanted) {
+            self.pending = Some(PendingAction::CopyOut);
+            self.popup = Some(Popup::Password);
+            self.password_input.clear();
+            self.password_attempts = 0;
+            return;
+        }
+
+        let Some(archive) = self.archive_path.clone() else {
+            return;
+        };
+        let total = self.uncompressed_total(&wanted);
+
+        let placement = match self.scratch.begin(scratch::Kind::CopyOut, total) {
+            Ok(p) => p,
+            Err(e) => {
+                self.status = format!("Could not make a scratch directory: {e}");
+                return;
+            }
+        };
+
+        let cancel = Arc::new(AtomicBool::new(false));
+        if let Err(e) = arch::extract(
+            &archive,
+            &wanted,
+            &placement.dir,
+            self.passphrase.as_ref(),
+            None,
+            &cancel,
+        ) {
+            self.status = e.to_string();
+            return;
+        }
+
+        let files = collect_files(&placement.dir);
+        if files.is_empty() {
+            self.status = "Nothing to copy.".to_string();
+            return;
+        }
+
+        match clipboard::offer(&files) {
+            Ok(()) => {
+                let n = files.len();
+                let mut msg = format!(
+                    "{n} {} ready to paste.",
+                    if n == 1 { "file" } else { "files" }
+                );
+                if placement.on_disk {
+                    // P3 §1's one-line notice.
+                    msg.push_str(" Over 1 GiB — staged on disk rather than in RAM.");
+                }
+                self.status = msg;
+            }
+            Err(e) => self.status = e,
+        }
+    }
+
+    /// `Enter` on a file — extract that one entry, then offer the picker.
+    pub fn open_with(&mut self, entry_path: &str) {
+        let Some(entry) = self.entry(entry_path).cloned() else {
+            return;
+        };
+        if entry.is_dir {
+            return;
+        }
+
+        if self.passphrase.is_none() && entry.encrypted {
+            self.pending = Some(PendingAction::OpenWith {
+                entry: entry_path.to_string(),
+            });
+            self.popup = Some(Popup::Password);
+            self.password_input.clear();
+            self.password_attempts = 0;
+            return;
+        }
+
+        let Some(archive) = self.archive_path.clone() else {
+            return;
+        };
+        let wanted: std::collections::HashSet<String> =
+            std::iter::once(entry.path.clone()).collect();
+
+        let placement = match self.scratch.begin(scratch::Kind::OpenWith, entry.size) {
+            Ok(p) => p,
+            Err(e) => {
+                self.status = format!("Could not make a scratch directory: {e}");
+                return;
+            }
+        };
+
+        let cancel = Arc::new(AtomicBool::new(false));
+        if let Err(e) = arch::extract(
+            &archive,
+            &wanted,
+            &placement.dir,
+            self.passphrase.as_ref(),
+            None,
+            &cancel,
+        ) {
+            self.status = e.to_string();
+            return;
+        }
+
+        let extracted = placement.dir.join(&entry.raw_path);
+        if !extracted.is_file() {
+            self.status = "The entry did not extract to a file.".to_string();
+            return;
+        }
+
+        let name = crate::util::base_name(&entry.path).to_string();
+        let mime = apps::mime_for(&name).to_string();
+        let installed = apps::scan(&apps::application_dirs());
+        let defaults = std::fs::read_to_string(apps::mimeapps_path())
+            .map(|t| apps::parse_mimeapps(&t))
+            .unwrap_or_default();
+
+        self.openwith_candidates = apps::rank(&installed, &mime, &defaults);
+        self.openwith_path = Some(extracted);
+        self.openwith_name = name;
+        self.openwith_mime = mime;
+        self.openwith_filter.clear();
+        self.openwith_show_all = false;
+        self.popup = Some(Popup::OpenWith);
+    }
+
     pub fn default_extract_dir(&self) -> PathBuf {
         let Some(archive) = &self.archive_path else {
             return crate::platform::home();
@@ -493,6 +694,27 @@ impl Indium {
             parent
         }
     }
+}
+
+/// Every regular file beneath `dir`, sorted, so the clipboard offer is stable.
+fn collect_files(dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            match e.file_type() {
+                Ok(t) if t.is_dir() => stack.push(p),
+                Ok(t) if t.is_file() || t.is_symlink() => out.push(p),
+                _ => {}
+            }
+        }
+    }
+    out.sort();
+    out
 }
 
 /// `photos-2026.tar.gz` -> `photos-2026`. Strips every extension, because a
@@ -545,6 +767,7 @@ impl eframe::App for Indium {
         about::show(self, &ctx);
         open_path_popup(self, &ctx);
         password::show(self, &ctx);
+        openwith::show(self, &ctx);
     }
 }
 
@@ -605,9 +828,8 @@ impl Indium {
         if ctrl_a && self.has_archive() && !typing {
             self.selection = rows.iter().map(|r| r.path.clone()).collect();
         }
-        if ctrl_c {
-            // CORE §4 assigns Ctrl+C to copy-out, which is P3's.
-            self.status = "Copy out arrives in P3.".to_string();
+        if ctrl_c && self.has_archive() {
+            self.copy_out(rows);
         }
 
         if typing {
@@ -719,7 +941,14 @@ impl Indium {
         match self.section {
             Section::Archive => {
                 if enter {
-                    self.descend(rows);
+                    match rows.get(self.cursor) {
+                        Some(row) if row.is_dir => self.descend(rows),
+                        Some(row) => {
+                            let path = row.path.clone();
+                            self.open_with(&path);
+                        }
+                        None => {}
+                    }
                 }
                 if back {
                     self.ascend();

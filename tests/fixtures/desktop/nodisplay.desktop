@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Fixture NoDisplay Viewer
+GenericName=Image Viewer
+Comment=Same shape as normal.desktop but NoDisplay=true. A parser must SKIP this one.
+Exec=cat %f
+Icon=image-x-generic
+Terminal=false
+NoDisplay=true
+Categories=Graphics;Viewer;
+MimeType=image/png;image/jpeg;text/plain;

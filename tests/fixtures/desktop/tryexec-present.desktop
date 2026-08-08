@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Fixture TryExec Present Viewer
+GenericName=Image Viewer
+Comment=TryExec names a binary that is on PATH. A parser must KEEP this one.
+TryExec=sh
+Exec=sh %f
+Icon=image-x-generic
+Terminal=false
+Categories=Graphics;Viewer;
+MimeType=image/png;image/jpeg;text/plain;

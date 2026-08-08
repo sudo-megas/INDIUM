@@ -1,0 +1,11 @@
+# INDIUM — desktop entry. CORE §8 fixes this MIME list; CORE §5 and §9 fix what is
+# deliberately missing from it.
+[Desktop Entry]
+Type=Application
+Name=INDIUM
+Comment=Open and inspect archives with full metadata
+Exec=indium %f
+Icon=indium
+Terminal=false
+Categories=Utility;Archiving;
+MimeType=application/zip;application/x-7z-compressed;application/x-tar;application/gzip;application/x-xz;application/zstd;application/x-bzip2;application/x-lzip;application/x-cpio;application/x-iso9660-image;application/x-compressed-tar;application/x-xz-compressed-tar;application/x-zstd-compressed-tar;application/x-bzip2-compressed-tar;

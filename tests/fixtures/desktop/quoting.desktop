@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Fixture Wine Quoting Torture
+GenericName=Windows Application
+Comment=Pathological wine-style Exec. Exercises value-level escaping, in-quote escaping, and stripped field codes. A parser must KEEP this one.
+Exec=env WINEPREFIX="/home/megas/.wine" wine "C:\\\\Program Files\\\\Acme \\"Deluxe\\" Viewer\\\\view.exe" %i %c %k %f
+Icon=wine
+Terminal=false
+Categories=Graphics;Viewer;
+MimeType=image/png;image/jpeg;application/x-ms-dos-executable;

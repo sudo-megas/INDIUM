@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Fixture Terminal Viewer
+GenericName=Console Image Dumper
+Comment=Terminal=true. P3 section 3 says such entries are listed, so a parser must KEEP this one.
+Exec=cat %f
+Icon=utilities-terminal
+Terminal=true
+Categories=Graphics;Viewer;ConsoleOnly;
+MimeType=image/png;image/jpeg;text/plain;

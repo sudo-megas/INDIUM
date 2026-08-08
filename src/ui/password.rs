@@ -37,8 +37,11 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 Some(PendingAction::List(_)) => {
                     "This archive's file names are encrypted. A password is needed to list it."
                 }
-                Some(PendingAction::Crc { .. }) => {
+                Some(PendingAction::Crc { .. }) | Some(PendingAction::OpenWith { .. }) => {
                     "This entry is encrypted. A password is needed to read it."
+                }
+                Some(PendingAction::CopyOut) => {
+                    "This selection is encrypted. A password is needed to copy it out."
                 }
                 _ => "This selection is encrypted. A password is needed to extract it.",
             })
@@ -146,6 +149,17 @@ fn attempt(app: &mut Indium, ctx: &egui::Context) {
             app.passphrase = Some(secret);
             app.compute_crc(&entry);
             // The password's job is done the moment the checksum is in hand.
+            app.passphrase = None;
+        }
+        Some(PendingAction::CopyOut) => {
+            app.passphrase = Some(secret);
+            let rows = app.rows();
+            app.copy_out(&rows);
+            app.passphrase = None;
+        }
+        Some(PendingAction::OpenWith { entry }) => {
+            app.passphrase = Some(secret);
+            app.open_with(&entry);
             app.passphrase = None;
         }
         None => {}

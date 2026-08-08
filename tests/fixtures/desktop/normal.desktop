@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Fixture Normal Viewer
+GenericName=Image Viewer
+Comment=Ordinary valid entry. A parser must KEEP this one.
+Exec=cat %f
+Icon=image-x-generic
+Terminal=false
+Categories=Graphics;Viewer;
+MimeType=image/png;image/jpeg;text/plain;
