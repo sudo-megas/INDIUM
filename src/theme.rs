@@ -58,6 +58,38 @@ pub fn hairline() -> Stroke {
     Stroke::new(1.0, HAIRLINE)
 }
 
+/// "This mode is active", in Aubergine, for every `selectable_label` in this `Ui`.
+///
+/// CORE §6 gives Aubergine "selection context, active sidebar item", and reserves orange for
+/// the current selection, staged changes, and Apply/progress — orange means *something will
+/// happen*. A tab, a preset chip and a toggle say only *which mode is active*; nothing is about
+/// to happen because a tab is open. So they are Aubergine's work, and always were: the sidebar,
+/// the New Archive method rows and the focused Recents and Bookmarks rows have hand-painted
+/// Aubergine for this exact meaning since P1. P6 §6.6.
+///
+/// **It is scoped rather than set in [`install_visuals`], and that is not a preference.** egui
+/// resolves a `selectable_label`'s selected fill from `Visuals::selection::bg_fill` — the same
+/// field `egui_extras` reads to paint the entry table's row cursor, which genuinely *is* the
+/// current selection and keeps orange. Setting it globally would repaint the one thing §6
+/// requires to stay. `visuals_mut` is clone-on-write per `Ui`, and `horizontal` and
+/// `horizontal_wrapped` already open a child `Ui`, so the override dies with the row.
+///
+/// `selection.stroke` is deliberately left alone: egui does not take a selected button's
+/// outline from it, and every one of these labels sets its text colour explicitly, so the
+/// field reaches nothing here.
+///
+/// The hover fill moves with it, and has to. `widgets.hovered.weak_bg_fill` is Aubergine for
+/// the whole program, so the moment the *selected* fill became Aubergine a chip under the
+/// pointer painted exactly like the chosen one — and with four preset chips in a row the
+/// pointer is nearly always on one. A fill that means both "active" and "the mouse is here"
+/// means neither.
+pub fn active_fill(ui: &mut egui::Ui) {
+    let v = ui.visuals_mut();
+    v.selection.bg_fill = AUBERGINE;
+    v.widgets.hovered.weak_bg_fill = WINDOW;
+    v.widgets.hovered.bg_fill = WINDOW;
+}
+
 /// CORE §6: "monospace for every value — sizes, checksums, paths, the whole Inspector.
 /// Monospace is what makes a verbose pane scannable instead of noisy."
 ///

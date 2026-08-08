@@ -45,6 +45,8 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui, rows: &[Row]) {
 
 fn tabs(app: &mut Indium, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
+        // Which tab is open is "this mode is active", not "something will happen". P6 §6.6.
+        theme::active_fill(ui);
         for (tab, label) in [
             (InspectorTab::Details, "Details"),
             (InspectorTab::Preview, "Preview"),

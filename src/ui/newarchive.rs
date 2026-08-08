@@ -97,6 +97,10 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             ui.add_space(10.0);
             group(ui, "PRESET");
             ui.horizontal_wrapped(|ui| {
+                // The method rows below already paint Aubergine by hand for this same
+                // "which one is chosen" meaning; the chips painted orange for it. Two
+                // colours, one meaning, one popup. P6 §6.6.
+                theme::active_fill(ui);
                 for preset in [
                     Preset::Fastest,
                     Preset::Balanced,
@@ -104,7 +108,14 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     Preset::Encrypted,
                 ] {
                     let selected = app.new_preset == preset;
-                    if ui.selectable_label(selected, preset.label()).clicked() {
+                    // Aubergine sits 1.72:1 against the panel, so the fill cannot be the
+                    // only cue. The ink carries it too, as the Inspector tabs already do.
+                    let label = egui::RichText::new(preset.label()).color(if selected {
+                        theme::TEXT
+                    } else {
+                        theme::TEXT_MUTED
+                    });
+                    if ui.selectable_label(selected, label).clicked() {
                         app.new_preset = preset;
                         let (method, encrypt) = preset.recipe_parts();
                         app.new_method = method;
