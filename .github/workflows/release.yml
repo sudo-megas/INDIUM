@@ -72,6 +72,18 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # The same remap the PKGBUILD's build() does, and for the same reason: panic locations
+      # carry the paths a binary was compiled in, `strip` does not remove them, and nothing
+      # warns about it. The Arch package would otherwise be path-clean while the .deb was not
+      # — two packages this milestone says ship the same payload, built to different standards.
+      # Written into GITHUB_ENV rather than one step's `env:` so the build and the tests see
+      # identical flags and cargo does not rebuild the world between them; and computed from
+      # $PWD and $CARGO_HOME rather than hardcoded, because a literal /root/.cargo would be a
+      # more fragile thing than the leak it removes.
+      - name: Set build flags
+        run: |
+          echo "RUSTFLAGS=--remap-path-prefix=$PWD=/usr/src/debug/indium --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}/registry=/usr/src/debug/indium/registry" >> "$GITHUB_ENV"
+
       - name: Build
         run: cargo build --release
 
