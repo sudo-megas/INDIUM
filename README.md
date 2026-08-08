@@ -1,213 +1,128 @@
-# INDIUM
+<img width="96" align="left" hspace="12" vspace="4" alt="" src="build/icons/indium-256.png" />
 
-An archive manager for Linux on Wayland where **the metadata is the main event.**
+<h1>INDIUM</h1>
 
-The stated ambition of this program is to be one of the most verbose archiver applications
-in the industry. Every other archiver on this platform treats an archive's contents as a
-name column and hides the rest behind a Properties dialog.
+<p>
+  <img alt="Version"      src="https://img.shields.io/badge/version-1.0.0-E95420?style=for-the-badge">
+  <img alt="Release date" src="https://img.shields.io/badge/released-2026--08--08-E95420?style=for-the-badge">
+  <img alt="Licence"      src="https://img.shields.io/badge/licence-GPL--3.0--only-772953?style=for-the-badge">
+</p>
 
-![INDIUM with an archive open: the sidebar, the entry table, and the permanent Inspector showing the archive card.](build/screenshot.png)
+<p>
+  <img alt="Debian package" src="https://img.shields.io/badge/Debian%20package-4.6%20MB-772953?style=for-the-badge&logo=debian&logoColor=white">
+  <img alt="Platform"       src="https://img.shields.io/badge/Linux-Wayland-E95420?style=for-the-badge&logo=linux&logoColor=white">
+</p>
 
-## What it is
+*Archive manager for Linux on Wayland* · **The metadata is the main event**
 
-INDIUM is written in Rust and drawn with egui. The Inspector is a permanent pane on the
-right of the window, not a dialog you go and find: sizes, packed sizes, ratio, method,
-checksums, four timestamps, ownership, mode, link targets, encryption state. Selecting
-nothing shows the archive-level card; selecting several entries shows aggregates. It has
-two tabs, *Details* and *Preview*, and `Space` moves between them.
+---
 
-Two sourcing notes belong here rather than in a bug report. libarchive does not expose an
-entry's *stored* CRC, so INDIUM computes CRC32 on demand and labels it computed. Preview
-renders text and images only — a file is judged by its bytes and never by its extension,
-and anything that is neither gets a plain sentence rather than a half-built hex view, which
-arrives in V1.1.
+## 1. DESCRIPTION
 
-All format work happens inside the process. INDIUM never runs `7z`, `tar`, `unzip`, `zstd`,
-or any other external compressor. When a format is listed as supported below, it is
-supported by code linked into the binary, on every machine, whether or not any archive tool
-is installed.
+INDIUM opens archives — tar, zip, 7z and the rest — and keeps a permanent **Inspector** pane
+on screen showing everything there is to know about what you have selected: sizes, packed
+sizes, ratio, method, checksums, four timestamps, ownership, mode, link targets, encryption
+state. Every other archiver hides that behind a Properties dialog; here it is the main view,
+and the stated ambition of the program is to be one of the most verbose archiver applications
+in the industry.
 
-One archive per window. Opening a second archive opens a second window. There are no tabs,
-and the title bar names the archive so a row of INDIUM windows can be told apart.
+Written in Rust and drawn with egui, INDIUM writes nothing in place, sends nothing anywhere,
+and calls no other program to do its work — it never runs `7z`, `tar` or `unzip` behind your
+back, so a format listed as supported works on any machine, with no archive tools installed
+at all.
 
-Nothing is written in place. Every mutation — add, remove, rename, create — is a task in a
-queue, and nothing reaches the disk until **Apply**. Apply builds the new archive in a temp
-file beside the target, verifies it by walking its entries, and then atomically renames it
-over the original. The original is never touched until the replacement is proven.
+**RAR is deliberately absent — not read, not written.** Opening one says exactly this and
+nothing more: *"RAR is not supported."*
 
-Wayland only. There is no X11 path and there will not be one.
+![INDIUM with an archive open: the sidebar, the entry table, and the permanent Inspector.](build/screenshot.png)
 
-## Install
+---
 
-Two packages, and nothing else.
+## 2. DEPENDENCIES
 
-### Arch
+**To simply use it — nothing to install by hand.**
+
+- **Arch Linux** — the package declares what it needs and `pacman` fetches it.
+- **Debian / Ubuntu** — the same; `apt` pulls in what the package asks for.
+
+**To build it yourself:**
+
+- **Arch Linux** — `sudo pacman -S libarchive rust`. That is the whole list.
+- **Debian / Ubuntu** — `sudo apt install libarchive-dev pkg-config build-essential`, and
+  Rust from [rustup](https://rustup.rs) rather than from `apt`, because bookworm packages
+  `rustc` 1.63 and that version cannot build INDIUM.
+
+---
+
+## 3. INSTALLATION
+
+### 3.A Arch Linux
+
+Download `indium-1.0.0-1-x86_64.pkg.tar.zst` from the Releases page:
 
 ```sh
 sudo pacman -U indium-1.0.0-1-x86_64.pkg.tar.zst
 ```
 
-### Debian / Ubuntu
+### 3.B Debian / Ubuntu
+
+Download `indium_1.0.0-1_amd64.deb` from the Releases page:
 
 ```sh
 sudo apt install ./indium_1.0.0-1_amd64.deb
 ```
 
-The three artefacts do not have the same floor, and the difference matters more than the
-file extension does. The `.deb` is built on Debian bookworm and needs **glibc 2.36 or
-newer**. The `.pkg.tar.zst` and the plain `indium-1.0-x86_64.tar.gz` are both built on
-Arch, and the binary in them requires **glibc 2.43** — measured from the binary's own
-symbol versions, not guessed. So the tarball is not a way to run INDIUM on Debian. It is
-the Arch binary without the package around it, and on bookworm it will refuse to start.
+**The two packages do not have the same floor, and it matters more than the file extension
+does.** The `.deb` is built on Debian bookworm and needs **glibc 2.35 or newer** — which is
+what it declares, and which covers bookworm, trixie and Ubuntu 22.04 onward. The
+`.pkg.tar.zst` is built on Arch and needs **glibc 2.43**, as does the plain tarball beside
+it — so the tarball is not a way to run INDIUM on Debian. It is the Arch binary without the
+package around it, and on bookworm it will refuse to start.
 
-No AppImage, no Flatpak, no Snap. That is CORE §9, and it is not open for discussion.
+No AppImage, no Flatpak, no Snap.
 
-## Build from source
-
-### Arch
+### 3.C Build From Source
 
 ```sh
-sudo pacman -S libarchive rust
-```
-
-### Debian / Ubuntu
-
-```sh
-sudo apt install libarchive-dev pkg-config build-essential
-```
-
-Rust comes from rustup — <https://rustup.rs> — on Debian and Ubuntu rather than from
-`apt`. Bookworm packages `rustc` 1.63, which cannot build `eframe` 0.36.
-
-Then, on either:
-
-```sh
+git clone https://github.com/sudo-megas/INDIUM.git
+cd INDIUM
 cargo build --release
 ```
 
-The binary lands at `target/release/indium` and runs from there. To register it on a
-development machine — the icon sizes, the desktop entry, and the two caches, all in user
-scope:
+The binary lands at `target/release/indium` and runs from there. To add the icon and the
+menu entry for your user, run `./build/install-desktop.sh`; add `--set-default` only if you
+want archives to open in INDIUM from your file manager, which is a decision left to you
+rather than made on your behalf.
 
-```sh
-./build/install-desktop.sh
-```
+---
 
-That command touches nothing about existing file associations. The second mode does:
+## 4. HOW TO USE? WHAT IS THE APPLICATION SECTIONS?
 
-```sh
-./build/install-desktop.sh --set-default
-```
+Open an archive by clicking it in your file manager, by passing it on the command line, or
+with `Ctrl+O` inside the program. **One archive per window** — opening a second one opens a
+second window, and there are no tabs.
 
-It rewrites your real MIME associations so that archives open in INDIUM. It is left for
-you to run, deliberately, because that is not a decision an install script should make on
-your behalf.
+### The sections
 
-## Dependencies
+| Section | What it is for |
+|---|---|
+| **Recent files** `1` | The archives you have opened before, newest first, so returning to one is a keypress rather than a hunt through folders. `Enter` opens the highlighted entry and `Del` forgets it. |
+| **Bookmarks** `2` | Folders you name once and reach thereafter by their name — mostly the places you extract to. They appear again inside the Extract popup, which is the point of them. |
+| **Archive** `3` | The archive itself: one row per entry, with Name, Size, Packed and Method, and a breadcrumb path above. It handles a hundred thousand entries as smoothly as a hundred. `Enter` goes into a folder, `Backspace` comes back out, `Ctrl+F` filters. |
+| **The Inspector** | The permanent pane on the right, and the reason the program exists. **Details** tells you everything knowable about what you have selected — select nothing and it describes the whole archive, select several and it adds them up. **Preview** shows text and images, judged by their bytes rather than their file extension. `Space` swaps the two. |
+| **New Archive** `N` | Builds a new archive. Pick one of four presets — *Fastest*, *Balanced*, *Smallest*, *Encrypted* — or choose a method from the list, where **every method carries one honest sentence** about what it costs you and what it saves. A line at the foot states exactly what is about to be built before anything is. |
+| **Pending tasks** `W` | Everything you have changed but not yet committed. A strip appears above the status bar the moment you stage your first change; this is the full list behind it, one row per operation, each removable on its own, with *Discard all* and **Apply**. |
+| **Extract** `E` | Unpacks the selection, or the whole archive if nothing is selected. Offers *Extract here*, *Extract to a folder of the same name*, or any path you type, with your bookmarks underneath. |
+| **Open With** | Press `Enter` on a file and INDIUM offers the applications that can open it, best match first, filtered as you type. It opens a **copy** — anything you change there does not return to the archive. |
+| **Settings** `,` | A small panel: your bookmarks, and whether Extract should start out pointed into a subfolder. It is a plain `settings.toml` you may edit by hand, and INDIUM respects what you write there. |
+| **About** `A` | The version and release date, the maker, the source address, and the licence in full. The address is text you can select and copy but not click — INDIUM opens no browser and follows no link, by design. |
+| **The status bar** | Three lines at the bottom of the window. The first says which archive this window holds and where it lives; the second the entry count, the real and packed sizes, and whatever INDIUM last had to say to you; the third the progress bar and its **Cancel** while something long is running. |
 
-A dependency enters INDIUM only when it does genuine work for the program, and it must be
-describable in one sentence. The count was never the point — an archiver that installs a
-password manager it will never open is bloated at five dependencies, and honest at fifty.
+![The New Archive popup: four presets, every method with its one-sentence verdict, and a line at the foot stating exactly what will be built.](build/screenshot-new.png)
 
-### Crates
+![The Extract popup: extract here, extract into a named folder, or type a path. Bookmarks sit underneath.](build/screenshot-extract.png)
 
-| Crate | Its sentence |
-| --- | --- |
-| `eframe` (features: `glow`, `wayland` — nothing else) | Draws the entire program: window, input, GL context. The only UI dependency. |
-| `egui_extras` | Provides the virtualized table that lets a 100,000-entry archive scroll like a 100-entry one. |
-| `sevenz-rust2` | Writes 7z with AES-256, which libarchive cannot do; also the source of 7z-specific detail the generic reader does not expose. |
-| `wl-clipboard-rs` | Puts `text/uri-list` on the Wayland clipboard so copy-out works into any file manager. |
-| `image` | Decodes the image formats the Preview tab shows; not a new dependency, since `eframe` already links it through its clipboard path. |
-| `serde` + `toml` | Read and write the settings, bookmarks, and recent-files TOML files. |
-
-Everything not in that table is the standard library or hand-written. CRC32 is a
-twenty-line table, byte formatting is ten lines, and argument handling is
-`std::env::args`.
-
-### System libraries
-
-| Library | Its sentence |
-| --- | --- |
-| `libarchive` | Reads and writes every supported container and filter in-process; it is a hard dependency of pacman itself, so it is present on every Arch machine that can install software. On Debian the package is `libarchive13t64` since the time64 transition, and `libarchive13` before it; the `.deb` declares both as alternatives so it installs on either. |
-| `libwayland-client`, `libwayland-egl`, `libxkbcommon`, `libEGL` | What the compositor session already provides, and what the window cannot be drawn without. |
-| `glibc`, `libgcc_s`, `libm` | The floor. |
-
-### The sentence `ldd` cannot tell you
-
-Run `ldd` on the release binary and the Wayland libraries are not in the output.
-`libwayland-client`, `libwayland-egl`, `libxkbcommon` and `libEGL` are `dlopen`ed by name
-at runtime, so they leave no `DT_NEEDED` entry to find. They are still hard requirements,
-and both packages declare them anyway. A dependency list derived from `ldd` alone would
-produce a package that installs cleanly and then fails to open a window.
-
-### Bundled, not depended on
-
-JetBrains Mono NL Nerd Font, regular and bold, embedded in the binary. Nothing is fetched
-and nothing is read from the system — INDIUM links no fontconfig. The licence is OFL-1.1,
-in `LICENSES/` alongside the GPL. `NL` is the no-ligature cut, and the reason is the whole
-program in miniature: a filename holding `->` must render as the two characters the archive
-stores, not as the single arrow a programmer's font would prefer to draw.
-
-### The toolkit gate
-
-No GTK. No Qt. No KF6. No portal. No X11. This is enforced rather than intended:
-`build/check-deps.sh` runs `ldd target/release/indium` and fails if the output contains
-`gtk`, `Qt`, `KF6`, `X11`, or `portal`, and it also asserts that the binary is PIE and
-full-RELRO. It runs by hand before every release, inside the Arch package's own `check()`,
-and inside the release workflow. What arrives at V1.4 is the rest of it: CI on every push,
-with this script as a gate that blocks a merge.
-
-## Formats
-
-### Read
-
-Everything system libarchive reads, with one deliberate hole.
-
-| Level | Formats |
-| --- | --- |
-| Containers | tar in all its variants, zip, 7z, cpio, ar, xar, mtree, iso9660, cab, lha, and deb and rpm as containers |
-| Filters | gzip, bzip2, xz, lzma, lzip, lz4, zstd, lzop, lrzip, compress |
-
-Encrypted zip and 7z entries are read after a password prompt, asked at the moment of use.
-
-### Write
-
-| Method | Produces |
-| --- | --- |
-| Store | `.tar` — no compression |
-| lz4 | `.tar.lz4` |
-| gzip | `.tar.gz` |
-| zstd | `.tar.zst` |
-| bzip2 | `.tar.bz2` |
-| xz | `.tar.xz` |
-| LZMA2 | `.7z` — the only road to AES-256 |
-| Deflate | `.zip` |
-
-![The New Archive popup: four presets, every method carrying its one-sentence verdict, and a line at the foot stating exactly what will be built.](build/screenshot-new.png)
-
-Every method carries its verdict in the window itself, so the choice is made with the
-trade-off in front of you rather than from memory. The sentence at the foot states exactly
-what will be built before anything is.
-
-Encryption is **7z AES-256 and nothing else.** There is no zip encryption. CORE §5's write
-sentence names the five tar filters and omits the plain uncompressed tar its own method
-table lists; the program writes it, so it is in the table above.
-
-### RAR is deliberately absent
-
-Not read, not written. The format's owner permits no one to create RAR archives, and the
-maker has ruled the format out entirely rather than carry half of it. The reader capability
-sits unused inside libarchive; INDIUM checks the detected format after open and refuses.
-Opening one produces a plain sentence:
-
-> RAR is not supported.
-
-`org.indium.desktop` registers every supported MIME type and deliberately not
-`application/vnd.rar`.
-
-ACE is absent for the same family of reasons and its security history.
-
-## Keyboard
+### The keyboard
 
 | Key | Does |
 | --- | --- |
@@ -224,53 +139,45 @@ ACE is absent for the same family of reasons and its security history.
 | `Ctrl+O` | Open (path field) |
 | `Esc` | Close the topmost popup |
 
-![The Extract popup: extract here, extract to a named subdirectory, or a path field with tab completion. Enter extracts, Esc closes.](build/screenshot-extract.png)
+Bare letters are shortcuts, which is why they are suppressed the moment a text field has
+focus. There is no modal editing, no `hjkl` and no `:` commands, anywhere.
 
-Every popup says what the keys do at the point they do it, which is why the keyboard table
-above is a summary rather than something to learn first.
+### What it does with your data
 
-Bare letters are shortcuts, which is why there is deliberately no type-to-jump in the
-table and why every bare letter is suppressed while a text field has focus. No modal
-editing, no `hjkl`, no `:` commands — anywhere, ever.
+**INDIUM uses the network for nothing at all** — there is no update check, no telemetry, no
+analytics and no crash reporting, and the program opens no browser and follows no link.
+Passwords for encrypted archives are asked for at the moment they are needed, used, and
+wiped; they are never written to a settings file or remembered between uses.
 
-## What INDIUM will never do
-
-- **No network at all** — no update check, no telemetry, no analytics, no crash reporting.
-- **The app never opens a URL.** Addresses in About are text you can select, never click.
-- **No RAR** — not read, not written.
-- **No plugin system** — not open for future arrangements.
-- **No second theme.** Ubuntu Canonical Aubergine, and no theme setting.
-- **No X11.** Wayland only.
-- **Passwords are never stored or remembered** — typed per use, wiped after.
-
-That is the short form. The full list is CORE.md §9, where it is authored by the maker's
-hand rather than derived, and where items enter and leave the same way.
-
-## Licence
-
-**GPL-3.0-only.** The full text is in `LICENSE`, and it is readable inside the program
-itself, from About.
-
-![The About popup: the mark, the version and date, the maker, the licence, the source address, and the GPL in full.](build/screenshot-about.png)
-
-The source address there is text you can select and copy. INDIUM opens no browser and
-follows no link, which is why it is not a button.
-
-JetBrains Mono NL is under the SIL Open Font Licence 1.1, in `LICENSES/`.
-
-## The documents
-
-`CORE.md` is the authoritative design document. When it and anything else in this
-repository disagree — a P-document, a comment, this file — CORE.md wins.
-
-`build/docs/P1.md` through `P6.md` are the record of how INDIUM was built, one milestone
-each, and every one of them ends in a deviations ledger that is honest about what was done
-differently and why. A document describing behaviour the code does not have is the one
-failure this project treats as unforgivable, so the ledgers correct the record rather than
-rewrite it.
+**Nothing is written in place.** Every change you make — adding, removing, renaming — is
+staged and shown to you first, and only **Apply** touches the disk. Apply builds the new
+archive beside the old one, walks its entries to prove it is sound, and only then puts it in
+place. Your original is never modified until its replacement has been verified.
 
 ---
 
-Copyright © sudo-megas
+## 5. LICENCE SUMMARY
+
+INDIUM is free software under the **GNU General Public License, version 3 only**
+(`GPL-3.0-only`).
+
+In plain terms: you may use it for anything, study how it works, share it with anyone, and
+change it to suit yourself. If you distribute a changed version, it must carry this same
+licence so that whoever receives it has the freedoms you had. It comes with **no warranty**.
+
+That is a summary and nothing more — the text that actually governs is the full
+[`LICENSE`](LICENSE) file in this repository, and the same full text is readable inside the
+application from the **About** page. The bundled JetBrains Mono NL Nerd Font is under the
+SIL Open Font Licence 1.1, in [`LICENSES/`](LICENSES).
+
+![The About popup: the mark, the version and date, the maker, the source address, and the GPL in full.](build/screenshot-about.png)
+
+If you want the design reasoning rather than the instructions, it is all written down:
+[`CORE.md`](CORE.md) is the authoritative document and wins over everything else, and
+[`build/docs/`](build/docs) records how each milestone was built.
+
+---
+
+Copyright © sudo-megas · <https://github.com/sudo-megas/INDIUM>
 
 *Built with Reason and Passion.*
