@@ -284,6 +284,7 @@ impl Indium {
         self.archive_info = None;
         self.archive_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         self.archive_path = Some(path.clone());
+        self.set_window_title(ctx);
         self.section = Section::Archive;
         self.listing = true;
         self.status = format!("Reading {}…", path.display());
@@ -546,6 +547,21 @@ impl Indium {
         self.password_input.clear();
         self.password_confirm.clear();
         self.password_attempts = 0;
+    }
+
+    /// Name the open archive in the window title.
+    ///
+    /// CORE §1: "One archive per window. Opening a second archive opens a second window.
+    /// There are no tabs." The title was set once at startup and never changed, so every
+    /// window in that model was labelled `INDIUM` — identical in the compositor, the
+    /// switcher and the taskbar, with no way to tell which held which archive short of
+    /// focusing it. The information was already on `archive_path`.
+    pub fn set_window_title(&self, ctx: &egui::Context) {
+        let title = match self.archive_path.as_ref().and_then(|p| p.file_name()) {
+            Some(name) => format!("{} — INDIUM", name.to_string_lossy()),
+            None => "INDIUM".to_string(),
+        };
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
     }
 
     /// Can anything be staged against what is currently open?

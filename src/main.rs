@@ -71,7 +71,12 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("INDIUM")
+            // On Wayland this is what actually resolves a window to its icon: the
+            // compositor maps the app id to `org.indium.desktop`, and that names
+            // `Icon=indium` in the hicolor tree. `with_icon` below is the belt to this
+            // brace, for compositors and tools that ask the window directly.
             .with_app_id("org.indium")
+            .with_icon(window_icon())
             .with_inner_size([1180.0, 720.0])
             .with_min_inner_size([840.0, 480.0]),
         ..Default::default()
@@ -82,4 +87,18 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(move |cc| Ok(Box::new(Indium::new(cc, open)))),
     )
+}
+
+/// The window icon, embedded from the maker's 256px master.
+///
+/// 256 because eframe's own guidance is a square image of about that size — smaller and
+/// a compositor scales up, larger and it scales down for no gain. `from_png_bytes` costs
+/// no new dependency: `image` is already linked through eframe's clipboard path with PNG
+/// on, which is the correction CORE §2 now records.
+///
+/// A decode failure yields an empty icon rather than a panic. INDIUM refusing to start
+/// because a decoration would not load would be the wrong trade.
+fn window_icon() -> eframe::egui::IconData {
+    eframe::icon_data::from_png_bytes(include_bytes!("../build/icons/indium-256.png"))
+        .unwrap_or_default()
 }

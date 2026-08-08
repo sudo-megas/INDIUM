@@ -215,6 +215,9 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
     if create {
         let recipe = recipe_of(app);
         app.stage_creation(recipe);
+        // A staged creation adopts an archive that does not exist yet, and the title
+        // should name it just as an opened one does.
+        app.set_window_title(ctx);
         app.popup = None;
     }
     if !open {

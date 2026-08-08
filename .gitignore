@@ -1,2 +1,9 @@
 /target
 .claude/settings.local.json
+
+# The two largest icon masters. Everything the program and the installer use is
+# committed (16 through 1024); 2048 and 4096 are 21 MB between them, exist only as
+# sources for future downscales, and are the maker's to keep locally. Remove these two
+# lines to track them.
+/build/icons/indium-2048.png
+/build/icons/indium-4096.png
