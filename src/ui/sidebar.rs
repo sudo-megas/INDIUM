@@ -43,8 +43,7 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                 ui.add_space(4.0);
                 action_item(ui, app, "About", "A", Some(Popup::About), true);
                 action_item(ui, app, "Settings", ",", Some(Popup::Settings), true);
-                // New Archive is P4's popup. Rendered, honest, and inert.
-                action_item(ui, app, "New", "N", None, false);
+                action_item(ui, app, "New", "N", Some(Popup::NewArchive), true);
                 ui.add_space(10.0);
                 ui.separator();
             });
@@ -75,12 +74,16 @@ fn action_item(
     popup: Option<Popup>,
     enabled: bool,
 ) {
-    let tag = if enabled { None } else { Some("P4") };
+    // Every sidebar action is live as of P4, so nothing carries a "not yet" tag any
+    // more. The parameter stays because the next milestone will want it again.
+    let tag = if enabled { None } else { Some("soon") };
     let response = row(ui, label, key, false, enabled, tag);
     if response.clicked() {
         match &popup {
+            // New Archive needs its fields seeded, which is what `N` does too.
+            Some(Popup::NewArchive) => app.open_new_archive(),
             Some(p) => app.popup = Some(p.clone()),
-            None => app.status = format!("{label} arrives in P4."),
+            None => app.status = format!("{label} is not available yet."),
         }
     }
 }

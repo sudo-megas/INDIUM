@@ -1,17 +1,22 @@
 //! The window: sidebar, table, Inspector, status bar, and every popup.
 //!
-//! CORE §4: "Five fixed zones and six popups. Nothing else appears, ever." P2 §5 adds
-//! the seventh popup — the password prompt — by the maker's ordered CORE edit.
+//! CORE §4: "Five fixed zones and seven popups. Nothing else appears, ever." P2 §5 added
+//! the password prompt by the maker's ordered CORE edit; P4 fills in the two the count
+//! always allowed for — New Archive and Pending tasks — and puts rename in the table
+//! rather than making it an eighth.
 
 pub mod about;
 pub mod extract;
 pub mod filter;
 pub mod inspector;
+pub mod newarchive;
 pub mod openwith;
 pub mod password;
+pub mod pending;
 pub mod settings;
 pub mod sidebar;
 pub mod table;
+pub mod tray;
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -28,6 +33,7 @@ use crate::platform::clipboard;
 use crate::platform::scratch::{self, Scratch};
 use crate::platform::store::{self, ExtractDefault, Recents, Settings, Store};
 use crate::secret::Secret;
+use crate::tasks::{self, ApplyMsg, Queue, Task};
 use crate::theme;
 
 /// Which centre view the sidebar has selected. P2 §2: "the sidebar selects what the
@@ -46,10 +52,12 @@ pub enum InspectorTab {
     Preview,
 }
 
-/// The popups. `NewArchive` and `PendingTasks` are P4's; they are listed so the
-/// keyboard map is honest about them and says so rather than doing nothing silently.
+/// The popups. CORE §4 fixes the list at seven, and this is all of them: rename happens
+/// in the table rather than in an eighth.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Popup {
+    NewArchive,
+    PendingTasks,
     Extract,
     About,
     Settings,
@@ -71,6 +79,8 @@ pub enum PendingAction {
     CopyOut,
     /// Extract one entry and offer it to an application.
     OpenWith { entry: String },
+    /// Rebuild the archive once a password has been given.
+    Apply,
 }
 
 pub struct Progress {
@@ -100,12 +110,39 @@ pub struct Indium {
     pub filter: Option<String>,
     pub filter_focus_requested: bool,
 
+    // --- staging (P4) -----------------------------------------------------
+    /// The queue CORE §3 calls the staging engine. Empty means the tray is hidden.
+    pub tasks: Queue,
+    /// The normalised paths the queue was staged against, so Apply can refuse if the
+    /// archive changed on disk underneath it.
+    pub staged_against: Vec<String>,
+    /// `Some(path)` while a name is being edited in place. CORE §4 fixes the popup count
+    /// at seven, so rename is not an eighth.
+    pub rename_target: Option<String>,
+    pub rename_input: String,
+
+    // --- New Archive (P4 §5) ----------------------------------------------
+    pub new_name: String,
+    pub new_dir: String,
+    pub new_preset: tasks::Preset,
+    pub new_method: tasks::Method,
+    pub new_level: u32,
+    pub new_advanced: bool,
+    pub new_encrypt: bool,
+    apply_rx: Option<Receiver<ApplyMsg>>,
+    /// Paths read off the clipboard by a worker. Reading blocks until the program that
+    /// owns the selection finishes writing, so it never happens on the UI thread.
+    paste_rx: Option<Receiver<Result<Vec<PathBuf>, String>>>,
+
     // --- popups -----------------------------------------------------------
     pub popup: Option<Popup>,
     pub extract_path: String,
     pub extract_to_subdir: bool,
     pub open_path: String,
     pub password_input: String,
+    /// The second field, shown only when building a fresh encrypted archive: there is
+    /// nothing to check a typo against, and a typo would build something nobody can open.
+    pub password_confirm: String,
     pub password_attempts: u8,
     pub pending: Option<PendingAction>,
     pub bookmark_name: String,
@@ -176,7 +213,21 @@ impl Indium {
             extract_path: String::new(),
             extract_to_subdir: settings.value.extract.default == ExtractDefault::Subdir,
             open_path: String::new(),
+            tasks: Queue::new(),
+            staged_against: Vec::new(),
+            rename_target: None,
+            rename_input: String::new(),
+            new_name: String::new(),
+            new_dir: String::new(),
+            new_preset: tasks::Preset::Balanced,
+            new_method: tasks::Method::Zstd,
+            new_level: tasks::Method::Zstd.default_level(),
+            new_advanced: false,
+            new_encrypt: false,
+            apply_rx: None,
+            paste_rx: None,
             password_input: String::new(),
+            password_confirm: String::new(),
             password_attempts: 0,
             pending: None,
             bookmark_name: String::new(),
@@ -263,7 +314,18 @@ impl Indium {
             Some(rx) => rx.try_iter().collect(),
             None => Vec::new(),
         };
-        let wake = !list_msgs.is_empty() || !extract_msgs.is_empty();
+        let apply_msgs: Vec<ApplyMsg> = match &self.apply_rx {
+            Some(rx) => rx.try_iter().collect(),
+            None => Vec::new(),
+        };
+        let paste_msgs: Vec<Result<Vec<PathBuf>, String>> = match &self.paste_rx {
+            Some(rx) => rx.try_iter().collect(),
+            None => Vec::new(),
+        };
+        let wake = !list_msgs.is_empty()
+            || !extract_msgs.is_empty()
+            || !apply_msgs.is_empty()
+            || !paste_msgs.is_empty();
 
         for msg in list_msgs {
             match msg {
@@ -317,7 +379,70 @@ impl Indium {
             }
         }
 
-        if wake {
+        for msg in paste_msgs {
+            self.paste_rx = None;
+            match msg {
+                Ok(paths) if paths.is_empty() => {
+                    self.status = "The clipboard holds no files.".to_string();
+                }
+                Ok(paths) => self.stage_adds(paths),
+                Err(e) => self.status = e,
+            }
+        }
+
+        for msg in apply_msgs {
+            match msg {
+                ApplyMsg::Progress { phase, done, total } => {
+                    self.progress = Some(Progress {
+                        done,
+                        total,
+                        label: phase.label().to_string(),
+                    });
+                }
+                ApplyMsg::Done { entries } => {
+                    self.progress = None;
+                    self.apply_rx = None;
+                    self.status = format!(
+                        "Applied. The archive now holds {entries} entr{}.",
+                        if entries == 1 { "y" } else { "ies" }
+                    );
+                    // The queue has been spent, and what is on screen is now a listing of
+                    // the archive that was replaced. Re-open it rather than leave stale
+                    // rows behind — the Inspector is the point of this program, and it
+                    // must not describe a file that no longer exists.
+                    self.tasks.clear();
+                    self.staged_against.clear();
+                    let path = self.archive_path.clone();
+                    let pass = self.passphrase.take();
+                    if let Some(path) = path {
+                        self.open_archive(ctx, path, pass);
+                    }
+                }
+                ApplyMsg::Cancelled => {
+                    self.progress = None;
+                    self.apply_rx = None;
+                    self.passphrase = None;
+                    // The queue survives a cancel: nothing was written, so the changes
+                    // the user staged are still exactly what they asked for.
+                    self.status =
+                        "Cancelled. Nothing was written, and your changes are still staged."
+                            .to_string();
+                }
+                ApplyMsg::Failed(msg) => {
+                    self.progress = None;
+                    self.apply_rx = None;
+                    self.passphrase = None;
+                    self.status = msg;
+                }
+            }
+        }
+
+        // Reactive mode repaints on input, and a `ProgressBar` — unlike the listing
+        // `Spinner` — asks for nothing on its own, while the worker holds no `Context` to
+        // ask with. So the drain keeps the pump alive for exactly as long as an operation
+        // is running, and stops the moment progress clears. This is what makes a progress
+        // bar move rather than jump to done when the mouse happens to twitch.
+        if wake || self.progress.is_some() {
             ctx.request_repaint();
         }
     }
@@ -395,6 +520,272 @@ impl Indium {
 
     pub fn has_archive(&self) -> bool {
         self.archive_path.is_some()
+    }
+
+    // -----------------------------------------------------------------------
+    // Staging — P4 §1
+    // -----------------------------------------------------------------------
+
+    /// Close whatever popup is open, and take the typed password with it.
+    ///
+    /// Every close path routes through here. CORE §9 says passwords are "typed per use,
+    /// wiped after", and before P4 an `Esc` cleared the popup and the parked action but
+    /// left the plaintext sitting on the window until the next prompt overwrote it.
+    pub fn close_popup(&mut self) {
+        self.popup = None;
+        self.pending = None;
+        self.password_input.clear();
+        self.password_confirm.clear();
+        self.password_attempts = 0;
+    }
+
+    /// Can anything be staged against what is currently open?
+    ///
+    /// P4 §1's two refusals, asked before the user invests in a queue rather than after.
+    /// The engine checks both again at Apply — this is the courtesy, that is the guard.
+    pub fn staging_refusal(&self) -> Option<String> {
+        let path = self.archive_path.as_ref()?;
+        if self.tasks.creation().is_some() {
+            return None;
+        }
+        let info = self.archive_info.as_ref()?;
+        let encrypted = self.entries.iter().any(|e| e.encrypted);
+        match tasks::Recipe::from_info(info, path, encrypted) {
+            None => Some(tasks::Conflict::FormatCannotBeWritten(info.format.clone()).to_string()),
+            Some(recipe) if encrypted && !recipe.encrypt => {
+                Some(tasks::Conflict::EncryptedSourceCannotBeRewritten.to_string())
+            }
+            Some(_) => None,
+        }
+    }
+
+    /// Push a task, or say why it cannot be pushed.
+    fn stage(&mut self, task: Task) {
+        if let Some(refusal) = self.staging_refusal() {
+            self.status = refusal;
+            return;
+        }
+        if self.staged_against.is_empty() {
+            self.staged_against = self.entries.iter().map(|e| e.path.clone()).collect();
+        }
+        self.status = task.summary();
+        self.tasks.push(task);
+    }
+
+    /// `Del` — stage a remove for the selection, or for the row under the cursor.
+    pub fn stage_remove(&mut self, rows: &[Row]) {
+        if !self.has_archive() {
+            return;
+        }
+        let subjects = self.subject_paths(rows);
+        if subjects.is_empty() {
+            return;
+        }
+        for path in subjects {
+            self.stage(Task::Remove { path });
+        }
+    }
+
+    /// `F2` — begin editing a name in the table. CORE §4 fixes the popup count at seven,
+    /// so this is not an eighth popup; it is the Name cell becoming a text field.
+    pub fn begin_rename(&mut self, rows: &[Row]) {
+        if !self.has_archive() {
+            return;
+        }
+        if let Some(refusal) = self.staging_refusal() {
+            self.status = refusal;
+            return;
+        }
+        if let Some(row) = rows.get(self.cursor) {
+            self.rename_target = Some(row.path.clone());
+            self.rename_input = crate::util::base_name(&row.path).to_string();
+        }
+    }
+
+    /// Commit the in-place rename. The last component only — moving an entry between
+    /// directories opens a family of questions v0.4 deliberately does not.
+    pub fn commit_rename(&mut self) {
+        let Some(from) = self.rename_target.take() else {
+            return;
+        };
+        let name = self.rename_input.trim().to_string();
+        self.rename_input.clear();
+        if name.is_empty() || name.contains('/') {
+            self.status = "A name cannot be empty or contain a slash.".to_string();
+            return;
+        }
+        let parent = crate::util::parent_dir(&from);
+        let to = if parent.is_empty() {
+            name
+        } else {
+            format!("{parent}/{name}")
+        };
+        if to == from {
+            return;
+        }
+        self.stage(Task::Rename { from, to });
+    }
+
+    /// `N` — seed and open the New Archive popup.
+    pub fn open_new_archive(&mut self) {
+        self.new_preset = tasks::Preset::Balanced;
+        let (method, encrypt) = self.new_preset.recipe_parts();
+        self.new_method = method;
+        self.new_level = method.default_level();
+        self.new_encrypt = encrypt;
+        self.new_advanced = false;
+        self.new_dir = self.default_extract_dir().to_string_lossy().to_string();
+        self.new_name = "archive".to_string();
+        self.popup = Some(Popup::NewArchive);
+    }
+
+    /// The container a rebuild would produce, for the metadata notes.
+    pub fn staging_container(&self) -> Option<tasks::Container> {
+        self.current_recipe().map(|r| r.container())
+    }
+
+    /// The recipe a rebuild would use: the one `Task::Create` staged, or the one the open
+    /// archive implies.
+    pub fn current_recipe(&self) -> Option<tasks::Recipe> {
+        if let Some(recipe) = self.tasks.creation() {
+            return Some(recipe.clone());
+        }
+        let path = self.archive_path.as_ref()?;
+        let info = self.archive_info.as_ref()?;
+        let encrypted = self.entries.iter().any(|e| e.encrypted);
+        tasks::Recipe::from_info(info, path, encrypted)
+    }
+
+    /// Remove one row from the queue.
+    ///
+    /// A queue is validated as a sequence, so deleting the middle of it can orphan what
+    /// came after — a rename of a name an earlier task produced, say. Re-folding after
+    /// each removal is what catches that, and the orphans are dropped with a word rather
+    /// than left to fail at Apply.
+    pub fn remove_task(&mut self, index: usize) {
+        self.tasks.remove(index);
+        let before = self.tasks.len();
+        self.tasks.retain_foldable(&self.entries);
+        let dropped = before - self.tasks.len();
+        if dropped > 0 {
+            self.status = format!("Removed that change, and {dropped} that depended on it.",);
+        }
+        if self.tasks.is_empty() {
+            self.staged_against.clear();
+        }
+    }
+
+    /// **Apply.** Everything is settled here and then handed to a worker.
+    pub fn request_apply(&mut self, ctx: &egui::Context) {
+        if self.tasks.is_empty() {
+            return;
+        }
+        let Some(recipe) = self.current_recipe() else {
+            self.status = "This archive's format cannot be written.".to_string();
+            return;
+        };
+
+        // A password is needed when the source is encrypted, or when the archive being
+        // built is. CORE §9 keeps it out of the popup and asks at the moment of use.
+        let needs_source = self.entries.iter().any(|e| e.encrypted);
+        if (needs_source || recipe.encrypt) && self.passphrase.is_none() {
+            self.pending = Some(PendingAction::Apply);
+            self.popup = Some(Popup::Password);
+            self.password_input.clear();
+            self.password_confirm.clear();
+            self.password_attempts = 0;
+            return;
+        }
+
+        self.begin_apply(ctx, recipe);
+    }
+
+    /// Spawn the rebuild.
+    pub fn begin_apply(&mut self, ctx: &egui::Context, recipe: tasks::Recipe) {
+        self.cancel.store(true, Ordering::Relaxed);
+        self.cancel = Arc::new(AtomicBool::new(false));
+
+        let (tx, rx) = channel();
+        self.apply_rx = Some(rx);
+        self.progress = Some(Progress {
+            done: 0,
+            total: self.tasks.len(),
+            label: tasks::Phase::Building.label().to_string(),
+        });
+
+        let encrypt = recipe.encrypt;
+        let input = tasks::ApplyInput {
+            target: recipe.path.clone(),
+            recipe,
+            tasks: self.tasks.tasks().to_vec(),
+            adds: Vec::new(),
+            staged_against: self.staged_against.clone(),
+            source_password: self.passphrase.clone(),
+            target_password: if encrypt {
+                self.passphrase.clone()
+            } else {
+                None
+            },
+        };
+
+        let cancel = Arc::clone(&self.cancel);
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = tasks::apply(&input, &tx, &cancel) {
+                let _ = tx.send(ApplyMsg::Failed(e));
+            }
+            // Reactive mode: the worker is what wakes the UI.
+            ctx.request_repaint();
+        });
+    }
+
+    /// Stage an add for every path given, landing each at the current directory.
+    pub fn stage_adds(&mut self, paths: Vec<PathBuf>) {
+        if paths.is_empty() {
+            return;
+        }
+        for path in paths {
+            let Some(name) = path.file_name().map(|n| n.to_string_lossy().to_string()) else {
+                continue;
+            };
+            let dest = if self.cwd.is_empty() {
+                name
+            } else {
+                format!("{}/{}", self.cwd, name)
+            };
+            self.stage(Task::Add { source: path, dest });
+        }
+    }
+
+    /// `Ctrl+V` — read the clipboard on a worker and stage what comes back.
+    ///
+    /// The read hands a pipe to whichever program owns the selection and blocks until it
+    /// finishes writing, with no timeout available. A slow or wedged source would freeze
+    /// the window, so it does not happen here.
+    pub fn request_paste(&mut self, ctx: &egui::Context) {
+        if self.paste_rx.is_some() {
+            return;
+        }
+        let (tx, rx) = channel();
+        self.paste_rx = Some(rx);
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(clipboard::paste_paths());
+            ctx.request_repaint();
+        });
+    }
+
+    /// Throw the queue away. The archive was never touched, so there is nothing to undo.
+    pub fn discard_tasks(&mut self) {
+        let n = self.tasks.len();
+        self.tasks.clear();
+        self.staged_against.clear();
+        if n > 0 {
+            self.status = format!(
+                "Discarded {n} staged change{}.",
+                if n == 1 { "" } else { "s" }
+            );
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -758,6 +1149,7 @@ impl eframe::App for Indium {
         // table taking whatever the four edges leave behind.
         sidebar::show(self, ui);
         status_bar(self, ui);
+        tray::show(self, ui);
         inspector::show(self, ui, &rows);
         table::show(self, ui, &rows);
 
@@ -766,6 +1158,8 @@ impl eframe::App for Indium {
         settings::show(self, &ctx);
         about::show(self, &ctx);
         open_path_popup(self, &ctx);
+        newarchive::show(self, &ctx);
+        pending::show(self, &ctx);
         password::show(self, &ctx);
         openwith::show(self, &ctx);
     }
@@ -780,7 +1174,14 @@ impl Indium {
                 .map(|f| f.path().to_path_buf())
                 .collect()
         });
-        if let Some(path) = dropped.into_iter().next() {
+        if dropped.is_empty() {
+            return;
+        }
+        // Before P4 this took `.next()` and silently discarded every other path. With an
+        // archive open, CORE §4 says a drop stages an add — of all of them.
+        if self.has_archive() && self.section == Section::Archive {
+            self.stage_adds(dropped);
+        } else if let Some(path) = dropped.into_iter().next() {
             self.open_archive(ctx, path, None);
         }
     }
@@ -800,20 +1201,26 @@ impl Indium {
                 ctx.memory_mut(|m| m.request_focus(egui::Id::NULL));
                 return;
             }
+            if self.rename_target.is_some() {
+                self.rename_target = None;
+                self.rename_input.clear();
+                ctx.memory_mut(|m| m.request_focus(egui::Id::NULL));
+                return;
+            }
             if self.popup.is_some() {
-                self.popup = None;
-                self.pending = None;
+                self.close_popup();
                 return;
             }
         }
 
         // Ctrl chords work even while typing.
-        let (ctrl_f, ctrl_a, ctrl_o, ctrl_c) = ctx.input(|i| {
+        let (ctrl_f, ctrl_a, ctrl_o, ctrl_c, ctrl_v) = ctx.input(|i| {
             (
                 i.modifiers.ctrl && i.key_pressed(egui::Key::F),
                 i.modifiers.ctrl && i.key_pressed(egui::Key::A),
                 i.modifiers.ctrl && i.key_pressed(egui::Key::O),
                 i.modifiers.ctrl && i.key_pressed(egui::Key::C),
+                i.modifiers.ctrl && i.key_pressed(egui::Key::V),
             )
         });
 
@@ -831,10 +1238,24 @@ impl Indium {
         if ctrl_c && self.has_archive() {
             self.copy_out(rows);
         }
+        // Guarded on `typing`, unlike the others: a paste into the Extract path field or
+        // the rename box must reach the field, not stage an add.
+        if ctrl_v && self.has_archive() && !typing {
+            self.request_paste(ctx);
+        }
 
-        if typing {
+        // CORE §4's bare letters are shortcuts, so they must not fire into a popup that
+        // happens to hold no focused text field. About and Settings never focus anything,
+        // and P4's two new popups are full of chips, rows and a slider that hold nothing
+        // either — without this guard, pressing `E` inside New Archive would silently
+        // swap it for the Extract popover.
+        if typing || self.popup.is_some() || self.rename_target.is_some() {
             return;
         }
+
+        // Set inside the input closure and acted on after it, because seeding the New
+        // Archive popup needs `&mut self` methods the closure cannot hold.
+        let mut new_archive = false;
 
         ctx.input(|i| {
             for ev in &i.events {
@@ -863,12 +1284,8 @@ impl Indium {
                             self.popup = Some(Popup::Extract);
                         }
                     }
-                    egui::Key::N => {
-                        self.status = "New Archive arrives in P4.".to_string();
-                    }
-                    egui::Key::W => {
-                        self.status = "Pending tasks arrive in P4.".to_string();
-                    }
+                    egui::Key::N => new_archive = true,
+                    egui::Key::W => self.popup = Some(Popup::PendingTasks),
                     egui::Key::Space => {
                         self.inspector_tab = match self.inspector_tab {
                             InspectorTab::Details => InspectorTab::Preview,
@@ -883,8 +1300,12 @@ impl Indium {
             }
         });
 
+        if new_archive {
+            self.open_new_archive();
+        }
+
         // Movement and descent, which need `rows`.
-        let (up, down, pgup, pgdn, home, end, enter, back, del) = ctx.input(|i| {
+        let (up, down, pgup, pgdn, home, end, enter, back, del, f2) = ctx.input(|i| {
             (
                 i.key_pressed(egui::Key::ArrowUp),
                 i.key_pressed(egui::Key::ArrowDown),
@@ -895,6 +1316,7 @@ impl Indium {
                 i.key_pressed(egui::Key::Enter),
                 i.key_pressed(egui::Key::Backspace),
                 i.key_pressed(egui::Key::Delete),
+                i.key_pressed(egui::Key::F2),
             )
         });
 
@@ -954,7 +1376,10 @@ impl Indium {
                     self.ascend();
                 }
                 if del {
-                    self.status = "Removing entries arrives in P4.".to_string();
+                    self.stage_remove(rows);
+                }
+                if f2 {
+                    self.begin_rename(rows);
                 }
             }
             Section::Recents => {

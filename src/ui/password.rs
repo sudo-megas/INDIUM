@@ -162,6 +162,14 @@ fn attempt(app: &mut Indium, ctx: &egui::Context) {
             app.open_with(&entry);
             app.passphrase = None;
         }
+        Some(PendingAction::Apply) => {
+            // Held for the whole rebuild — it may be needed to read the source, to
+            // encrypt the replacement, or both — and dropped when the worker reports.
+            app.passphrase = Some(secret);
+            if let Some(recipe) = app.current_recipe() {
+                app.begin_apply(ctx, recipe);
+            }
+        }
         None => {}
     }
 }

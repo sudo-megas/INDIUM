@@ -53,6 +53,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
 
     let mut clicked: Option<(usize, bool)> = None;
     let mut descend_into: Option<usize> = None;
+    let mut commit_rename = false;
 
     TableBuilder::new(ui)
         .striped(false)
@@ -83,7 +84,12 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                 let focused = i == app.cursor;
                 tr.set_selected(selected);
 
-                let entry = app.entry(&row.path);
+                // Copied out rather than borrowed: the Name cell needs `&mut` access to
+                // the rename field, and a live `&Entry` would hold `app` immutably
+                // across it.
+                let entry: Option<(bool, bool, u64, Option<u64>, String)> = app
+                    .entry(&row.path)
+                    .map(|e| (e.encrypted, e.is_dir, e.size, e.packed, e.method.clone()));
 
                 tr.col(|ui| {
                     let colour = if focused {
@@ -105,22 +111,38 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                     } else {
                         row.display.clone()
                     };
-                    let mut text = egui::RichText::new(shown).color(colour);
-                    if row.is_dir {
-                        text = text.family(theme::bold());
+                    // `F2` turns this cell into a text field rather than opening an
+                    // eighth popup — CORE §4 fixes the count at seven. A focused field
+                    // also makes the existing `typing` guard suppress bare keys, so
+                    // `Del` cannot fire into a half-typed name.
+                    if app.rename_target.as_deref() == Some(row.path.as_str()) {
+                        let field = ui.add(
+                            egui::TextEdit::singleline(&mut app.rename_input)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(240.0),
+                        );
+                        field.request_focus();
+                        if ui.input(|inp| inp.key_pressed(egui::Key::Enter)) {
+                            commit_rename = true;
+                        }
+                    } else {
+                        let mut text = egui::RichText::new(shown).color(colour);
+                        if row.is_dir {
+                            text = text.family(theme::bold());
+                        }
+                        let resp = ui.add(
+                            egui::Label::new(text)
+                                .sense(egui::Sense::click())
+                                .truncate(),
+                        );
+                        if resp.clicked() {
+                            clicked = Some((i, ui.input(|inp| inp.modifiers.ctrl)));
+                        }
+                        if resp.double_clicked() && row.is_dir {
+                            descend_into = Some(i);
+                        }
                     }
-                    let resp = ui.add(
-                        egui::Label::new(text)
-                            .sense(egui::Sense::click())
-                            .truncate(),
-                    );
-                    if resp.clicked() {
-                        clicked = Some((i, ui.input(|inp| inp.modifiers.ctrl)));
-                    }
-                    if resp.double_clicked() && row.is_dir {
-                        descend_into = Some(i);
-                    }
-                    if entry.map(|e| e.encrypted).unwrap_or(false) {
+                    if entry.as_ref().map(|e| e.0).unwrap_or(false) {
                         ui.label(
                             egui::RichText::new("enc")
                                 .size(10.0)
@@ -130,17 +152,20 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                 });
 
                 tr.col(|ui| {
-                    let text = match entry {
-                        Some(e) if !e.is_dir => util::format_bytes(e.size),
+                    let text = match entry.as_ref() {
+                        Some((_, is_dir, size, _, _)) if !*is_dir => util::format_bytes(*size),
                         _ => "—".to_string(),
                     };
                     mono_right(ui, &text, theme::TEXT_SECONDARY);
                 });
 
                 tr.col(|ui| {
-                    // Per-entry packed size is not something the generic reader can
-                    // tell us; showing "—" is the honest answer until P4.
-                    let text = match entry.and_then(|e| e.packed) {
+                    // Reported only where it is knowable. libarchive exposes no
+                    // per-entry compressed size at all, and a 7z gives one only where an
+                    // entry owns its compression block outright — a shared block's total
+                    // belongs to no single member of it, so "—" is the honest answer
+                    // rather than a share of someone else's bytes.
+                    let text = match entry.as_ref().and_then(|e| e.3) {
                         Some(p) => util::format_bytes(p),
                         None => "—".to_string(),
                     };
@@ -149,7 +174,8 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
 
                 tr.col(|ui| {
                     let text = entry
-                        .map(|e| e.method.clone())
+                        .as_ref()
+                        .map(|e| e.4.clone())
                         .unwrap_or_else(|| "—".into());
                     ui.label(
                         egui::RichText::new(text)
@@ -160,6 +186,10 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                 });
             });
         });
+
+    if commit_rename {
+        app.commit_rename();
+    }
 
     if let Some((i, additive)) = clicked {
         app.cursor = i;

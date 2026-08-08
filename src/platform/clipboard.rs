@@ -199,3 +199,161 @@ mod tests {
         assert!(uris.contains("file:///tmp/%C3%B6dev.txt"), "got: {uris}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// The read half — `Ctrl+V`, P4 §5
+// ---------------------------------------------------------------------------
+
+/// Read file paths off the Wayland clipboard.
+///
+/// P3 built only the offer; staging an add needs the other direction. `text/uri-list`
+/// first, then plain text, which is the same pair `offer` puts out — so a copy from
+/// INDIUM pastes back into INDIUM, and so does a copy from any file manager.
+///
+/// An empty clipboard is `Ok(vec![])`, not an error: the crate's own documentation groups
+/// `NoMimeType`, `ClipboardEmpty` and `NoSeats` as "nothing to worry about", and a user
+/// who presses `Ctrl+V` with nothing copied has made no mistake worth a message.
+///
+/// **This blocks.** `get_contents` hands a pipe to the selection's owner and the read
+/// runs until that program finishes writing; a slow or wedged source would freeze
+/// whatever thread calls this. It must never be called from the UI thread.
+pub fn paste_paths() -> Result<Vec<std::path::PathBuf>, String> {
+    use wl_clipboard_rs::paste::{
+        get_contents, ClipboardType, Error as PasteError, MimeType as PasteMime, Seat,
+    };
+
+    fn read(mime: PasteMime<'_>) -> Result<Vec<u8>, Option<String>> {
+        use std::io::Read as _;
+        match get_contents(ClipboardType::Regular, Seat::Unspecified, mime) {
+            Ok((mut pipe, _actual)) => {
+                let mut buf = Vec::new();
+                pipe.read_to_end(&mut buf)
+                    .map_err(|e| Some(format!("Clipboard: {e}")))?;
+                Ok(buf)
+            }
+            Err(PasteError::NoMimeType)
+            | Err(PasteError::ClipboardEmpty)
+            | Err(PasteError::NoSeats) => Err(None),
+            Err(e) => Err(Some(format!("Clipboard: {e}"))),
+        }
+    }
+
+    match read(PasteMime::Specific("text/uri-list")) {
+        Ok(bytes) => return Ok(parse_uri_list(&bytes)),
+        Err(None) => {}
+        Err(Some(e)) => return Err(e),
+    }
+    match read(PasteMime::Specific("text/plain;charset=utf-8")) {
+        Ok(bytes) => Ok(parse_plain_list(&bytes)),
+        Err(None) => Ok(Vec::new()),
+        Err(Some(e)) => Err(e),
+    }
+}
+
+/// The exact inverse of `path_to_uri`, hand-written for the same reason it was.
+///
+/// RFC 2483: lines end `\r\n` and a line beginning `#` is a comment. Percent-decoding is
+/// byte-wise rather than through a string, because an archive member's name is not
+/// guaranteed to be UTF-8 and neither is a filename.
+pub fn parse_uri_list(bytes: &[u8]) -> Vec<std::path::PathBuf> {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let mut out = Vec::new();
+    for line in bytes.split(|&b| b == b'\n') {
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        if line.is_empty() || line[0] == b'#' {
+            continue;
+        }
+        let Some(rest) = line.strip_prefix(b"file://") else {
+            continue;
+        };
+        // `file://host/path` — an authority we do not recognise is not ours to open.
+        let rest = match rest.first() {
+            Some(b'/') => rest,
+            _ => match rest.iter().position(|&b| b == b'/') {
+                Some(i) => &rest[i..],
+                None => continue,
+            },
+        };
+        let mut buf = Vec::with_capacity(rest.len());
+        let mut i = 0;
+        while i < rest.len() {
+            if rest[i] == b'%' && i + 2 < rest.len() {
+                let hex = std::str::from_utf8(&rest[i + 1..i + 3])
+                    .ok()
+                    .and_then(|h| u8::from_str_radix(h, 16).ok());
+                if let Some(b) = hex {
+                    buf.push(b);
+                    i += 3;
+                    continue;
+                }
+            }
+            buf.push(rest[i]);
+            i += 1;
+        }
+        out.push(std::path::PathBuf::from(OsString::from_vec(buf)));
+    }
+    out
+}
+
+/// The inverse of `build_plain_list`. Absolute paths only — a relative one from another
+/// program means nothing here, since INDIUM has no idea what it was relative to.
+pub fn parse_plain_list(bytes: &[u8]) -> Vec<std::path::PathBuf> {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    bytes
+        .split(|&b| b == b'\n')
+        .map(|l| l.strip_suffix(b"\r").unwrap_or(l))
+        .filter(|l| !l.is_empty() && l[0] == b'/')
+        .map(|l| std::path::PathBuf::from(OsStr::from_bytes(l)))
+        .collect()
+}
+
+#[cfg(test)]
+mod paste_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// P3 §2's encoder and P4's decoder must be exact inverses, including on the names
+    /// P3 chose precisely because they are awkward.
+    #[test]
+    fn a_file_uri_round_trips_through_encode_and_decode() {
+        let cases = [
+            "/home/megas/plain.txt",
+            "/home/megas/with space.txt",
+            "/home/megas/ödev.txt",
+            "/home/megas/hash#and%percent?.txt",
+            "/home/megas/sub dir/inner file.tar.gz",
+        ];
+        for case in cases {
+            let uri = path_to_uri(Path::new(case));
+            let back = parse_uri_list(uri.as_bytes());
+            assert_eq!(back, vec![PathBuf::from(case)], "{case}");
+        }
+    }
+
+    #[test]
+    fn a_uri_list_ignores_comments_and_foreign_schemes() {
+        let list = b"#comment\r\nfile:///a.txt\r\nhttps://example.invalid/b.txt\r\n";
+        assert_eq!(parse_uri_list(list), vec![PathBuf::from("/a.txt")]);
+    }
+
+    #[test]
+    fn a_localhost_authority_is_accepted_and_stripped() {
+        assert_eq!(
+            parse_uri_list(b"file://localhost/a.txt\r\n"),
+            vec![PathBuf::from("/a.txt")]
+        );
+    }
+
+    #[test]
+    fn plain_text_paths_must_be_absolute_to_be_taken() {
+        let list = b"/absolute.txt\nrelative.txt\n\n/second.txt\n";
+        assert_eq!(
+            parse_plain_list(list),
+            vec![PathBuf::from("/absolute.txt"), PathBuf::from("/second.txt")]
+        );
+    }
+}

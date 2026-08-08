@@ -387,6 +387,25 @@ impl Queue {
         self.tasks.clear();
     }
 
+    /// Drop any task that no longer folds against `source`.
+    ///
+    /// A queue is valid as a *sequence*, so removing one row can orphan a later one — a
+    /// rename of a name an earlier task produced, an add beneath a directory that is no
+    /// longer being created. Re-folding after every edit is what keeps the list the user
+    /// sees identical to the list Apply would run, instead of letting the difference
+    /// surface as a failure much later.
+    pub fn retain_foldable(&mut self, source: &[Entry]) {
+        let mut kept: Vec<Task> = Vec::with_capacity(self.tasks.len());
+        for task in std::mem::take(&mut self.tasks) {
+            let mut trial = kept.clone();
+            trial.push(task.clone());
+            if plan(source, &trial, &[]).is_ok() {
+                kept.push(task);
+            }
+        }
+        self.tasks = kept;
+    }
+
     /// The recipe staged by a `Create`, if this queue creates an archive.
     pub fn creation(&self) -> Option<&Recipe> {
         self.tasks.iter().find_map(|t| match t {
