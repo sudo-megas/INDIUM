@@ -3,8 +3,10 @@
 //! "Details shows everything the reader can know about the selection; multi-select
 //! shows aggregates; no selection shows the archive-level card."
 //!
-//! CORE §6: "Ubuntu Mono for every value — sizes, checksums, paths, the whole
-//! Inspector. Monospace is what makes a verbose pane scannable instead of noisy."
+//! CORE §6: "One typeface, monospace, everywhere — chrome and values alike; sizes,
+//! checksums, paths, the whole Inspector. Monospace is what makes a verbose pane
+//! scannable instead of noisy, and the pane is the program, so the window wears it
+//! throughout."
 //!
 //! Two honesty notes live here, because CORE §4 requires them stated rather than
 //! discovered: libarchive exposes no *stored* CRC, so INDIUM computes one on demand
@@ -452,7 +454,7 @@ fn section_label(ui: &mut egui::Ui, text: &str) {
         egui::RichText::new(text)
             .size(10.0)
             .color(theme::AUBERGINE.to_opaque())
-            .strong(),
+            .family(theme::bold()),
     );
     ui.add_space(2.0);
 }

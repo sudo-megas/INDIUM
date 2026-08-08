@@ -28,7 +28,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 egui::RichText::new("INDIUM")
                     .size(26.0)
                     .color(theme::TEXT)
-                    .strong(),
+                    .family(theme::bold()),
             );
             ui.label(
                 egui::RichText::new(

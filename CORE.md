@@ -60,8 +60,10 @@ No GTK. No Qt. No KF6. No portal. `build/check-deps.sh` runs
 `ldd target/release/indium` and fails if the output contains `gtk`, `Qt`, `KF6`, `X11`,
 or `portal`. It runs by hand until V1.4 wires it into CI, and it runs before every release.
 
-Bundled assets, not dependencies: Ubuntu Sans and Ubuntu Mono, embedded in the binary,
-with the Ubuntu Font Licence 1.0 alongside the GPL in `LICENSES/`.
+Bundled assets, not dependencies: JetBrains Mono NL Nerd Font, regular and bold, embedded
+in the binary, with the SIL Open Font Licence 1.1 alongside the GPL in `LICENSES/`. `NL`
+is the no-ligature cut, because a filename holding `->` must render as the two characters
+the archive stores.
 
 ---
 
@@ -202,8 +204,11 @@ One theme: **Ubuntu Canonical Aubergine.** There is no second theme and no theme
 | Text | `#F0E6EE` primary · `#C9B3C4` secondary · `#A98BA3` muted |
 | Lines | 1px hairlines at 8% white. Nothing thicker, anywhere. |
 
-Ubuntu Sans for chrome; **Ubuntu Mono for every value** — sizes, checksums, paths, the
-whole Inspector. Monospace is what makes a verbose pane scannable instead of noisy.
+**One typeface, monospace, everywhere** — chrome and values alike; sizes, checksums,
+paths, the whole Inspector. Monospace is what makes a verbose pane scannable instead of
+noisy, and the pane is the program, so the window wears it throughout. Chrome and values
+are told apart by weight and colour, never by family. There is no second face and no font
+setting.
 Motion is functional only: progress moves, panels appear; nothing decorates.
 
 The icon is photorealistic PNG, supplied by the maker, installed at the hicolor sizes
@@ -258,7 +263,7 @@ Second language: shelved for an undefined time. English is the language of v1.
   attribution anywhere: no trailers, no generated-by lines, nothing in files, docs, or
   release notes.
 - Licence: **GPL-3.0-only**, full text in `LICENSE`, readable inside the app from About.
-  Font licence (UFL-1.0) in `LICENSES/`.
+  Font licence (OFL-1.1) in `LICENSES/`.
 - Every P-document ends with the full ritual spelled out: test, commit, push, tag, build
   `--release`, run `check-deps.sh`, package, upload. Nothing implicit.
 

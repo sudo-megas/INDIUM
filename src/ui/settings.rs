@@ -172,7 +172,7 @@ fn group(ui: &mut egui::Ui, title: &str) {
         egui::RichText::new(title)
             .size(10.0)
             .color(theme::AUBERGINE.to_opaque())
-            .strong(),
+            .family(theme::bold()),
     );
     ui.add_space(3.0);
 }

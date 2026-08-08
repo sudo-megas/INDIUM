@@ -24,7 +24,7 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     egui::RichText::new("INDIUM")
                         .size(21.0)
                         .color(theme::TEXT)
-                        .strong(),
+                        .family(theme::bold()),
                 );
                 ui.label(
                     egui::RichText::new("archive manager")

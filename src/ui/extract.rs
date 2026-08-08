@@ -3,8 +3,11 @@
 //! "A popover: *Extract here*, *Extract to `<name>/`*, a path field with tab
 //! completion, bookmarks beneath. Enter-driven."
 //!
-//! P2 §2 un-stubs the bookmarks row and adds the pin button (CORE draws it as a
-//! star; the embedded Ubuntu faces have no star glyph, so it is a "+") —
+//! P2 §2 un-stubs the bookmarks row and adds the pin button, drawn as a `+`. CORE asks
+//! for no particular mark — the star this comment used to credit it with was never in
+//! the document — and `+` says "add this" without one. P1 Deviation 5 records the
+//! original reason (the Ubuntu faces carried no `☆`); the face still carries no
+//! `★ U+2605`, only Nerd Font's own star, and `+` remains the plainer answer.
 //! "Adding happens where the path is already in your hands."
 
 use std::path::PathBuf;

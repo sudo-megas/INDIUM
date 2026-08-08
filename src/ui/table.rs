@@ -93,10 +93,13 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                     } else {
                         theme::TEXT_SECONDARY
                     };
-                    // A trailing slash marks a directory. CORE draws a triangle, but
-                    // the embedded Ubuntu faces carry no such glyph and P1 §6 leaves
-                    // no fallback font behind — a slash is unambiguous and always
-                    // renders. Recorded in Deviations.
+                    // A trailing slash marks a directory, as `ls -F` has since forever.
+                    // CORE names no marker at all — the triangle this comment used to
+                    // credit it with was never in the document — so the slash is
+                    // INDIUM's own choice and stays one: it sorts with the name, costs
+                    // no column, and needs no glyph. P1 Deviation 5 records the
+                    // original reason (the Ubuntu faces carried no `▸`); the face
+                    // carries one now, and the answer is still the slash.
                     let shown = if row.is_dir {
                         format!("{}/", row.display)
                     } else {
@@ -104,7 +107,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                     };
                     let mut text = egui::RichText::new(shown).color(colour);
                     if row.is_dir {
-                        text = text.strong();
+                        text = text.family(theme::bold());
                     }
                     let resp = ui.add(
                         egui::Label::new(text)

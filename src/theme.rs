@@ -1,8 +1,12 @@
-//! Ubuntu Canonical Aubergine, and the two embedded typefaces.
+//! Ubuntu Canonical Aubergine, and the embedded typeface.
 //!
 //! CORE §6: "One theme: Ubuntu Canonical Aubergine. There is no second theme and no
 //! theme setting." Every value below is transcribed from that section; none of them is
 //! configurable, and CORE §9 forbids adding a control that would make them so.
+//!
+//! The typeface is JetBrains Mono NL Nerd Font, in two weights, and it is the only one:
+//! CORE §6 puts the whole window in monospace rather than splitting chrome from values,
+//! so chrome and values are told apart by weight and colour instead of by family.
 
 use eframe::egui;
 use egui::{Color32, FontData, FontDefinitions, FontFamily, Stroke};
@@ -39,55 +43,72 @@ pub fn hairline() -> Stroke {
     Stroke::new(1.0, HAIRLINE)
 }
 
-/// The name of the monospace family. CORE §6: "Ubuntu Mono for every value — sizes,
-/// checksums, paths, the whole Inspector. Monospace is what makes a verbose pane
-/// scannable instead of noisy."
+/// CORE §6: "monospace for every value — sizes, checksums, paths, the whole Inspector.
+/// Monospace is what makes a verbose pane scannable instead of noisy."
+///
+/// `MONO` and `SANS` now resolve to the same face. Both names are kept because egui's
+/// two default families are still distinct — `Monospace` is what the table and the
+/// Inspector ask for — and naming a value's family at the call site keeps saying what it
+/// means, whatever is installed behind it.
 pub const MONO: FontFamily = FontFamily::Monospace;
-/// Ubuntu Sans, for chrome.
+/// Chrome. The same face as [`MONO`]; see its note.
 pub const SANS: FontFamily = FontFamily::Proportional;
 
-/// Embed the typefaces and make them the only ones.
+/// The bold weight.
 ///
-/// The files are bundled assets, not dependencies (CORE §2), under the Ubuntu Font
-/// Licence 1.0 in `LICENSES/`.
+/// This cannot be a `const` like [`MONO`] and [`SANS`] — `FontFamily::Name` holds an
+/// `Arc<str>`. Reach for it instead of `RichText::strong()`, which is a colour change and
+/// never a weight change: `strong_text_color()` resolves to `widgets.active`'s colour,
+/// which this theme sets to the same `TEXT` that `override_text_color` already forces, so
+/// `.strong()` renders identically to ordinary text and always did.
+pub fn bold() -> FontFamily {
+    FontFamily::Name("jetbrains-bold".into())
+}
+
+/// Embed the typeface and make it the only one.
+///
+/// The files are bundled assets, not dependencies (CORE §2), under the SIL Open Font
+/// Licence 1.1 in `LICENSES/`. `NL` is the no-ligature cut: a filename holding `->` or
+/// `!=` must render as the bytes the archive stores, not as the glyph a programmer's font
+/// would rather show. `…NerdFontMono…` is the single-cell icon cut, so an icon occupies
+/// one column and the entry table stays aligned.
 pub fn install_fonts(ctx: &egui::Context) {
-    let mut fonts = FontDefinitions::default();
+    // `empty()`, not `default()`. `eframe` is built without `default_fonts`, so
+    // `default()` already returns nothing — but it returns nothing *by side effect of a
+    // feature flag*, and saying `empty()` means the same thing on purpose.
+    let mut fonts = FontDefinitions::empty();
 
     fonts.font_data.insert(
-        "ubuntu-sans".to_owned(),
+        "jetbrains".to_owned(),
         Arc::new(FontData::from_static(include_bytes!(
-            "../assets/fonts/UbuntuSans-Regular.ttf"
+            "../assets/fonts/JetBrainsMonoNLNerdFontMono-Regular.ttf"
         ))),
     );
     fonts.font_data.insert(
-        "ubuntu-sans-bold".to_owned(),
+        "jetbrains-bold".to_owned(),
         Arc::new(FontData::from_static(include_bytes!(
-            "../assets/fonts/UbuntuSans-Bold.ttf"
-        ))),
-    );
-    fonts.font_data.insert(
-        "ubuntu-mono".to_owned(),
-        Arc::new(FontData::from_static(include_bytes!(
-            "../assets/fonts/UbuntuSansMono-Regular.ttf"
+            "../assets/fonts/JetBrainsMonoNLNerdFontMono-Bold.ttf"
         ))),
     );
 
-    // Our faces go first; egui's bundled fallbacks stay behind them so a CJK or
-    // emoji filename still renders something rather than tofu.
-    fonts
-        .families
-        .entry(FontFamily::Proportional)
-        .or_default()
-        .insert(0, "ubuntu-sans".to_owned());
-    fonts
-        .families
-        .entry(FontFamily::Monospace)
-        .or_default()
-        .insert(0, "ubuntu-mono".to_owned());
+    // One face in both default families, because CORE §6 puts the whole window in
+    // monospace. There is no fallback behind it and no pretending otherwise: this face
+    // carries 12,218 codepoints — Latin, the arrows and box-drawing, and some ten
+    // thousand Nerd icons — but no CJK and no emoji, so a filename in Japanese or with an
+    // emoji in it renders as tofu. That is the honest cost of embedding one face and
+    // linking no fontconfig, and it is stated here so it is a known limit, not a bug
+    // report waiting to happen.
+    for family in [FontFamily::Proportional, FontFamily::Monospace] {
+        fonts
+            .families
+            .entry(family)
+            .or_default()
+            .insert(0, "jetbrains".to_owned());
+    }
 
     fonts.families.insert(
-        FontFamily::Name("ubuntu-sans-bold".into()),
-        vec!["ubuntu-sans-bold".to_owned(), "ubuntu-sans".to_owned()],
+        FontFamily::Name("jetbrains-bold".into()),
+        vec!["jetbrains-bold".to_owned(), "jetbrains".to_owned()],
     );
 
     ctx.set_fonts(fonts);
