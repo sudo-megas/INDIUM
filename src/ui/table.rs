@@ -280,6 +280,10 @@ fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
 
     let mut open_this: Option<String> = None;
     let mut forget: Option<String> = None;
+    // A double-click on a row whose file is gone. It used to assign `None` over a `forget`
+    // that was already `None` — nothing happened, and nothing was said. The `Enter` path
+    // in `handle_keys` has answered this honestly since P2, and the two now agree.
+    let mut missing: Option<String> = None;
 
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
@@ -346,7 +350,7 @@ fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
                     if exists {
                         open_this = Some(path.clone());
                     } else {
-                        forget = None;
+                        missing = Some(path.clone());
                     }
                 }
                 resp.context_menu(|ui| {
@@ -361,12 +365,17 @@ fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
     if let Some(p) = open_this {
         app.open_archive(ctx, std::path::PathBuf::from(p), None);
     }
+    if let Some(p) = missing {
+        // P2 §2 keeps the row: the list loses entries by the user's hand or the cap, not
+        // because a drive happened to be unmounted this morning.
+        app.status = format!("{p} is no longer there.");
+    }
     if let Some(p) = forget {
         app.recents.remove(&p);
-        if !app.recents_broken {
-            let _ = app.store.save_recents(&app.recents);
-        }
+        // Status first, save last: a write that failed owns the line, rather than losing
+        // it to a sentence about a removal the file on disk never heard of.
         app.status = format!("Removed {p} from recent files.");
+        app.save_recents();
     }
 }
 

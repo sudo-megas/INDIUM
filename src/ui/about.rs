@@ -10,6 +10,12 @@ use super::{Indium, Popup};
 use crate::theme;
 
 const SOURCE: &str = "https://github.com/sudo-megas/INDIUM";
+/// Updated by the maker at each tag, by hand, in the same commit as the version bump.
+///
+/// Deliberately not a build-time timestamp: CORE §8 ships this as a package, and a binary
+/// that embeds the minute it was compiled cannot be built twice into the same bytes. A
+/// constant is deterministic and is exactly how `LICENCE` below is already embedded.
+const RELEASE_DATE: &str = "2026-08-08";
 const LICENCE: &str = include_str!("../../LICENSE");
 
 pub fn show(app: &mut Indium, ctx: &egui::Context) {
@@ -43,6 +49,9 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 .spacing([14.0, 4.0])
                 .show(ui, |ui| {
                     field(ui, "Version", env!("CARGO_PKG_VERSION"));
+                    // CORE §4.6 asks for "the version and date", and the date was missing
+                    // from this grid from P1 until P6.
+                    field(ui, "Date", RELEASE_DATE);
                     field(ui, "Maker", "sudo-megas");
                     field(ui, "Licence", "GPL-3.0-only");
                     ui.label(egui::RichText::new("Source").color(theme::TEXT_MUTED));

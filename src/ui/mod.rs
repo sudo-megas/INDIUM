@@ -52,8 +52,15 @@ pub enum InspectorTab {
     Preview,
 }
 
-/// The popups. CORE §4 fixes the list at seven, and this is all of them: rename happens
-/// in the table rather than in an eighth.
+/// The popups — eight of them, and this is all of them: rename happens in the table
+/// rather than in another popup.
+///
+/// CORE §4's numbered list stops at seven and does not carry `OpenPath`. But §4's keyboard
+/// table has carried `Ctrl+O` since P1, and the window behind it has been a real
+/// `egui::Window` for just as long: the document ordered the mechanism and forgot to
+/// number the window it opens. This comment used to claim seven and count eight, which is
+/// the wrong half to leave standing. `build/docs/P6.md` orders the matching CORE §4 edit —
+/// the maker lands CORE changes in his own hand.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Popup {
     NewArchive,
@@ -83,6 +90,24 @@ pub enum PendingAction {
     Preview { entry: String },
     /// Rebuild the archive once a password has been given.
     Apply,
+}
+
+/// What becomes of an extraction's output once the worker reports `Done`.
+///
+/// P3's two outward paths ran `arch::extract` inline on the UI thread until P6: the window
+/// froze for as long as libarchive took, the progress bar never moved, and the status bar
+/// drew a Cancel the UI thread was too busy inside the extraction to ever notice. They
+/// spawn the same worker `Extract` does now, and everything that used to follow the call
+/// follows the message instead.
+enum PostExtract {
+    /// A plain `E` extraction. The status line is the whole of it.
+    None,
+    /// `Ctrl+C` — offer what came out on the clipboard. `on_disk` is `Placement`'s answer,
+    /// carried because P3 §1's one-line notice is owed at the end, not at the start.
+    Clipboard { on_disk: bool },
+    /// `Enter` on a file — find what came out and open the picker on it. Boxed for the
+    /// same reason `ListMsg::Entry` is: an `Entry` dwarfs the other two variants.
+    OpenWith { entry: Box<Entry> },
 }
 
 /// How much of an entry Preview will read.
@@ -197,6 +222,8 @@ pub struct Indium {
     pub cancel: Arc<AtomicBool>,
     list_rx: Option<Receiver<ListMsg>>,
     extract_rx: Option<Receiver<ExtractMsg>>,
+    /// Set before the extraction worker is spawned, consumed when it reports.
+    post_extract: PostExtract,
     pub progress: Option<Progress>,
 
     // --- persistence ------------------------------------------------------
@@ -285,6 +312,7 @@ impl Indium {
             cancel: Arc::new(AtomicBool::new(false)),
             list_rx: None,
             extract_rx: None,
+            post_extract: PostExtract::None,
             progress: None,
 
             store,
@@ -414,12 +442,27 @@ impl Indium {
                         "Extracted {written} {}.",
                         if written == 1 { "entry" } else { "entries" }
                     );
-                    // The password's job is over.
+                    // The password's job is over. Neither post-step below needs it: one
+                    // reads the scratch directory, the other reads `.desktop` files.
                     self.passphrase = None;
+                    // A cancelled extraction returns `Ok` with however much it managed to
+                    // write, so the flag is the only thing that tells the two apart — and
+                    // half a selection is not what `Ctrl+C` or Open With asked for. A plain
+                    // extract keeps the count it always reported.
+                    let cancelled = self.cancel.load(Ordering::Relaxed);
+                    match std::mem::replace(&mut self.post_extract, PostExtract::None) {
+                        PostExtract::None => {}
+                        _ if cancelled => {
+                            self.status = "Cancelled. Nothing was offered.".to_string();
+                        }
+                        PostExtract::Clipboard { on_disk } => self.finish_copy_out(on_disk),
+                        PostExtract::OpenWith { entry } => self.finish_open_with(&entry),
+                    }
                 }
                 ExtractMsg::Failed(msg) => {
                     self.progress = None;
                     self.extract_rx = None;
+                    self.post_extract = PostExtract::None;
                     self.status = msg;
                     self.passphrase = None;
                 }
@@ -558,11 +601,23 @@ impl Indium {
         };
         let path = path.to_string_lossy().to_string();
         self.recents.bump(&path, store::now());
-        // P2 §1: writes happen on change, and never over a file that failed to parse.
-        if !self.recents_broken {
-            if let Err(e) = self.store.save_recents(&self.recents) {
-                self.status = format!("Could not save recent files: {e}");
-            }
+        self.save_recents();
+    }
+
+    /// P2 §1: writes happen on change, and never over a file that failed to parse.
+    ///
+    /// Shaped exactly like `save_settings`, and for the same reason: a save that did not
+    /// happen must say so. Three call sites used to swallow both answers with `let _`,
+    /// which meant a full disk or a read-only state directory looked identical to a
+    /// successful write — and the recents file the user was told about never changed.
+    pub fn save_recents(&mut self) {
+        if self.recents_broken {
+            self.status =
+                "recents.toml could not be parsed earlier; it will not be overwritten.".to_string();
+            return;
+        }
+        if let Err(e) = self.store.save_recents(&self.recents) {
+            self.status = format!("Could not save recent files: {e}");
         }
     }
 
@@ -871,6 +926,23 @@ impl Indium {
 
     /// Spawn the rebuild.
     pub fn begin_apply(&mut self, ctx: &egui::Context, recipe: tasks::Recipe) {
+        // The window holds one `apply_rx` and one cancellation flag. A second Apply used to
+        // replace both: the first worker went on rebuilding an archive nothing could report
+        // on and nothing could stop, and the status bar's Cancel reached only the newer one.
+        // The tray strip is a button and Apply is one keystroke, so twice is easy.
+        if self.apply_rx.is_some() {
+            self.status = "A rebuild is already running. Cancel it, or let it finish.".to_string();
+            return;
+        }
+        // And an extraction counts, for a sharper reason: the `store` below would cancel a
+        // running copy-out without a word, and its `Done` would then arrive holding a fresh
+        // flag that says nothing was cancelled — a partial selection offered to the
+        // clipboard as if it were the whole of it. Both refusals come before that store.
+        if self.extract_rx.is_some() {
+            self.status =
+                "An extraction is already running. Cancel it, or let it finish.".to_string();
+            return;
+        }
         self.cancel.store(true, Ordering::Relaxed);
         self.cancel = Arc::new(AtomicBool::new(false));
 
@@ -979,10 +1051,85 @@ impl Indium {
         }
     }
 
+    /// Is long work already running? Then say so, and start nothing.
+    ///
+    /// The window holds one `extract_rx` and one cancellation flag, so a second start
+    /// replaces both and leaves the first worker sending into a dropped channel: no
+    /// `Done`, progress that never clears, and a Cancel that reaches only the newer worker
+    /// while the older keeps writing files with nothing left to stop it. Copy-out and Open
+    /// With have a second reason — `Scratch::begin` removes the previous directory of its
+    /// kind, which is the very directory the first worker is writing into.
+    ///
+    /// A rebuild counts too, and must: extraction and Apply share that one flag and one
+    /// progress bar, so starting an extraction over a rebuild would leave the rebuild's
+    /// Cancel pointing at a flag nothing reads. CORE §3 has one worker, and this is what
+    /// keeps it to one.
+    fn work_running(&mut self) -> bool {
+        if self.extract_rx.is_some() {
+            self.status =
+                "An extraction is already running. Cancel it, or let it finish.".to_string();
+            return true;
+        }
+        if self.apply_rx.is_some() {
+            self.status = "A rebuild is already running. Cancel it, or let it finish.".to_string();
+            return true;
+        }
+        false
+    }
+
+    /// Hand an extraction to a worker, and record what becomes of it when it lands.
+    ///
+    /// The one place the receiver, the cancellation flag and the progress total are set up,
+    /// so the three callers cannot drift apart on any of them. CORE §3: "the UI thread and
+    /// one worker … it reports progress over a channel and honours a cancellation flag."
+    fn spawn_extract(
+        &mut self,
+        ctx: &egui::Context,
+        archive: PathBuf,
+        wanted: std::collections::HashSet<String>,
+        dest: PathBuf,
+        post: PostExtract,
+    ) {
+        self.cancel = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = channel();
+        self.extract_rx = Some(rx);
+        self.post_extract = post;
+        self.progress = Some(Progress {
+            done: 0,
+            total: wanted.len(),
+            label: "Extracting".to_string(),
+        });
+
+        let cancel = Arc::clone(&self.cancel);
+        let ctx2 = ctx.clone();
+        // Cloned here, on the UI thread, before the worker exists — the password prompt
+        // drops `self.passphrase` the moment the caller returns, and the worker must not
+        // depend on a field it cannot see.
+        let pass = self.passphrase.clone();
+
+        std::thread::spawn(move || {
+            match arch::extract(&archive, &wanted, &dest, pass.as_ref(), Some(&tx), &cancel) {
+                Ok(written) => {
+                    let _ = tx.send(ExtractMsg::Done { written });
+                }
+                Err(e) => {
+                    let _ = tx.send(ExtractMsg::Failed(e.to_string()));
+                }
+            }
+            // Reactive mode: the worker is what wakes the UI, and what makes the Open With
+            // picker appear on the frame the extraction finished rather than the next time
+            // the mouse happens to move.
+            ctx2.request_repaint();
+        });
+    }
+
     pub fn begin_extract(&mut self, ctx: &egui::Context, dest: PathBuf) {
         let Some(archive) = self.archive_path.clone() else {
             return;
         };
+        if self.work_running() {
+            return;
+        }
 
         // Nothing selected means the whole archive — the obvious reading of "Extract"
         // with no selection, and what every other archiver does.
@@ -997,33 +1144,8 @@ impl Indium {
             return;
         }
 
-        self.cancel = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = channel();
-        self.extract_rx = Some(rx);
-        self.progress = Some(Progress {
-            done: 0,
-            total: wanted.len(),
-            label: "Extracting".to_string(),
-        });
-
-        let cancel = Arc::clone(&self.cancel);
-        let ctx2 = ctx.clone();
-        let pass = self.passphrase.clone();
-        let dest2 = dest.clone();
-
-        std::thread::spawn(move || {
-            match arch::extract(&archive, &wanted, &dest2, pass.as_ref(), Some(&tx), &cancel) {
-                Ok(written) => {
-                    let _ = tx.send(ExtractMsg::Done { written });
-                }
-                Err(e) => {
-                    let _ = tx.send(ExtractMsg::Failed(e.to_string()));
-                }
-            }
-            ctx2.request_repaint();
-        });
-
         self.status = format!("Extracting to {}…", dest.display());
+        self.spawn_extract(ctx, archive, wanted, dest, PostExtract::None);
     }
 
     /// Extraction needs a password when the selection contains encrypted entries and
@@ -1104,10 +1226,12 @@ impl Indium {
             .any(|e| e.encrypted)
     }
 
-    /// `Ctrl+C` — extract to scratch, then offer `file://` URIs on the clipboard.
+    /// `Ctrl+C` — extract to scratch on a worker, and offer the clipboard what lands.
     ///
-    /// P3 §2: "it must feel better than drag, not apologetic about it."
-    pub fn copy_out(&mut self, rows: &[Row]) {
+    /// P3 §2: "it must feel better than drag, not apologetic about it." A copy-out that
+    /// froze the window until libarchive was finished did not, so from P6 the extraction
+    /// is the same worker `E` uses and the offer happens in `finish_copy_out`.
+    pub fn copy_out(&mut self, ctx: &egui::Context, rows: &[Row]) {
         let paths = self.subject_paths(rows);
         if paths.is_empty() {
             self.status = "Nothing selected.".to_string();
@@ -1126,6 +1250,11 @@ impl Indium {
         let Some(archive) = self.archive_path.clone() else {
             return;
         };
+        // Asked before `Scratch::begin`, which removes the previous copy-out directory —
+        // the one a running worker is writing into.
+        if self.work_running() {
+            return;
+        }
         let total = self.uncompressed_total(&wanted);
 
         let placement = match self.scratch.begin(scratch::Kind::CopyOut, total) {
@@ -1135,21 +1264,33 @@ impl Indium {
                 return;
             }
         };
+        let on_disk = placement.on_disk;
 
-        let cancel = Arc::new(AtomicBool::new(false));
-        if let Err(e) = arch::extract(
-            &archive,
-            &wanted,
-            &placement.dir,
-            self.passphrase.as_ref(),
-            None,
-            &cancel,
-        ) {
-            self.status = e.to_string();
+        self.status = "Copying out…".to_string();
+        self.spawn_extract(
+            ctx,
+            archive,
+            wanted,
+            placement.dir,
+            PostExtract::Clipboard { on_disk },
+        );
+    }
+
+    /// The other half of `copy_out`, run when the worker reports.
+    ///
+    /// The directory comes back off `self.scratch` rather than being carried through the
+    /// channel: `Scratch` owns it either way, and only `on_disk` was worth stashing.
+    fn finish_copy_out(&mut self, on_disk: bool) {
+        let Some(dir) = self
+            .scratch
+            .current(scratch::Kind::CopyOut)
+            .map(|p| p.to_path_buf())
+        else {
+            self.status = "The scratch directory is gone; nothing was offered.".to_string();
             return;
-        }
+        };
 
-        let files = collect_files(&placement.dir);
+        let files = collect_files(&dir);
         if files.is_empty() {
             self.status = "Nothing to copy.".to_string();
             return;
@@ -1162,7 +1303,7 @@ impl Indium {
                     "{n} {} ready to paste.",
                     if n == 1 { "file" } else { "files" }
                 );
-                if placement.on_disk {
+                if on_disk {
                     // P3 §1's one-line notice.
                     msg.push_str(" Over 1 GiB — staged on disk rather than in RAM.");
                 }
@@ -1172,8 +1313,9 @@ impl Indium {
         }
     }
 
-    /// `Enter` on a file — extract that one entry, then offer the picker.
-    pub fn open_with(&mut self, entry_path: &str) {
+    /// `Enter` on a file — extract that one entry on a worker, and offer the picker when
+    /// it lands.
+    pub fn open_with(&mut self, ctx: &egui::Context, entry_path: &str) {
         let Some(entry) = self.entry(entry_path).cloned() else {
             return;
         };
@@ -1194,6 +1336,9 @@ impl Indium {
         let Some(archive) = self.archive_path.clone() else {
             return;
         };
+        if self.work_running() {
+            return;
+        }
         let wanted: std::collections::HashSet<String> =
             std::iter::once(entry.path.clone()).collect();
 
@@ -1205,20 +1350,30 @@ impl Indium {
             }
         };
 
-        let cancel = Arc::new(AtomicBool::new(false));
-        if let Err(e) = arch::extract(
-            &archive,
-            &wanted,
-            &placement.dir,
-            self.passphrase.as_ref(),
-            None,
-            &cancel,
-        ) {
-            self.status = e.to_string();
-            return;
-        }
+        self.status = format!("Extracting {}…", crate::util::base_name(&entry.path));
+        self.spawn_extract(
+            ctx,
+            archive,
+            wanted,
+            placement.dir,
+            PostExtract::OpenWith {
+                entry: Box::new(entry),
+            },
+        );
+    }
 
-        let extracted = placement.dir.join(&entry.raw_path);
+    /// The other half of `open_with`, run when the worker reports.
+    fn finish_open_with(&mut self, entry: &Entry) {
+        let Some(dir) = self
+            .scratch
+            .current(scratch::Kind::OpenWith)
+            .map(|p| p.to_path_buf())
+        else {
+            self.status = "The scratch directory is gone; there is nothing to open.".to_string();
+            return;
+        };
+
+        let extracted = dir.join(&entry.raw_path);
         if !extracted.is_file() {
             self.status = "The entry did not extract to a file.".to_string();
             return;
@@ -1382,7 +1537,9 @@ impl Indium {
             }
         }
 
-        // Ctrl chords work even while typing.
+        // `Ctrl+F` and `Ctrl+O` work even while typing — a `TextEdit` claims neither, so
+        // opening the filter bar or the path field from inside another field is no
+        // ambiguity at all.
         let (ctrl_f, ctrl_a, ctrl_o, ctrl_c, ctrl_v) = ctx.input(|i| {
             (
                 i.modifiers.ctrl && i.key_pressed(egui::Key::F),
@@ -1401,14 +1558,16 @@ impl Indium {
         if ctrl_o {
             self.popup = Some(Popup::OpenPath);
         }
+        // The three chords a `TextEdit` already owns, all guarded on `typing`: select-all,
+        // copy and paste belong to the focused field. Without the guard, `Ctrl+C` in the
+        // filter bar, the rename box, the Extract path field or the `Ctrl+O` field copied
+        // the archive selection out instead of the text the user had just highlighted.
         if ctrl_a && self.has_archive() && !typing {
             self.selection = rows.iter().map(|r| r.path.clone()).collect();
         }
-        if ctrl_c && self.has_archive() {
-            self.copy_out(rows);
+        if ctrl_c && self.has_archive() && !typing {
+            self.copy_out(ctx, rows);
         }
-        // Guarded on `typing`, unlike the others: a paste into the Extract path field or
-        // the rename box must reach the field, not stage an add.
         if ctrl_v && self.has_archive() && !typing {
             self.request_paste(ctx);
         }
@@ -1538,7 +1697,7 @@ impl Indium {
                         Some(row) if row.is_dir => self.descend(rows),
                         Some(row) => {
                             let path = row.path.clone();
-                            self.open_with(&path);
+                            self.open_with(ctx, &path);
                         }
                         None => {}
                     }
@@ -1568,10 +1727,11 @@ impl Indium {
                     if let Some(r) = self.recents.sorted().get(self.cursor).cloned() {
                         let path = r.path.clone();
                         self.recents.remove(&path);
-                        if !self.recents_broken {
-                            let _ = self.store.save_recents(&self.recents);
-                        }
+                        // The success line first, the write last: a save that failed has
+                        // something to say, and it must not be overwritten by a sentence
+                        // announcing a change that never reached the disk.
                         self.status = format!("Removed {path} from recent files.");
+                        self.save_recents();
                     }
                 }
             }

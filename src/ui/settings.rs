@@ -42,23 +42,29 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             group(ui, "Extract");
             let mut changed = false;
             ui.horizontal(|ui| {
+                // Which default is chosen is "this mode is active", not "something will
+                // happen". The ink carries it too, because Aubergine alone sits 1.72:1
+                // against the panel. P6 §6.6.
+                theme::active_fill(ui);
                 ui.label(
                     egui::RichText::new("Preselect")
                         .size(13.0)
                         .color(theme::TEXT_MUTED),
                 );
                 let cur = app.settings.extract.default;
-                if ui
-                    .selectable_label(cur == ExtractDefault::Here, "here")
-                    .clicked()
-                    && cur != ExtractDefault::Here
-                {
+                let toggle = |ui: &mut egui::Ui, on: bool, text: &str| {
+                    let text = egui::RichText::new(text).color(if on {
+                        theme::TEXT
+                    } else {
+                        theme::TEXT_MUTED
+                    });
+                    ui.selectable_label(on, text).clicked()
+                };
+                if toggle(ui, cur == ExtractDefault::Here, "here") && cur != ExtractDefault::Here {
                     app.settings.extract.default = ExtractDefault::Here;
                     changed = true;
                 }
-                if ui
-                    .selectable_label(cur == ExtractDefault::Subdir, "into a subdirectory")
-                    .clicked()
+                if toggle(ui, cur == ExtractDefault::Subdir, "into a subdirectory")
                     && cur != ExtractDefault::Subdir
                 {
                     app.settings.extract.default = ExtractDefault::Subdir;
@@ -138,10 +144,11 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 );
                 if ui.button("Clear list").clicked() {
                     app.recents.items.clear();
-                    if !app.recents_broken {
-                        let _ = app.store.save_recents(&app.recents);
-                    }
+                    // Status first, save last, so a refusal or a write error is what the
+                    // status bar carries rather than a cheerful line about a file that is
+                    // still full of what it always held.
                     app.status = "Recent files cleared.".to_string();
+                    app.save_recents();
                 }
             });
 

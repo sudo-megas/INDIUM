@@ -191,14 +191,17 @@ fn attempt(app: &mut Indium, ctx: &egui::Context) {
             app.passphrase = None;
         }
         Some(PendingAction::CopyOut) => {
+            // Both of these spawn a worker that takes its own clone of the passphrase
+            // before returning, so clearing it here still leaves the extraction able to
+            // read what it was unlocked for.
             app.passphrase = Some(secret);
             let rows = app.rows();
-            app.copy_out(&rows);
+            app.copy_out(ctx, &rows);
             app.passphrase = None;
         }
         Some(PendingAction::OpenWith { entry }) => {
             app.passphrase = Some(secret);
-            app.open_with(&entry);
+            app.open_with(ctx, &entry);
             app.passphrase = None;
         }
         Some(PendingAction::Preview { entry }) => {
