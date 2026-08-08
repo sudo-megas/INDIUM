@@ -41,7 +41,7 @@ five dependencies, and honest at fifty.
 | `egui_extras` | P1 | Provides the virtualized table that lets a 100,000-entry archive scroll like a 100-entry one. |
 | `sevenz-rust2` | P4 | Writes 7z with AES-256, which libarchive cannot do; also the source of 7z-specific detail (solid blocks) the generic reader does not expose. |
 | `wl-clipboard-rs` | P3 | Puts `text/uri-list` on the Wayland clipboard so copy-out works into any file manager. |
-| `image` (via `egui_extras` `image` feature) | P5 | Decodes the image formats the Preview tab shows. |
+| `image` (via `egui_extras` `image` feature) | already linked; formats chosen at P5 | Decodes the image formats the Preview tab shows. It is not a new dependency — `eframe` pulls it through its clipboard path already, with PNG on — so P5 names the formats rather than adding the crate. |
 | `serde` + `toml` | P2 | Read and write the settings, bookmarks, and recent-files TOML files. |
 
 Everything not in this table is the standard library or hand-written: CRC32 is a
@@ -198,10 +198,11 @@ One theme: **Ubuntu Canonical Aubergine.** There is no second theme and no theme
 
 | Role | Value |
 | --- | --- |
-| Base | `#221226` window · `#2B1830` raised panels · `#1C0F20` status bar |
+| Base | `#300A24` window · `#3D0D2E` raised panels · `#24071B` status bar |
 | Structure | Canonical Aubergine `#772953` — selection context, active sidebar item |
 | Accent | Ubuntu Orange `#E95420` — reserved for exactly three meanings: the current selection, staged changes, and Apply/progress. Orange means *something will happen.* |
-| Text | `#F0E6EE` primary · `#C9B3C4` secondary · `#A98BA3` muted |
+| Text | `#EEEEEC` primary · `#BDBDBB` secondary · `#999997` muted |
+| Warning | `#FFD800` — and only where something has gone wrong: a wrong password, two passwords that differ, a settings file that would not parse. It is not an accent and never decorates. |
 | Lines | 1px hairlines at 8% white. Nothing thicker, anywhere. |
 
 **One typeface, monospace, everywhere** — chrome and values alike; sizes, checksums,
