@@ -25,6 +25,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
     let mut apply = false;
 
     egui::Window::new("Pending tasks")
+        .max_height(theme::popup_max_height(ctx))
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -44,7 +45,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             }
 
             egui::ScrollArea::vertical()
-                .max_height(theme::list_height(ctx, 220.0, 320.0))
+                .max_height(theme::list_height(ctx, 250.0, 320.0))
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     for (i, task) in app.tasks.tasks().iter().enumerate() {
@@ -96,25 +97,26 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             }
 
             ui.add_space(8.0);
-            ui.separator();
-            ui.horizontal(|ui| {
-                discard = theme::button(ui, egui::RichText::new("Discard all"), true).clicked();
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    apply = theme::button(
-                        ui,
-                        egui::RichText::new("Apply")
-                            .color(theme::ORANGE)
-                            .family(theme::bold()),
-                        true,
-                    )
-                    .clicked();
+            theme::foot(ui, |ui| {
+                ui.horizontal(|ui| {
+                    discard = theme::button(ui, egui::RichText::new("Discard all"), true).clicked();
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        apply = theme::button(
+                            ui,
+                            egui::RichText::new("Apply")
+                                .color(theme::ORANGE)
+                                .family(theme::bold()),
+                            true,
+                        )
+                        .clicked();
+                    });
                 });
+                ui.label(
+                    egui::RichText::new("Esc closes · nothing is written until Apply")
+                        .size(12.0)
+                        .color(theme::TEXT_MUTED),
+                );
             });
-            ui.label(
-                egui::RichText::new("Esc closes · nothing is written until Apply")
-                    .size(12.0)
-                    .color(theme::TEXT_MUTED),
-            );
         });
 
     if let Some(i) = remove {

@@ -549,23 +549,35 @@ pub fn zone(fill: Color32) -> egui::Frame {
         .outer_margin(egui::Margin::same(GUTTER / 2))
 }
 
-/// How tall a popup's scrolling middle may be, in the window it actually has.
+/// The tallest a popup may be before it starts losing its own edges.
 ///
 /// `egui::Window` sizes itself from its content and is then **clipped** by the viewport
-/// rather than shrunk to it, so a list with a fixed height is a popup that fits until the
-/// window is small and then loses its own title band off the top and its foot off the
-/// bottom — at which point the thing the popup exists to say is the thing that is gone. The
-/// window has a minimum inner size of 480 (`main.rs`), and every popup here wanted more
-/// than that on its own.
+/// rather than shrunk to it. A popup whose content outgrew the window therefore lost its
+/// title band off the top and its foot off the bottom — which is to say it lost its name
+/// and the button it exists for, and kept the middle. The window's minimum inner height is
+/// 480 (`main.rs`) and three of the popups wanted more than that on their own, so this was
+/// never a small-screen edge case.
+pub fn popup_max_height(ctx: &egui::Context) -> f32 {
+    (ctx.content_rect().height() - 2.0 * GUTTER as f32).max(240.0)
+}
+
+/// How tall a popup's scrolling middle may be, in the window it actually has.
 ///
-/// `chrome` is everything in the popup that is not the list: its title band, its fields,
-/// its foot. `want` is the height the list was designed to have and is never exceeded — a
-/// big screen does not get a longer list, it gets the list the popup was drawn with. The
-/// floor of 80 is three rows: below that a scrolling list is worse than useless, and a
-/// popup that cannot fit three rows is one the user must resize the window for.
+/// `chrome` is everything in the popup that is not this list — its title band, the fields
+/// above, the foot below. `want` is the height the list was drawn to have and is never
+/// exceeded: a taller window gets the list the popup was designed with, not a longer one.
+///
+/// **Asked of the viewport, not of the `Ui`.** Measuring looks like the better answer and is
+/// not: an `egui::Window` sizes itself from its content, so inside one `available_height` is
+/// effectively unbounded and every list quietly kept the height it already had. Anchoring
+/// the sum on the window's own cursor instead makes it circular — a centre-anchored popup's
+/// position depends on the height being computed. The viewport is the one term in the
+/// arithmetic that does not move.
+///
+/// The floor of 56 is two rows. A popup that cannot show two rows is one the user has to
+/// resize the window for, and two rows with a foot beats six rows and no way to act on them.
 pub fn list_height(ctx: &egui::Context, chrome: f32, want: f32) -> f32 {
-    let room = ctx.content_rect().height() - chrome;
-    want.min(room).max(80.0)
+    want.min(ctx.content_rect().height() - chrome).max(56.0)
 }
 
 /// The band across the foot of a popup, holding what the popup is about to do.

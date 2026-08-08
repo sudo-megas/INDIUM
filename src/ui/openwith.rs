@@ -24,6 +24,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
     let mut launch: Option<Candidate> = None;
 
     egui::Window::new("Open With")
+        .max_height(theme::popup_max_height(ctx))
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -77,7 +78,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             }
 
             egui::ScrollArea::vertical()
-                .max_height(theme::list_height(ctx, 210.0, 300.0))
+                .max_height(theme::list_height(ctx, 300.0, 300.0))
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     for c in &visible {
@@ -129,12 +130,13 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             ui.checkbox(&mut app.openwith_show_all, "Show all applications");
 
             ui.add_space(8.0);
-            ui.separator();
-            ui.label(
-                egui::RichText::new(FOOTER)
-                    .size(13.0)
-                    .color(theme::TEXT_MUTED),
-            );
+            theme::foot(ui, |ui| {
+                ui.label(
+                    egui::RichText::new(FOOTER)
+                        .size(13.0)
+                        .color(theme::TEXT_MUTED),
+                );
+            });
         });
 
     if let Some(c) = launch {

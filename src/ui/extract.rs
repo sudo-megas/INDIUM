@@ -31,6 +31,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
     let mut go: Option<PathBuf> = None;
 
     egui::Window::new("Extract")
+        .max_height(theme::popup_max_height(ctx))
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -152,19 +153,21 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             }
 
             ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if theme::button(ui, egui::RichText::new("Extract"), true).clicked() || enter {
-                    let typed = app.extract_path.trim();
-                    if !typed.is_empty() {
-                        go = Some(PathBuf::from(expand_tilde(typed)));
+            theme::foot(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if theme::button(ui, egui::RichText::new("Extract"), true).clicked() || enter {
+                        let typed = app.extract_path.trim();
+                        if !typed.is_empty() {
+                            go = Some(PathBuf::from(expand_tilde(typed)));
+                        }
                     }
-                }
-                ui.label(
-                    egui::RichText::new("Enter extracts · Esc closes")
-                        .size(12.0)
-                        .color(theme::TEXT_MUTED),
-                );
+                    ui.label(
+                        egui::RichText::new("Enter extracts · Esc closes")
+                            .size(12.0)
+                            .color(theme::TEXT_MUTED),
+                    );
+                });
             });
         });
 

@@ -27,6 +27,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
     let mut create = false;
 
     egui::Window::new("New Archive")
+        .max_height(theme::popup_max_height(ctx))
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)

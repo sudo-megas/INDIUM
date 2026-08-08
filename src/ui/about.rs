@@ -24,12 +24,23 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
     }
     let mut open = true;
     egui::Window::new("About INDIUM")
+        .max_height(theme::popup_max_height(ctx))
         .collapsible(false)
         .resizable(true)
         .default_size([620.0, 480.0])
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .open(&mut open)
         .show(ctx, |ui| {
+            // About is the one popup whose fixed part alone — a 150px mark, a title, five
+            // fields and a sourcing note — is taller than the window's own minimum height,
+            // so no arithmetic over what is *left* can make it fit. The whole body scrolls
+            // instead, and only the foot is held out of it: a popup may lose the bottom of
+            // the licence to a small window, but it must never lose the line naming what it
+            // is and who made it.
+            egui::ScrollArea::vertical()
+                .max_height(theme::list_height(ctx, 120.0, f32::INFINITY))
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
             // "The mark, the maker, the version and date" — CORE §4.6, in that order. The
             // mark was named in the document from P1 and drawn here for the first time in P6.
             ui.vertical_centered(|ui| {
@@ -94,10 +105,9 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             ui.separator();
             theme::section_bare(ui, "The licence, in full");
 
-            egui::ScrollArea::vertical()
-                .max_height(theme::list_height(ctx, 330.0, 240.0))
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
+                    // No scroll area of its own any more: the body above is already one, and
+                    // a licence that scrolls inside a popup that scrolls is two wheels under
+                    // one finger.
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(LICENCE)
@@ -110,11 +120,13 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 });
 
             ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new("Copyright © sudo-megas · Built with Reason and Passion.")
-                    .size(13.0)
-                    .color(theme::TEXT_MUTED),
-            );
+            theme::foot(ui, |ui| {
+                ui.label(
+                    egui::RichText::new("Copyright © sudo-megas · Built with Reason and Passion.")
+                        .size(13.0)
+                        .color(theme::TEXT_MUTED),
+                );
+            });
         });
 
     if !open {

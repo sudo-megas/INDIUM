@@ -19,6 +19,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
     let mut open = true;
 
     egui::Window::new("Settings")
+        .max_height(theme::popup_max_height(ctx))
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -155,20 +156,21 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             });
 
             ui.add_space(12.0);
-            ui.separator();
-            ui.label(
-                egui::RichText::new(format!(
-                    "settings.toml · {}",
-                    app.store.settings_path().display()
-                ))
-                .size(12.0)
-                .color(theme::TEXT_MUTED),
-            );
-            ui.label(
-                egui::RichText::new("Hand-editable. INDIUM respects what you write there.")
+            theme::foot(ui, |ui| {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "settings.toml · {}",
+                        app.store.settings_path().display()
+                    ))
                     .size(12.0)
                     .color(theme::TEXT_MUTED),
-            );
+                );
+                ui.label(
+                    egui::RichText::new("Hand-editable. INDIUM respects what you write there.")
+                        .size(12.0)
+                        .color(theme::TEXT_MUTED),
+                );
+            });
         });
 
     if !open {
