@@ -1,8 +1,20 @@
-//! Where copies live — P3 §1.
+//! Where copies live — P3 §1, corrected by P8 §3.
 //!
 //! Copy-out and Open With both hand real files to the outside world, so both need a
 //! scratch area with rules. `$XDG_RUNTIME_DIR` is tmpfs — RAM — so a large selection
 //! is routed to disk instead, and everything INDIUM made is removed on a clean exit.
+//!
+//! **The scratch roots are shared by every INDIUM on the machine, and until P8 the
+//! names inside them were not.** P3 numbered a window's directories from one, so the
+//! first copy-out of every window was `co-1` in one shared directory: a second window's
+//! copy-out landed on top of the first window's files, and either window's next
+//! operation removed a directory the other was still handing to a file manager. The
+//! sweep was worse — it took every `co-*` and `ow-*` it found at launch, so opening a
+//! second window deleted the first one's on-disk copy-out while the user was looking at
+//! it. Neither needed a bug report to be a bug; both needed a second window, which
+//! CORE §1 has told users to open since P1 and P8 finally opens for them. So the names
+//! carry the process that made them, and the sweep asks whether that process is still
+//! running before it removes anything.
 
 use std::path::{Path, PathBuf};
 
@@ -50,6 +62,10 @@ pub struct Scratch {
     /// `$XDG_CACHE_HOME/indium/scratch`.
     cache_root: PathBuf,
     limit: u64,
+    /// This window's process id, which is what keeps two windows' directory names
+    /// apart in a root they share. Held rather than asked for each time, so every
+    /// directory one window makes carries one number.
+    pid: u32,
     counter: u32,
     current: [Option<PathBuf>; 2],
 }
@@ -66,6 +82,7 @@ impl Scratch {
             runtime_root: runtime,
             cache_root: cache,
             limit,
+            pid: std::process::id(),
             counter: 0,
             current: [None, None],
         }
@@ -90,7 +107,7 @@ impl Scratch {
 
         let (root, on_disk) = self.route(total_bytes);
         self.counter += 1;
-        let dir = root.join(format!("{}-{}", kind.prefix(), self.counter));
+        let dir = root.join(format!("{}-{}-{}", kind.prefix(), self.pid, self.counter));
         std::fs::create_dir_all(&dir)?;
         self.current[kind.slot()] = Some(dir.clone());
         Ok(Placement { dir, on_disk })
@@ -110,6 +127,13 @@ impl Scratch {
     /// Sweep leftovers from a previous run. P3 §1: "Stale `scratch/` cache entries are
     /// swept at launch" — the runtime dir's logout wipe is the backstop for the other
     /// root, but the cache is on disk and nothing else will ever clear it.
+    ///
+    /// **"Stale" now means the window that made it is gone.** P3's sweep read "ours" and
+    /// removed it, which was right while only one INDIUM could be running and became a
+    /// deletion of a live window's files the moment a second one could — see this
+    /// module's own note. A directory is removed when its name says it belongs to no
+    /// running process, and kept in every other case, including every case the name
+    /// cannot answer.
     pub fn sweep_stale(&self) {
         let Ok(entries) = std::fs::read_dir(&self.cache_root) else {
             return;
@@ -117,21 +141,71 @@ impl Scratch {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if is_ours(&name) {
+            let stale = match owner(&name) {
+                // Not ours, and so not ours to delete.
+                Owner::Stranger => false,
+                // Ours, from a version that did not say whose. Nothing else will ever
+                // clear it, and no running window is using a name in that form.
+                Owner::Anonymous => true,
+                Owner::Process(pid) => !is_running(pid),
+            };
+            if stale {
                 let _ = std::fs::remove_dir_all(entry.path());
             }
         }
     }
 }
 
-/// Does this directory name look like one of ours? Deliberately strict: only
-/// `co-<digits>` and `ow-<digits>`, so a sweep can never delete something it did not
-/// create.
-pub fn is_ours(name: &str) -> bool {
-    let Some((prefix, n)) = name.split_once('-') else {
-        return false;
+/// What a directory name under a scratch root says about who made it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Owner {
+    /// Ours, and it names the window that made it: `co-<pid>-<n>`.
+    Process(u32),
+    /// Ours, but from a version before P8 put the process id in the name: `co-<n>`.
+    Anonymous,
+    /// Not ours. Never to be removed, whatever else is true of it.
+    Stranger,
+}
+
+/// Read a directory name. Deliberately strict, for the reason P3 gave when the only
+/// forms were `co-<digits>` and `ow-<digits>`: a sweep must never be able to delete
+/// something INDIUM did not create. Anything that does not parse exactly is a
+/// `Stranger`, including a process id too large to be one.
+pub fn owner(name: &str) -> Owner {
+    let Some((prefix, rest)) = name.split_once('-') else {
+        return Owner::Stranger;
     };
-    matches!(prefix, "co" | "ow") && !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())
+    if !matches!(prefix, "co" | "ow") {
+        return Owner::Stranger;
+    }
+    match rest.split_once('-') {
+        Some((pid, n)) if digits(pid) && digits(n) => match pid.parse::<u32>() {
+            Ok(pid) => Owner::Process(pid),
+            Err(_) => Owner::Stranger,
+        },
+        Some(_) => Owner::Stranger,
+        None if digits(rest) => Owner::Anonymous,
+        None => Owner::Stranger,
+    }
+}
+
+fn digits(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Does this directory name look like one of ours?
+pub fn is_ours(name: &str) -> bool {
+    owner(name) != Owner::Stranger
+}
+
+/// Is that process id still on this machine?
+///
+/// `/proc/<pid>` is the whole test — CORE §9 is Linux only, and the directory is there
+/// on every machine INDIUM runs on. A process id the kernel has since handed to some
+/// other program reads as running and the directory is kept: the two mistakes are not
+/// the same size, and one leftover directory swept on a later launch is the small one.
+fn is_running(pid: u32) -> bool {
+    Path::new("/proc").join(pid.to_string()).exists()
 }
 
 /// P3 §1's drop guard: "removes everything of ours on clean exit".
@@ -301,6 +375,80 @@ mod tests {
         assert!(cache.join("co-not-a-number").exists(), "not our naming");
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The collision P3 could not have: every window numbers its copy-outs from one, so
+    /// without the process id in the name the first copy-out of every window on the
+    /// machine is the same directory in the same shared root.
+    #[test]
+    fn a_scratch_directory_says_which_window_made_it() {
+        let base = tmp("owner");
+        let mut s = Scratch::with_roots(Some(base.join("run")), base.join("cache"), 1000);
+
+        let dir = s.begin(Kind::CopyOut, 1).unwrap().dir;
+        let name = dir.file_name().unwrap().to_string_lossy().to_string();
+        assert_eq!(
+            owner(&name),
+            Owner::Process(std::process::id()),
+            "a name that does not carry the window's process id collides with every other window's"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The bug this replaces: launching a second window swept the first one's on-disk
+    /// copy-out while the user was still looking at it.
+    #[test]
+    fn the_sweep_leaves_a_running_windows_copy_out_alone() {
+        let base = tmp("live");
+        let cache = base.join("cache");
+        let mine = cache.join(format!("co-{}-1", std::process::id()));
+        std::fs::create_dir_all(&mine).unwrap();
+        std::fs::write(mine.join("held.txt"), b"a file handed to a file manager").unwrap();
+
+        let s = Scratch::with_roots(Some(base.join("run")), cache.clone(), 1000);
+        s.sweep_stale();
+
+        assert!(
+            mine.join("held.txt").exists(),
+            "a second window must not delete the files a first window is still handing out"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The other half of the same rule: a window that died still has to be cleaned up
+    /// after, or the cache grows for ever. The dead process id is a real one — a child
+    /// this test starts and reaps — rather than a number assumed to be free.
+    #[test]
+    fn the_sweep_removes_a_dead_windows_copy_out() {
+        let base = tmp("dead");
+        let cache = base.join("cache");
+
+        let mut child = std::process::Command::new("/bin/true").spawn().unwrap();
+        let gone = child.id();
+        child.wait().unwrap();
+
+        let theirs = cache.join(format!("co-{gone}-1"));
+        std::fs::create_dir_all(&theirs).unwrap();
+
+        let s = Scratch::with_roots(Some(base.join("run")), cache.clone(), 1000);
+        s.sweep_stale();
+
+        assert!(
+            !theirs.exists(),
+            "nothing else will ever clear the cache root, so a dead window's directory must go"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A process id too large to be one is not a licence to delete the directory.
+    #[test]
+    fn a_name_we_cannot_read_is_never_swept() {
+        assert_eq!(owner("co-99999999999999-1"), Owner::Stranger);
+        assert_eq!(owner("co-1-2-3"), Owner::Stranger);
+        assert_eq!(owner("co--1"), Owner::Stranger);
     }
 
     #[test]
