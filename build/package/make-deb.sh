@@ -50,7 +50,20 @@ HOMEPAGE=https://github.com/sudo-megas/INDIUM
 # one commit agree about every timestamp they write, without anyone passing anything. That
 # is as far as the claim goes: xz's encoder output moves between its own releases, so
 # byte-identical rebuilds need the same xz as well, not just the same commit.
-EPOCH=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}
+#
+# git is asked, but not required, and its failure is not allowed to be silent. A container
+# checkout is owned by a different uid than the step that runs in it, so git refuses the
+# repository outright ("detected dubious ownership") — which killed this script's first run
+# under the release workflow. Falling back to the current time would have been worse than
+# failing: the package would build, and its reproducibility claim would quietly stop being
+# true. So git may fail, and the script then insists on being told.
+EPOCH=$SOURCE_DATE_EPOCH
+[ -n "$EPOCH" ] || EPOCH=$(git log -1 --format=%ct 2>/dev/null || true)
+[ -n "$EPOCH" ] || {
+  echo "make-deb: no commit date available (not a usable git checkout), and" >&2
+  echo "          SOURCE_DATE_EPOCH is unset. Set it to build reproducibly." >&2
+  exit 2
+}
 
 W=$(mktemp -d)
 trap 'rm -rf "$W"' EXIT INT HUP TERM

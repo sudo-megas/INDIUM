@@ -72,6 +72,15 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # actions/checkout writes the tree as a different uid than the steps run as, so git
+      # refuses the repository — "detected dubious ownership" — and make-deb.sh, which asks
+      # git for the commit date behind its reproducible timestamps, exits 128. This is the
+      # bug that the workflow_dispatch trigger above exists to catch, and it caught it: the
+      # first run of this workflow failed here, on master, with no tag at stake. The
+      # directory genuinely is safe; saying so is the documented fix.
+      - name: Trust the checkout
+        run: git config --global --add safe.directory "$PWD"
+
       # The same remap the PKGBUILD's build() does, and for the same reason: panic locations
       # carry the paths a binary was compiled in, `strip` does not remove them, and nothing
       # warns about it. The Arch package would otherwise be path-clean while the .deb was not
