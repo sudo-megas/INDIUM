@@ -100,7 +100,9 @@ rather than made on your behalf.
 
 Open an archive by clicking it in your file manager, by passing it on the command line, or
 with `Ctrl+O` inside the program. **One archive per window** — opening a second one opens a
-second window, and there are no tabs.
+second window, and there are no tabs. Name several archives on the command line and you get
+several windows. Every window stands on its own: close them in any order, and closing one
+never closes another.
 
 ### The sections
 
