@@ -1,7 +1,25 @@
-# INDIUM — the .deb release build. CORE §8: "Packages: `.pkg.tar.zst` (Arch) and `.deb`
-# (Debian/Ubuntu), from P6 onward. Nothing else." The Arch package is built by hand on the
-# maker's own machine, which is an Arch machine; the .deb is built here, because the .deb
-# is the one that has to run somewhere the maker does not live.
+# INDIUM — the release build. CORE §8: "Packages: `.pkg.tar.zst` (Arch) and `.deb`
+# (Debian/Ubuntu), from P6 onward. Nothing else."
+#
+# Both packages and the plain tarball are built here, in containers, from what GitHub
+# holds. Nothing a release ships is produced on the maker's own machine any more — not
+# because that machine is untrustworthy, but because a machine is a variable and a
+# container is a written-down constant. Whoever reads this file can see the entire
+# provenance of every byte that ships; before P8's last commit they could see two thirds
+# of it and had to take the Arch package on trust.
+#
+# Three jobs, and the third is the one that matters:
+#
+#   deb      debian:bookworm      → indium_<ver>-1_amd64.deb, and the tarball
+#   arch     archlinux:base-devel → indium-<ver>-1-x86_64.pkg.tar.zst
+#   verify   ubuntu-latest        → both packages, in one place, judged together
+#
+# `verify.sh` has always had INDIUM_PKG and INDIUM_DEB overrides for artefacts built
+# somewhere other than the tree. Until this job existed there was nowhere both packages
+# were ever present at once, so its strongest checks — the two payloads being identical
+# under usr/, neither desktop entry mentioning RAR — could only ever be run by hand on a
+# machine holding a .deb it had downloaded. Now they run on every release, and on every
+# dispatch that rehearses one.
 name: release
 
 on:
@@ -16,23 +34,31 @@ on:
       - 'v*'
 
 # Explicit and minimal. This workflow does not create a release, edit a release, or write
-# anything back to the repository: it uploads the .deb as a run artifact and stops. The
+# anything back to the repository: it uploads the artefacts to the run and stops. The
 # outward-facing act stays a separate human step, taken from the sudo-megas account and no
 # other, as CORE §8 requires.
 permissions:
   contents: read
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # The Debian package, and the tarball that comes off the same binary.
+  # ---------------------------------------------------------------------------
   deb:
     runs-on: ubuntu-latest
 
-    # THIS LINE IS THE WHOLE POINT OF THE WORKFLOW. The .deb has to declare the oldest
-    # glibc that can run its binary, and `make-deb.sh` reads that floor out of the binary
-    # itself rather than trusting anybody's memory. Built on the maker's Arch machine the
-    # same binary imports GLIBC_2.43; bookworm ships 2.36, so an Arch-built .deb would
-    # honestly declare a dependency that no Debian stable can satisfy. Building inside
-    # bookworm makes the floor 2.36 by construction rather than by promise — there is
-    # nothing left to remember, and nothing left to get wrong.
+    # THIS LINE IS THE WHOLE POINT OF THE JOB. The .deb has to declare the oldest glibc
+    # that can run its binary, and `make-deb.sh` reads that floor out of the binary itself
+    # rather than trusting anybody's memory. Built on the maker's Arch machine the same
+    # binary imports GLIBC_2.43; bookworm ships 2.36, so an Arch-built .deb would honestly
+    # declare a dependency that no Debian stable can satisfy. Building inside bookworm
+    # makes the floor 2.36 by construction rather than by promise — there is nothing left
+    # to remember, and nothing left to get wrong.
+    #
+    # The tarball comes off this binary and not the Arch one for the same reason: a
+    # tarball declares no dependencies at all, so it is the artefact with the least
+    # opportunity to warn anybody, and it should therefore be the one that runs in the
+    # most places.
     container: debian:bookworm
 
     steps:
@@ -64,10 +90,16 @@ jobs:
 
       # bookworm packages rustc 1.63, which cannot build eframe 0.36. rustup fetches a
       # current stable toolchain without adding an apt source to the image.
+      #
+      # `--profile minimal` leaves out rustfmt and clippy, and both are asked for by name
+      # because the two gates below are now this workflow's rather than the maker's: a
+      # release built entirely in containers has to hold itself to the whole standard, or
+      # "built in CI" quietly means "built in CI, formatted wherever".
       - name: Install Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-            | sh -s -- -y --profile minimal --default-toolchain stable
+            | sh -s -- -y --profile minimal --default-toolchain stable \
+                --component rustfmt --component clippy
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - uses: actions/checkout@v4
@@ -81,6 +113,21 @@ jobs:
       - name: Trust the checkout
         run: git config --global --add safe.directory "$PWD"
 
+      # Cargo.toml is the one place the version is written. CORE §7's tags are two-numeral
+      # (`v1.0`) where Cargo's are three (`1.0.0`), so both forms are derived here rather
+      # than typed anywhere — and on a tag run the two are made to agree, which is what
+      # catches a `v1.1` pushed over a tree that still says 1.0.0.
+      - name: Version
+        run: |
+          VER=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          [ -n "$VER" ] || { echo "no version in Cargo.toml" >&2; exit 1; }
+          echo "VER=$VER"       >> "$GITHUB_ENV"
+          echo "SHORT=${VER%.*}" >> "$GITHUB_ENV"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v${VER%.*}" ]; then
+            echo "tag $GITHUB_REF_NAME does not match Cargo.toml's $VER" >&2
+            exit 1
+          fi
+
       # The same remap the PKGBUILD's build() does, and for the same reason: panic locations
       # carry the paths a binary was compiled in, `strip` does not remove them, and nothing
       # warns about it. The Arch package would otherwise be path-clean while the .deb was not
@@ -92,6 +139,12 @@ jobs:
       - name: Set build flags
         run: |
           echo "RUSTFLAGS=--remap-path-prefix=$PWD=/usr/src/debug/indium --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}/registry=/usr/src/debug/indium/registry" >> "$GITHUB_ENV"
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Build
         run: cargo build --release
@@ -108,11 +161,165 @@ jobs:
       - name: Build .deb
         run: ./build/package/make-deb.sh target/release/indium
 
+      # A first pass, inside the container that built the binary. It cannot see the Arch
+      # package and will say SKIP where that is the subject; the verify job below is where
+      # the two are judged against each other. Running it here anyway means a broken .deb
+      # fails in the job that made it, next to the log that explains it.
       - name: Verify .deb
         run: ./build/package/verify.sh
+
+      # CORE §8 ships two packages; the tarball is not a third package but the same binary
+      # with no packaging at all, for the machines neither package fits. `-C target/release`
+      # so the archive holds `indium` and not a path.
+      - name: Tarball
+        run: tar czf "indium-${SHORT}-x86_64.tar.gz" -C target/release indium
 
       - uses: actions/upload-artifact@v4
         with:
           name: indium-deb
           path: build/package/out/*.deb
           if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: indium-tar
+          path: indium-*-x86_64.tar.gz
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # The Arch package.
+  # ---------------------------------------------------------------------------
+  arch:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+
+    steps:
+      # base-devel carries binutils, fakeroot, pkgconf and sudo; it does not carry git,
+      # and actions/checkout runs inside this container. `rust` is the makedepend that
+      # matters. The six runtime depends are installed too, so `makepkg` finds them
+      # already present and never has to call `pacman -S` as a user that is not root.
+      - name: Install build tools
+        run: |
+          pacman -Syu --noconfirm --needed \
+            git rust libarchive wayland libxkbcommon libglvnd
+
+      - uses: actions/checkout@v4
+
+      - name: Trust the checkout
+        run: git config --global --add safe.directory "$PWD"
+
+      - name: Version
+        run: |
+          VER=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          [ -n "$VER" ] || { echo "no version in Cargo.toml" >&2; exit 1; }
+          echo "VER=$VER"        >> "$GITHUB_ENV"
+          echo "SHORT=${VER%.*}" >> "$GITHUB_ENV"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v${VER%.*}" ]; then
+            echo "tag $GITHUB_REF_NAME does not match Cargo.toml's $VER" >&2
+            exit 1
+          fi
+
+      # The PKGBUILD's `source=` is nailed to `#tag=v1.0`, and deliberately: a package is
+      # built from what GitHub holds under a name that cannot move, never from a working
+      # tree. That leaves the rehearsal with nothing to build — on a dispatch the tag does
+      # not exist yet, which is the entire point of dispatching.
+      #
+      # So the fragment is rewritten here, and only the fragment: a tag run builds the tag
+      # it was triggered by, a dispatch builds the commit it was triggered on. Both are
+      # immutable names for exact content, both are fetched from GitHub over the network,
+      # and the rehearsal therefore exercises the same clone, the same build(), the same
+      # check() and the same package() as the release. The line is printed afterwards so
+      # the log says which of the two happened rather than leaving it to be inferred.
+      - name: Point the PKGBUILD at this run
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            frag="tag=$GITHUB_REF_NAME"
+          else
+            frag="commit=$GITHUB_SHA"
+          fi
+          sed -i "s|#tag=[^\"]*|#$frag|" build/package/PKGBUILD
+          grep -n '^source=' build/package/PKGBUILD
+
+      # makepkg refuses to run as root and is right to: build() and check() run arbitrary
+      # code from the PKGBUILD, and fakeroot exists so that package() can write root-owned
+      # files without any of the rest of it being root. The container starts as root, so a
+      # user has to be made for it.
+      - name: Build the package
+        run: |
+          useradd -m builder
+          chown -R builder:builder "$PWD"
+          su builder -c 'cd build/package && makepkg -f --noconfirm'
+
+      - name: Show what was built
+        run: ls -l build/package/*.pkg.tar.zst
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: indium-pkg
+          path: build/package/*.pkg.tar.zst
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Both packages, together, judged against each other.
+  # ---------------------------------------------------------------------------
+  verify:
+    runs-on: ubuntu-latest
+    needs: [deb, arch]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # libarchive-dev is here to build INDIUM's own reader, which is what reads the
+      # packages; the rest are what verify.sh reaches for. Its `need` helper counts a
+      # missing tool as a FAIL and not a SKIP, so a thin runner would fail a sound
+      # package — every tool it can ask for is installed.
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libarchive-dev libarchive-tools \
+            desktop-file-utils binutils file
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artefacts
+
+      - name: Version
+        run: |
+          VER=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          echo "VER=$VER"        >> "$GITHUB_ENV"
+          echo "SHORT=${VER%.*}" >> "$GITHUB_ENV"
+
+      # The tarball holds the same binary the .deb wraps, so unpacking it into the place
+      # the tree would have built one lets verify.sh run its ELF checks and CORE §2's
+      # toolkit gate against the binary that actually ships. Without this those two checks
+      # would SKIP, and a skip proves nothing.
+      - name: Put the shipped binary where the checks look
+        run: |
+          mkdir -p target/release
+          tar xzf "artefacts/indium-tar/indium-${SHORT}-x86_64.tar.gz" -C target/release
+          chmod +x target/release/indium
+          ls -l target/release/indium
+
+      - name: Locate the artefacts
+        run: |
+          pkg=$(ls artefacts/indium-pkg/*.pkg.tar.zst)
+          deb=$(ls artefacts/indium-deb/*.deb)
+          echo "INDIUM_PKG=$PWD/$pkg" >> "$GITHUB_ENV"
+          echo "INDIUM_DEB=$PWD/$deb" >> "$GITHUB_ENV"
+
+      - name: Verify both packages
+        run: ./build/package/verify.sh
+
+      # `--test package_path` and not a bare `cargo test -- --ignored`, which would also
+      # run src/platform/clipboard.rs's ignored test — that one wants a live Wayland
+      # session and wl-paste, neither of which a runner has, and it would fail here for a
+      # reason that has nothing to do with the packages. package_path.rs says the same
+      # command in its own header.
+      #
+      # This is the strongest thing in the workflow: INDIUM's own reader opens both
+      # packages and asserts they put identical files under usr/, differing only where
+      # Arch and Debian each command their own paperwork, and that neither desktop entry
+      # so much as mentions RAR.
+      - name: The packages, read by INDIUM itself
+        run: cargo test --test package_path -- --ignored

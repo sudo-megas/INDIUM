@@ -17,18 +17,23 @@ icon-size list in the tree and no way for a package and a dev install to drift a
 
 ## The one thing to know first
 
-**The shippable `.deb`'s binary is not built here.** This is an Arch machine and its
-glibc floor is too high to be a Debian build host. The release binary's dynamic imports
-reach `GLIBC_2.43` — `acosf` and `atan2f`, versioned by the local glibc 2.44 — and Debian
-bookworm ships 2.36. A `.deb` built from an Arch-compiled binary installs and then
-refuses to start.
+**Nothing that ships is built on the maker's machine.** From P8 onward
+`.github/workflows/release.yml` builds all three release artefacts in containers — the
+`.deb` in `debian:bookworm`, the `.pkg.tar.zst` in `archlinux:base-devel`, and the plain
+tarball off the same binary the `.deb` wraps. Everything below still works by hand and is
+the right way to test a change to this directory; the result is not a release artefact.
 
-So the `.deb` that reaches users is built by `.github/workflows/release.yml` inside a
-`debian:bookworm` container, and `make-deb.sh` takes the binary as an argument precisely
-so it does not care where that binary came from. Running it locally is a legitimate way
-to test the packaging; the result is not a release artefact.
+The `.deb` had to move first, and for a reason that has nothing to do with tidiness. This
+is an Arch machine and its glibc floor is too high to be a Debian build host: the release
+binary's dynamic imports reach `GLIBC_2.43` — `acosf` and `atan2f`, versioned by the local
+glibc 2.44 — and Debian bookworm ships 2.36. A `.deb` built from an Arch-compiled binary
+installs and then refuses to start. `make-deb.sh` takes the binary as an argument
+precisely so it does not care where that binary came from.
 
-The `.pkg.tar.zst` has no such problem — an Arch package built on Arch is exactly right.
+The `.pkg.tar.zst` never had that problem — an Arch package built on Arch is exactly
+right, and `makepkg` inside `archlinux:base-devel` is the same `makepkg`. It moved for the
+other reason: a machine is a variable and a container is a written-down constant, so the
+workflow file is now the whole provenance of every byte a user receives.
 
 ## By hand
 
@@ -39,10 +44,24 @@ The `.pkg.tar.zst` has no such problem — an Arch package built on Arch is exac
 ```
 
 `makepkg` clones the tag named in `source=`, so the tag has to be pushed before this
-works — a release is built from what GitHub has, never from uncommitted local state.
+works — a release is built from what GitHub has, never from uncommitted local state. The
+workflow's `arch` job rewrites that fragment to the commit it was dispatched on, and only
+on a dispatch, so a rehearsal has something to build before the tag exists; a tag run
+builds the tag.
+
 `makepkg` also runs `check()`, which is `cargo test` and `build/check-deps.sh`: CORE §2's
 toolkit gate fails the build before there is anything to install, so no package can be
 produced from a binary that grew GTK.
+
+## Both at once
+
+`verify.sh` takes `INDIUM_PKG` and `INDIUM_DEB` so it can judge artefacts built somewhere
+other than this tree, and the workflow's third job is the first place both packages have
+ever existed at the same moment. That is where the assertions worth the most are made —
+`tests/package_path.rs`, run with `cargo test --test package_path -- --ignored`, opens
+both packages *with INDIUM's own reader* and holds them to putting identical files under
+`usr/`, differing only where Arch and Debian each command their own paperwork, and to
+neither desktop entry so much as mentioning RAR.
 
 `PKGEXT='.pkg.tar.zst'` is already the stock makepkg default, and nothing here overrides
 it. The format CORE §8 names is what an untouched machine already produces.
