@@ -6,6 +6,8 @@ The stated ambition of this program is to be one of the most verbose archiver ap
 in the industry. Every other archiver on this platform treats an archive's contents as a
 name column and hides the rest behind a Properties dialog.
 
+![INDIUM with an archive open: the sidebar, the entry table, and the permanent Inspector showing the archive card.](build/screenshot.png)
+
 ## What it is
 
 INDIUM is written in Rust and drawn with egui. The Inspector is a permanent pane on the
@@ -181,6 +183,12 @@ Encrypted zip and 7z entries are read after a password prompt, asked at the mome
 | LZMA2 | `.7z` — the only road to AES-256 |
 | Deflate | `.zip` |
 
+![The New Archive popup: four presets, every method carrying its one-sentence verdict, and a line at the foot stating exactly what will be built.](build/screenshot-new.png)
+
+Every method carries its verdict in the window itself, so the choice is made with the
+trade-off in front of you rather than from memory. The sentence at the foot states exactly
+what will be built before anything is.
+
 Encryption is **7z AES-256 and nothing else.** There is no zip encryption. CORE §5's write
 sentence names the five tar filters and omits the plain uncompressed tar its own method
 table lists; the program writes it, so it is in the table above.
@@ -216,6 +224,11 @@ ACE is absent for the same family of reasons and its security history.
 | `Ctrl+O` | Open (path field) |
 | `Esc` | Close the topmost popup |
 
+![The Extract popup: extract here, extract to a named subdirectory, or a path field with tab completion. Enter extracts, Esc closes.](build/screenshot-extract.png)
+
+Every popup says what the keys do at the point they do it, which is why the keyboard table
+above is a summary rather than something to learn first.
+
 Bare letters are shortcuts, which is why there is deliberately no type-to-jump in the
 table and why every bare letter is suppressed while a text field has focus. No modal
 editing, no `hjkl`, no `:` commands — anywhere, ever.
@@ -237,6 +250,11 @@ hand rather than derived, and where items enter and leave the same way.
 
 **GPL-3.0-only.** The full text is in `LICENSE`, and it is readable inside the program
 itself, from About.
+
+![The About popup: the mark, the version and date, the maker, the licence, the source address, and the GPL in full.](build/screenshot-about.png)
+
+The source address there is text you can select and copy. INDIUM opens no browser and
+follows no link, which is why it is not a button.
 
 JetBrains Mono NL is under the SIL Open Font Licence 1.1, in `LICENSES/`.
 
