@@ -437,15 +437,19 @@ fn deb_data_is_root_owned_with_sane_modes() {
 /// Only `usr/` is compared: pacman's `.PKGINFO` and Debian's control member are each
 /// their own system's bookkeeping, and neither lands on a machine.
 ///
-/// **Deviation.** P6 asked for the set of paths under `usr/` to be *identical*, full stop.
-/// It cannot be, and should not be: Arch puts a package's licences in
-/// `/usr/share/licenses/$pkgname/` and Debian Policy demands `/usr/share/doc/indium/`
-/// hold a copyright file (§12.5) and a gzipped changelog (§12.7), at those exact paths. A
-/// package obeying only the other system's convention is broken on its own. So the two
-/// paperwork directories are cut out of the comparison — and then asserted, both ways
-/// round, so the exception is pinned rather than left as a hole to grow in. What the test
-/// claims in the end is stronger than a set comparison: **the packages differ exactly
-/// where their distributions command them to, and nowhere else at all.**
+/// **Deviation.** P6 §8 asks for the two payloads to be "set-identical under `usr/`",
+/// full stop. They cannot be, and P6 itself is why: §3 sends both licences to
+/// `/usr/share/licenses/indium/` because that is where Arch keeps them, and §4 writes
+/// `/usr/share/doc/indium/copyright` and `changelog.Debian.gz` because Debian Policy
+/// §12.5 and §12.7 require exactly those paths. A package obeying only the other system's
+/// convention is a broken package on its own system, so neither is removable and literal
+/// identity was never available.
+///
+/// The two paperwork directories are therefore cut out of the comparison — and then
+/// asserted, both ways round, so the exception is pinned rather than left as a hole to
+/// grow in. What the test claims in the end is stronger than the set comparison §8 asked
+/// for: **the packages differ exactly where their distributions command them to, and
+/// nowhere else at all.**
 #[test]
 #[ignore = "needs both packages: makepkg -f in build/package/, and make-deb.sh for the .deb"]
 fn deb_and_pkg_ship_the_same_payload() {
