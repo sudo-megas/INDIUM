@@ -10,8 +10,9 @@
 //!
 //! Two honesty notes live here, because CORE §4 requires them stated rather than
 //! discovered: libarchive exposes no *stored* CRC, so INDIUM computes one on demand
-//! and labels it computed; and it exposes no per-entry compressed size, so Packed
-//! reads "—" until `sevenz-rust2` arrives in P4.
+//! and labels it computed; and libarchive exposes no per-entry compressed size at all,
+//! so Packed reads "—" for everything it reads. A 7z is read by `sevenz-rust2` instead,
+//! which reports a packed size wherever an entry owns its compression block outright.
 
 use eframe::egui;
 
@@ -155,9 +156,18 @@ fn entry_card(app: &mut Indium, ui: &mut egui::Ui, e: &Entry) {
     });
 
     if e.packed.is_none() && !e.is_dir {
+        // Two different absences, and they are not the same fact. A 7z member that
+        // shares its compression block genuinely has no packed size of its own — the
+        // block's total belongs to no single member of it. Everything else is simply
+        // libarchive not exposing one.
         note(
             ui,
-            "libarchive reports no per-entry compressed size. 7z detail arrives in P4.",
+            if app.archive_info.as_ref().and_then(|i| i.solid) == Some(true) {
+                "This entry shares a compression block, so no packed size belongs to it \
+                 alone. The archive card reports the block count."
+            } else {
+                "libarchive reports no per-entry compressed size."
+            },
         );
     }
 
@@ -337,6 +347,19 @@ fn archive_card(app: &Indium, ui: &mut egui::Ui) {
             field(ui, "Format", &info.format);
             if !info.filter.is_empty() && info.filter != "none" {
                 field(ui, "Filter", &info.filter);
+            }
+            // CORE §4's solid-block detail. It belongs to the archive rather than to an
+            // entry — which is exactly why a member of a shared block has no packed size
+            // of its own to show.
+            if let Some(solid) = info.solid {
+                field(ui, "Solid", if solid { "yes" } else { "no" });
+            }
+            if let Some(blocks) = info.blocks {
+                field(
+                    ui,
+                    "Blocks",
+                    &format!("{blocks} {}", if blocks == 1 { "block" } else { "blocks" }),
+                );
             }
         }
         field(ui, "Entries", &agg.count.to_string());

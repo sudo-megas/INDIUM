@@ -151,7 +151,8 @@ fn packed_size_is_absent_rather_than_guessed() {
     let entries = arch::list_all(&fixture("basic.zip"), None).expect("listed");
     assert!(
         entries.iter().all(|e| e.packed.is_none()),
-        "libarchive exposes no per-entry compressed size; it must stay None until P4"
+        "libarchive exposes no per-entry compressed size, and the Inspector must not \
+         invent one. A 7z reports one where an entry owns its block; a zip never does."
     );
 }
 
@@ -477,4 +478,142 @@ fn encrypted_headers_list_with_the_passphrase_and_refuse_without_it() {
     assert_eq!(entries.len(), 1, "the fixture holds one member");
     assert_eq!(entries[0].path, "f.txt");
     assert!(entries[0].encrypted, "its block is AES-256");
+}
+
+// ---------------------------------------------------------------------------
+// The streaming list — P5 §A1
+//
+// `arch::list_all` is what the tests reach for and `arch::list` is what the window
+// actually runs. They routed 7z differently until P5, so everything sevenz-rust2 knew
+// reached this file and never reached a user. These tests drive the streaming path
+// specifically, because that is the one that was wrong.
+// ---------------------------------------------------------------------------
+
+/// Collect a streaming listing the way `Indium::drain_worker` does.
+fn stream(
+    path: &Path,
+    passphrase: Option<&Secret>,
+) -> Result<(arch::ArchiveInfo, Vec<Entry>), ArchiveError> {
+    use indium::arch::ListMsg;
+    let (tx, rx) = std::sync::mpsc::channel();
+    arch::list(path, passphrase, &tx, &no_cancel());
+    drop(tx);
+
+    let mut info = arch::ArchiveInfo::default();
+    let mut entries = Vec::new();
+    for msg in rx {
+        match msg {
+            ListMsg::Opened(i) => info = i,
+            ListMsg::Entry(e) => entries.push(*e),
+            ListMsg::Done { .. } => {}
+            ListMsg::Failed(e) => return Err(e),
+        }
+    }
+    Ok((info, entries))
+}
+
+/// P5 §A1. The discriminating assertion is the **method**, not the packed size:
+/// `basic.7z` is solid, so packed is `None` under either routing and an assertion on it
+/// would have passed while the bug was still there.
+#[test]
+fn the_streaming_list_names_the_coder_a_7z_actually_uses() {
+    let (_, entries) = stream(&fixture("basic.7z"), None).expect("basic.7z must list");
+    assert_eq!(
+        find(&entries, "alpha.txt").method,
+        "LZMA",
+        "the streaming list must route 7z through sevenz-rust2, which names the coder; \
+         libarchive would say \"7z\" and know nothing of the block"
+    );
+}
+
+/// CORE §4's solid-block detail, reaching the window at last rather than only a test.
+#[test]
+fn a_solid_archive_reports_itself_solid_through_the_streaming_list() {
+    let (info, _) = stream(&fixture("basic.7z"), None).expect("basic.7z must list");
+    assert_eq!(
+        info.solid,
+        Some(true),
+        "basic.7z is one block holding three files"
+    );
+    assert_eq!(info.blocks, Some(1));
+
+    // Everything libarchive reads has no block structure to report, and must not invent
+    // one rather than leaving it unknown.
+    let (zip, _) = stream(&fixture("basic.zip"), None).expect("basic.zip must list");
+    assert_eq!(zip.solid, None, "a zip has no blocks to be solid about");
+    assert_eq!(zip.blocks, None);
+}
+
+/// P2 §6's requirement, through the path the window actually uses. Until P5 this failed:
+/// `open_archive` runs the streaming list, which went straight to libarchive.
+#[test]
+fn an_encrypted_header_7z_opens_through_the_streaming_list() {
+    let path = fixture("secret-headers.7z");
+
+    let err = stream(&path, None).expect_err("without the password there is nothing to show");
+    assert!(
+        matches!(
+            err,
+            ArchiveError::NeedPassword
+                | ArchiveError::WrongPassword
+                | ArchiveError::EncryptedHeaders
+        ),
+        "the error must be one the window turns into a prompt, not a dead end: {err:?}"
+    );
+
+    let (_, entries) =
+        stream(&path, Some(&Secret::from_text("indium"))).expect("with the password it must list");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].path, "f.txt");
+    assert_eq!(
+        entries[0].packed,
+        Some(48),
+        "f.txt owns its block outright, so its packed size is knowable"
+    );
+}
+
+/// P5 §A1b. P4 §4 promised libarchive-first-then-sevenz for data and never built it;
+/// making an encrypted-header archive listable is what turned that from latent into a
+/// user-visible hole. The payload is recorded in `tests/fixtures/README.md`.
+#[test]
+fn an_encrypted_header_7z_entry_can_be_read_after_the_prompt() {
+    let path = fixture("secret-headers.7z");
+    let secret = Secret::from_text("indium");
+    const PAYLOAD: &[u8] = b"INDIUM header-encrypted payload\n";
+
+    let got = arch::crc32_of(&path, "f.txt", Some(&secret))
+        .expect("an archive that lists must also be readable");
+    assert_eq!(
+        got,
+        util::crc32(PAYLOAD),
+        "the bytes must be the payload the fixtures README records"
+    );
+
+    assert!(
+        arch::crc32_of(&path, "f.txt", None).is_err(),
+        "and without the password it must still refuse"
+    );
+}
+
+/// The third read path. An archive that lists must also extract, or listing it was a
+/// promise INDIUM could not keep.
+#[test]
+fn an_encrypted_header_7z_extracts_after_the_prompt() {
+    let dir = TempDir::new("hdr7z");
+    let n = arch::extract(
+        &fixture("secret-headers.7z"),
+        &wanted(&["f.txt"]),
+        dir.path(),
+        Some(&Secret::from_text("indium")),
+        None,
+        &no_cancel(),
+    )
+    .expect("an archive that lists must also extract");
+
+    assert_eq!(n, 1);
+    assert_eq!(
+        std::fs::read(dir.path().join("f.txt")).expect("f.txt must be on disk"),
+        b"INDIUM header-encrypted payload\n",
+        "the bytes must be the payload the fixtures README records"
+    );
 }

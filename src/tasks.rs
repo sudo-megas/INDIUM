@@ -1928,6 +1928,8 @@ mod tests {
             let info = ArchiveInfo {
                 format: format.to_string(),
                 filter: filter.to_string(),
+                solid: None,
+                blocks: None,
             };
             let got = Recipe::from_info(&info, Path::new("/tmp/a"), false).map(|r| r.method);
             assert_eq!(got, want, "{format} / {filter}");

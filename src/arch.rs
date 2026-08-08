@@ -341,6 +341,15 @@ pub struct Reader {
 pub struct ArchiveInfo {
     pub format: String,
     pub filter: String,
+    /// Whether the archive shares compression blocks between members.
+    ///
+    /// CORE §4 promised this in P4 and it was written and never shown. It belongs to the
+    /// archive rather than to an entry — which is exactly *why* an entry's packed size so
+    /// often cannot be given. `None` for every format but 7z, because no other reader
+    /// exposes it.
+    pub solid: Option<bool>,
+    /// How many compression blocks the archive holds. `None` outside 7z.
+    pub blocks: Option<usize>,
 }
 
 /// Why an open or a listing failed, when the reason is actionable.
@@ -449,6 +458,9 @@ impl Reader {
             ArchiveInfo {
                 format: cstr_to_string(archive_format_name(self.raw)).unwrap_or_default(),
                 filter: cstr_to_string(archive_filter_name(self.raw, 0)).unwrap_or_default(),
+                // libarchive knows nothing of blocks; only the 7z reader fills these.
+                solid: None,
+                blocks: None,
             }
         }
     }
@@ -590,6 +602,40 @@ pub fn list(
     tx: &Sender<ListMsg>,
     cancel: &Arc<AtomicBool>,
 ) {
+    // A 7z takes the same route here that `list_all` takes, or everything
+    // `sevenz-rust2` knows — packed sizes, the real coder, an encrypted-header archive
+    // that libarchive will not open at all — would reach the tests and never the window.
+    // 7z headers do not parse incrementally, so the entries arrive in one go and are
+    // then sent one at a time; the channel shape the UI drains is unchanged.
+    if looks_like_7z(path) {
+        match crate::sevenz::list_all(path, passphrase) {
+            Ok(entries) => {
+                let _ = tx.send(ListMsg::Opened(crate::sevenz::info_of(path, passphrase)));
+                let count = entries.len();
+                for entry in entries {
+                    if cancel.load(Ordering::Relaxed) {
+                        let _ = tx.send(ListMsg::Done { count });
+                        return;
+                    }
+                    if tx.send(ListMsg::Entry(Box::new(entry))).is_err() {
+                        return; // the UI went away
+                    }
+                }
+                let _ = tx.send(ListMsg::Done { count });
+                return;
+            }
+            // A password problem belongs to the caller — the window turns it into a
+            // prompt. Falling through to libarchive would replace it with a vaguer
+            // error, or with an empty listing, which is worse.
+            Err(e @ (ArchiveError::NeedPassword | ArchiveError::WrongPassword)) => {
+                let _ = tx.send(ListMsg::Failed(e));
+                return;
+            }
+            // Anything else and libarchive gets its ordinary turn; nothing is lost.
+            Err(_) => {}
+        }
+    }
+
     let mut reader = match Reader::open(path, passphrase) {
         Ok(r) => r,
         Err(e) => {
@@ -762,17 +808,64 @@ pub fn extract(
         }
     }
 
+    // Does libarchive refuse this archive's headers outright? If so the 7z reader owns
+    // both the verification and the data, and asking libarchive to check the password
+    // would fail for a reason that has nothing to do with the password being wrong.
+    let headers_need_sevenz =
+        looks_like_7z(path) && Reader::open(path, passphrase)?.next_entry().is_err();
+
     if selected.iter().any(|e| e.encrypted) {
         match passphrase {
             None => return Err(ArchiveError::NeedPassword),
             Some(secret) => {
-                if !verify_passphrase(path, secret)? {
+                // The listing above already succeeded, and an encrypted-header archive
+                // cannot be parsed at all without the right password — so reaching this
+                // line *is* the verification, and a second one through a reader that
+                // cannot open the file would only ever report a false failure.
+                if !headers_need_sevenz && !verify_passphrase(path, secret)? {
                     return Err(ArchiveError::WrongPassword);
                 }
             }
         }
     }
     // ---- Pre-flight over. ----
+
+    // P5 §A1b, the third read path. An encrypted-header 7z lists through `sevenz` and
+    // libarchive cannot read a byte of it, so extraction routes there too rather than
+    // leaving an archive that opens and then refuses to give anything up. The guards
+    // above are untouched — the decoder changes where the bytes come from, never what is
+    // allowed to be written.
+    if headers_need_sevenz {
+        let mut written = 0usize;
+        for entry in &selected {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            let target = dest.join(&entry.raw_path);
+            if entry.is_dir {
+                std::fs::create_dir_all(&target).map_err(|e| {
+                    ArchiveError::Other(format!("could not create {target:?}: {e}"))
+                })?;
+                continue;
+            }
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    ArchiveError::Other(format!("could not create {parent:?}: {e}"))
+                })?;
+            }
+            let (bytes, _) = crate::sevenz::read_entry(path, &entry.path, usize::MAX, passphrase)?;
+            std::fs::write(&target, &bytes)
+                .map_err(|e| ArchiveError::Other(format!("could not write {target:?}: {e}")))?;
+            written += 1;
+            if let Some(tx) = tx {
+                let _ = tx.send(ExtractMsg::Progress {
+                    done: written,
+                    total: selected.len(),
+                });
+            }
+        }
+        return Ok(written);
+    }
 
     let mut reader = Reader::open(path, passphrase)?;
     let total = selected.len();
@@ -847,6 +940,28 @@ pub fn extract(
 /// CORE §4: libarchive does not expose an entry's *stored* CRC, so INDIUM computes it
 /// on demand and the Inspector labels the value *computed*.
 pub fn crc32_of(
+    path: &Path,
+    entry_path: &str,
+    passphrase: Option<&Secret>,
+) -> Result<u32, ArchiveError> {
+    // P5 §A1b: libarchive first, and the 7z reader only where libarchive refuses. That
+    // is what P4 §4 promised and did not build, and it became reachable the moment an
+    // encrypted-header archive could be listed — such an archive would otherwise open,
+    // list, and then refuse every read.
+    //
+    // The refusal does not come from `Reader::open`, which succeeds: opening the *file*
+    // is fine, and it is the first header that libarchive cannot decrypt. So the
+    // fallback is keyed on the error the read actually produces.
+    match crc32_via_libarchive(path, entry_path, passphrase) {
+        Err(ArchiveError::EncryptedHeaders) if looks_like_7z(path) => {
+            let (bytes, _) = crate::sevenz::read_entry(path, entry_path, usize::MAX, passphrase)?;
+            Ok(util::crc32(&bytes))
+        }
+        other => other,
+    }
+}
+
+fn crc32_via_libarchive(
     path: &Path,
     entry_path: &str,
     passphrase: Option<&Secret>,

@@ -15,11 +15,11 @@ use std::path::Path;
 
 use sevenz_rust2::encoder_options::{AesEncoderOptions, Lzma2Options};
 use sevenz_rust2::{
-    Archive, ArchiveEntry as SevenZEntry, ArchiveWriter, EncoderConfiguration, EncoderMethod,
-    Password,
+    Archive, ArchiveEntry as SevenZEntry, ArchiveWriter, BlockDecoder, EncoderConfiguration,
+    EncoderMethod, Password,
 };
 
-use crate::arch::{ArchiveError, Entry};
+use crate::arch::{ArchiveError, ArchiveInfo, Entry};
 use crate::secret::Secret;
 use crate::tasks::{Meta, Recipe, Sink};
 use crate::util::normalize_archive_path;
@@ -97,6 +97,27 @@ pub fn solid_info(path: &Path, passphrase: Option<&Secret>) -> Option<(bool, usi
     let password = password_of(passphrase);
     let archive = Archive::open_with_password(path, &password).ok()?;
     Some((archive.is_solid, archive.blocks.len()))
+}
+
+/// What a 7z reports about itself, in the shape the rest of the program consumes.
+///
+/// libarchive names the container and its filter; only this reader can say whether the
+/// archive is solid and how many blocks it holds, so those two arrive here and nowhere
+/// else. The format string is written to read as libarchive's does, because the status
+/// bar and the archive card show it beside formats libarchive named.
+pub fn info_of(path: &Path, passphrase: Option<&Secret>) -> ArchiveInfo {
+    let (solid, blocks) = match solid_info(path, passphrase) {
+        Some((s, b)) => (Some(s), Some(b)),
+        None => (None, None),
+    };
+    ArchiveInfo {
+        format: "7-Zip".to_string(),
+        // A 7z carries its compression inside the container rather than as an outer
+        // filter, so there is no filter to name — the Method column carries the coder.
+        filter: String::new(),
+        solid,
+        blocks,
+    }
 }
 
 /// Map a parsed 7z onto INDIUM's own `Entry`, so the rest of the program never learns
@@ -343,6 +364,78 @@ impl Sink for Writer {
         // file cannot be mistaken for a complete archive. Apply removes it either way.
         self.inner = None;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Reading data — P5 §A1b
+// ---------------------------------------------------------------------------
+
+/// Read one entry's bytes out of a 7z.
+///
+/// P4 §4 promised this — *"Data … goes to libarchive first, and to `sevenz` only where
+/// libarchive refuses"* — and did not build it. Nothing noticed, because until P5 the
+/// window could not open an encrypted-header archive at all. Now that it can, an archive
+/// that lists and then refuses every read would be a worse state than not opening.
+///
+/// `cap` bounds the read: an archive is untrusted input, and a caller that wants a
+/// preview must not be handed four gigabytes. The `bool` is true when the entry was
+/// longer than the cap and the read stopped early.
+pub fn read_entry(
+    path: &Path,
+    entry_path: &str,
+    cap: usize,
+    passphrase: Option<&Secret>,
+) -> Result<(Vec<u8>, bool), ArchiveError> {
+    use std::io::Read as _;
+
+    let password = password_of(passphrase);
+    let mut source = std::fs::File::open(path)
+        .map_err(|e| ArchiveError::Other(format!("could not open the archive: {e}")))?;
+    let archive = Archive::read(&mut source, &password).map_err(classify)?;
+
+    // Which block holds it, so the other blocks are never decoded at all.
+    let wanted = archive
+        .files
+        .iter()
+        .position(|f| normalize_archive_path(&f.name) == entry_path)
+        .ok_or_else(|| ArchiveError::Other(format!("no such entry: {entry_path}")))?;
+    let Some(block) = archive
+        .stream_map
+        .file_block_index
+        .get(wanted)
+        .copied()
+        .flatten()
+    else {
+        // A directory or an empty file has no data stream, and that is not an error.
+        return Ok((Vec::new(), false));
+    };
+
+    let name = archive.files[wanted].name.clone();
+    let mut out = Vec::new();
+    let mut truncated = false;
+    let mut found = false;
+
+    let decoder = BlockDecoder::new(1, block, &archive, &password, &mut source);
+    decoder
+        .for_each_entries(&mut |entry, reader| {
+            if entry.name != name {
+                // A solid block is one sequential stream, so a member before the one we
+                // want has to be read through rather than skipped over.
+                std::io::copy(reader, &mut std::io::sink())?;
+                return Ok(true);
+            }
+            found = true;
+            let mut limited = reader.take(cap as u64);
+            limited.read_to_end(&mut out)?;
+            truncated = out.len() >= cap;
+            Ok(false) // stop; nothing after this one needs decoding
+        })
+        .map_err(classify)?;
+
+    if !found {
+        return Err(ArchiveError::Other(format!("no such entry: {entry_path}")));
+    }
+    Ok((out, truncated))
 }
 
 #[cfg(test)]

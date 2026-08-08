@@ -449,10 +449,19 @@ impl Indium {
 
     fn on_list_failure(&mut self, e: ArchiveError) {
         match e {
-            ArchiveError::EncryptedHeaders => {
-                // P2 §5, the encrypted-headers flow: prompt and reopen.
+            // P2 §5, the encrypted-headers flow: prompt and reopen.
+            //
+            // All three variants land here because the answer is the same — ask. Which
+            // one arrives depends on which reader refused: libarchive says
+            // `EncryptedHeaders`, and the 7z reader, which can actually open such an
+            // archive once it has the password, says `NeedPassword` or `WrongPassword`.
+            // Before P5 only the first was handled, so routing 7z through the streaming
+            // list would have failed to a status line with no prompt behind it.
+            ArchiveError::EncryptedHeaders
+            | ArchiveError::NeedPassword
+            | ArchiveError::WrongPassword => {
                 if let Some(p) = self.archive_path.clone() {
-                    self.status = ArchiveError::EncryptedHeaders.to_string();
+                    self.status = e.to_string();
                     self.pending = Some(PendingAction::List(p));
                     self.popup = Some(Popup::Password);
                     self.password_input.clear();
