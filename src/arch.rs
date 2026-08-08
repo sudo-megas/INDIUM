@@ -635,6 +635,16 @@ pub fn list(
 
 /// List into a `Vec`, for tests and for any caller that does not want a channel.
 pub fn list_all(path: &Path, passphrase: Option<&Secret>) -> Result<Vec<Entry>, ArchiveError> {
+    if let Some(entries) = list_7z(path, passphrase) {
+        return entries;
+    }
+    list_via_libarchive(path, passphrase)
+}
+
+fn list_via_libarchive(
+    path: &Path,
+    passphrase: Option<&Secret>,
+) -> Result<Vec<Entry>, ArchiveError> {
     let mut reader = Reader::open(path, passphrase)?;
     let mut out = Vec::new();
     while let Some(e) = reader.next_entry()? {
@@ -642,6 +652,42 @@ pub fn list_all(path: &Path, passphrase: Option<&Secret>) -> Result<Vec<Entry>, 
         reader.skip_data();
     }
     Ok(out)
+}
+
+/// The magic of a 7z, sniffed before either reader is asked to open the file.
+///
+/// Mirrors `looks_like_rar`, and for the same reason: the decision of which reader to
+/// use should not depend on first getting an error out of the wrong one.
+pub fn looks_like_7z(path: &Path) -> bool {
+    use std::io::Read as _;
+    let mut head = [0u8; 6];
+    match std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut head)) {
+        Ok(()) => head == [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C],
+        Err(_) => false,
+    }
+}
+
+/// P4 §4's routing: a 7z is **listed** through `sevenz-rust2`, because it alone can give
+/// per-entry packed sizes, solid-block detail, and a listing of an archive whose headers
+/// are encrypted. `None` means "not a 7z, or that reader could not parse it" — in which
+/// case libarchive gets its ordinary turn, and nothing is lost.
+///
+/// Data — extraction, CRC32, passphrase checks — deliberately does **not** route here.
+/// With this crate's default features off it carries no bzip2, ppmd, deflate or zstd
+/// decoder, so making it the sole 7z reader would be a read regression against CORE §5's
+/// promise to read everything libarchive reads.
+fn list_7z(path: &Path, passphrase: Option<&Secret>) -> Option<Result<Vec<Entry>, ArchiveError>> {
+    if !looks_like_7z(path) {
+        return None;
+    }
+    match crate::sevenz::list_all(path, passphrase) {
+        Ok(entries) => Some(Ok(entries)),
+        // A password problem is the caller's to hear about: falling through to
+        // libarchive would turn "wrong password" into a vaguer error, or into an empty
+        // listing, which is worse.
+        Err(e @ (ArchiveError::NeedPassword | ArchiveError::WrongPassword)) => Some(Err(e)),
+        Err(_) => None,
+    }
 }
 
 // ---------------------------------------------------------------------------

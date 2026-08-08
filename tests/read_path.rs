@@ -128,7 +128,13 @@ fn methods_are_reported_per_format() {
         ("basic.zip", "deflate"),
         ("basic.tar.gz", "gzip"),
         ("basic.tar.zst", "zstd"),
-        ("basic.7z", "7z"),
+        // Since P4 a 7z is listed through `sevenz-rust2`, which names the coder its
+        // block actually uses rather than the container. That is strictly more than
+        // libarchive's "7z" could say, and it is what CORE §4 meant by 7z-specific
+        // detail arriving in P4 — note this fixture is **LZMA**, not LZMA2, because
+        // `bsdtar --format 7zip` defaults to LZMA1. INDIUM writes LZMA2; it reads what
+        // is actually there, and says which.
+        ("basic.7z", "LZMA"),
     ];
     for (name, expect) in cases {
         let entries = arch::list_all(&fixture(name), None).expect("listed");
@@ -439,29 +445,36 @@ fn passwords_can_be_verified_without_writing() {
 
 /// `secret-headers.7z` — encrypted filenames.
 ///
-/// DEVIATION, recorded in P2's log: libarchive 3.8.9 returns "The archive header is
-/// encrypted, but currently not supported" from every `next_header`, with or without
-/// a passphrase. So P2 §6's "with the passphrase, lists and extracts" is not reachable
-/// from a pure-libarchive reader. What INDIUM *can* do — and what this test pins — is
-/// detect the situation and say so plainly instead of showing an empty archive.
+/// P2 §6 asked for "with the passphrase, lists and extracts" and could not have it:
+/// libarchive 3.8.9 answers every `next_header` with "The archive header is encrypted,
+/// but currently not supported", with or without a passphrase, which P2 recorded as its
+/// first Deviation. P4 routes 7z listing through `sevenz-rust2`, which parses encrypted
+/// headers natively — so **this test now pins the requirement rather than the excuse**,
+/// and the deviation it used to guard is closed.
 #[test]
-fn encrypted_headers_are_detected_and_reported_not_silently_empty() {
+fn encrypted_headers_list_with_the_passphrase_and_refuse_without_it() {
     let path = fixture("secret-headers.7z");
 
-    assert_eq!(
-        arch::has_encrypted_entries(&path),
-        Some(true),
-        "encrypted headers must be detectable"
+    let err = arch::list_all(&path, None)
+        .expect_err("without the password the names are ciphertext and must not be listed");
+    assert!(
+        matches!(
+            err,
+            ArchiveError::NeedPassword
+                | ArchiveError::WrongPassword
+                | ArchiveError::EncryptedHeaders
+                | ArchiveError::Other(_)
+        ),
+        "unexpected error {err:?}"
+    );
+    assert!(
+        !err.to_string().is_empty(),
+        "whatever the wording, it must never be silently empty"
     );
 
-    for attempt in [None, Some(Secret::from_text("indium"))] {
-        let err = arch::list_all(&path, attempt.as_ref())
-            .expect_err("libarchive cannot read encrypted 7z headers");
-        assert!(
-            matches!(err, ArchiveError::EncryptedHeaders | ArchiveError::Other(_)),
-            "unexpected error {err:?}"
-        );
-        // Whatever the wording, it must never be silently empty.
-        assert!(!err.to_string().is_empty());
-    }
+    let entries = arch::list_all(&path, Some(&Secret::from_text("indium")))
+        .expect("with the passphrase it must list — P2 §6, reachable at last");
+    assert_eq!(entries.len(), 1, "the fixture holds one member");
+    assert_eq!(entries[0].path, "f.txt");
+    assert!(entries[0].encrypted, "its block is AES-256");
 }

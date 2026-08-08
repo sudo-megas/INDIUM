@@ -809,7 +809,18 @@ pub struct Expected {
 
 impl Plan {
     /// The shape the rebuilt archive must have.
-    pub fn expected(&self, source: &[Entry], added: &[(String, u64)]) -> Expected {
+    ///
+    /// It must account for what the *target* format cannot carry, or verification asks
+    /// for a member the writer was never able to write. 7z stores no symlink and no
+    /// hardlink, so a symlink rebuilt into a 7z is legitimately absent — expecting it
+    /// would fail every such Apply, and the loss is the one `metadata_losses` already
+    /// warns about before the button is pressed.
+    pub fn expected(
+        &self,
+        source: &[Entry],
+        added: &[(String, u64)],
+        container: Container,
+    ) -> Expected {
         let mut paths = Vec::new();
         let mut sizes = BTreeMap::new();
 
@@ -817,6 +828,11 @@ impl Plan {
             let Disposition::Keep { out_path, .. } = disposition else {
                 continue;
             };
+            if let Some(entry) = source.get(i) {
+                if !container_keeps(container, entry) {
+                    continue;
+                }
+            }
             let normalised = normalize_archive_path(out_path);
             paths.push(normalised.clone());
             if let Some(entry) = source.get(i) {
@@ -843,6 +859,18 @@ impl Plan {
 /// would fail `meta.tar` for reasons that are not corruption.
 fn is_regular_file(entry: &Entry) -> bool {
     !entry.is_dir && entry.symlink.is_none() && entry.hardlink.is_none()
+}
+
+/// Will this member exist at all in the rebuilt archive?
+///
+/// The mirror of `metadata_losses`: what that sentence warns about, this one accounts
+/// for. 7z carries neither a symlink nor a hardlink, so its writer skips them, and
+/// verification must not then go looking for them.
+fn container_keeps(container: Container, entry: &Entry) -> bool {
+    match container {
+        Container::SevenZ => entry.symlink.is_none() && entry.hardlink.is_none(),
+        _ => true,
+    }
 }
 
 /// Walk the rebuilt archive's entries against what the plan promised.
@@ -955,13 +983,17 @@ pub fn metadata_losses(container: Container, entries: &[Entry]) -> Vec<String> {
         ));
     }
     if entries.iter().any(|e| e.hardlink.is_some()) {
-        out.push(format!(
-            "{} does not store hard links — they will be written as separate files.",
-            container_label(container)
-        ));
+        out.push(match container {
+            // 7z's writer skips a link outright rather than writing a body it has no
+            // way to point anywhere, so the member simply will not be there.
+            Container::SevenZ => {
+                "7z does not store hard links — they will not be kept.".to_string()
+            }
+            _ => "zip does not store hard links — they will not be kept.".to_string(),
+        });
     }
     if container == Container::SevenZ && entries.iter().any(|e| e.symlink.is_some()) {
-        out.push("7z does not store symbolic links in this version.".to_string());
+        out.push("7z does not store symbolic links — they will not be kept.".to_string());
     }
     out
 }
@@ -1065,7 +1097,17 @@ impl Lock {
 /// directories do not collide, and it is sanitised so it is always one flat filename.
 /// Pure, so the rule is testable without a runtime directory.
 pub fn lock_name_for(target: &Path) -> String {
-    let full = target.to_string_lossy();
+    // Canonicalised first, or the guard is trivially defeated by how the archive was
+    // named: `indium ./photos.7z` in one window and `indium /home/megas/photos.7z` in
+    // another would take two different locks on one file, and paths come straight from
+    // `std::env::args`, so the relative form is ordinary rather than exotic. This also
+    // gives the symlink case for free. A path that cannot be canonicalised — a new
+    // archive that does not exist yet — falls back to the name as given, which is
+    // correct: nothing else can be holding a lock on a file that is not there.
+    let resolved = target
+        .canonicalize()
+        .unwrap_or_else(|_| target.to_path_buf());
+    let full = resolved.to_string_lossy();
     let mut name = String::with_capacity(full.len() + 5);
     for ch in full.chars() {
         match ch {
@@ -1093,7 +1135,17 @@ pub struct ApplyInput {
     pub target: PathBuf,
     pub recipe: Recipe,
     pub tasks: Vec<Task>,
+    /// Adds already resolved to individual members. A directory staged by `Task::Add`
+    /// is expanded by Apply itself, so a caller may leave this empty; it exists for a
+    /// caller that has already walked the tree.
     pub adds: Vec<AddItem>,
+    /// The normalised paths the queue was staged against.
+    ///
+    /// Apply re-lists the source and refuses if this no longer matches — the archive can
+    /// change on disk between staging and Apply, and a queue folded against a listing
+    /// that is no longer true would rebuild the wrong thing. Empty means "do not check",
+    /// which is right for a creation and for a caller with nothing staged.
+    pub staged_against: Vec<String>,
     /// The password the source was read with, if it was encrypted.
     pub source_password: Option<Secret>,
     /// The password the rebuilt archive is encrypted with, if it is.
@@ -1133,8 +1185,47 @@ pub fn apply(
             .map_err(|e| e.to_string())?
     };
 
+    // The two refusals P4 §1 states, checked here as well as at stage time. The UI gate
+    // is the convenience; this is the guard. Without it an `ApplyInput` naming an
+    // encrypted source and an unencrypted recipe would stream decrypted members into a
+    // plaintext archive — the silent security downgrade §1 exists to forbid — and the
+    // only thing standing in the way would be a window that had not been written yet.
+    if source.iter().any(|e| e.encrypted) && !input.recipe.encrypt {
+        return Err(Conflict::EncryptedSourceCannotBeRewritten.to_string());
+    }
+    if input.recipe.container() == Container::Tar && input.recipe.method == Method::Lzma2 {
+        return Err(Conflict::FormatCannotBeWritten("this archive".to_string()).to_string());
+    }
+
+    // The archive may have changed on disk since the queue was staged against it.
+    if !input.staged_against.is_empty() {
+        let mut now: Vec<&str> = source.iter().map(|e| e.path.as_str()).collect();
+        let mut then: Vec<&str> = input.staged_against.iter().map(|s| s.as_str()).collect();
+        now.sort_unstable();
+        then.sort_unstable();
+        if now != then {
+            return Err("The archive changed on disk. Nothing was written.".to_string());
+        }
+    }
+
+    // Directory adds are expanded here, not in the fold, because walking a tree touches
+    // the disk and `plan` must stay pure. Doing it inside Apply rather than leaving it
+    // to the caller is what stops a directory being folded once unexpanded and once
+    // expanded.
+    let mut adds = input.adds.clone();
+    for task in &input.tasks {
+        if let Task::Add { source: src, dest } = task {
+            if src.is_dir() {
+                adds.extend(
+                    expand_add(src, dest)
+                        .map_err(|e| format!("could not read {}: {e}", src.display()))?,
+                );
+            }
+        }
+    }
+
     // 3. Fold. Any conflict fails here, before a byte is written.
-    let plan = plan(&source, &input.tasks, &input.adds).map_err(|c| c.to_string())?;
+    let plan = plan(&source, &input.tasks, &adds).map_err(|c| c.to_string())?;
 
     // 4. Build into a temp beside the target. A leftover from an interrupted Apply is
     //    removed first — that is the whole of the orphan policy, and it only ever
@@ -1280,12 +1371,17 @@ fn build_and_verify(
         done: 0,
         total,
     });
-    let built = match input.recipe.container() {
-        Container::SevenZ => crate::sevenz::list_all(temp, input.target_password.as_ref())
-            .map_err(|e| e.to_string())?,
-        _ => crate::arch::list_all(temp, None).map_err(|e| e.to_string())?,
+    // Read back through the *other* implementation wherever that is possible: a 7z this
+    // program wrote with sevenz-rust2 is proven by libarchive, which shares none of its
+    // code. Only an encrypted 7z is verified by its own writer's reader, because
+    // libarchive cannot open one at all — and there that doubles as proof the password
+    // written with is the password that reads.
+    let built = if input.recipe.container() == Container::SevenZ && input.recipe.encrypt {
+        crate::sevenz::list_all(temp, input.target_password.as_ref()).map_err(|e| e.to_string())?
+    } else {
+        crate::arch::list_all(temp, None).map_err(|e| e.to_string())?
     };
-    let expected = plan.expected(source, &added_sizes);
+    let expected = plan.expected(source, &added_sizes, input.recipe.container());
     verify_against(&expected, &built)?;
     let _ = tx.send(ApplyMsg::Progress {
         phase: Phase::Verifying,

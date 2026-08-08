@@ -499,6 +499,7 @@ fn input_for(path: &Path, tasks: Vec<Task>) -> ApplyInput {
         recipe: recipe(path, Method::Gzip),
         tasks,
         adds: Vec::new(),
+        staged_against: Vec::new(),
         source_password: None,
         target_password: None,
     }
@@ -710,5 +711,135 @@ fn a_renamed_entry_keeps_its_bytes_and_its_metadata() {
         arch::crc32_of(&path, "sub/renamed.txt", None).expect("could not checksum"),
         indium::util::crc32(BETA),
         "the bytes must be the bytes"
+    );
+}
+
+/// The flagship. CORE opens with "the metadata is the main event", and `meta.tar` is the
+/// fixture that holds the fields no other format carries — a symlink, a hardlink, a
+/// non-root uid and gid, owner names, and two distinct mtimes. An Apply that reproduces
+/// all of it is the strongest statement this milestone can make.
+///
+/// It is also the only test where the fold's hardlink retargeting meets a real archive.
+#[test]
+fn metadata_survives_a_tar_rebuild() {
+    let dir = TempDir::new("metatar");
+    let path = dir.join("meta.tar");
+    fs::copy(fixture("meta.tar"), &path).expect("could not stage meta.tar");
+
+    let before = arch::list_all(&path, None).expect("could not list meta.tar");
+    assert!(
+        before.iter().any(|e| e.symlink.is_some()),
+        "the fixture must hold a symlink, or this test proves less than it claims"
+    );
+    assert!(
+        before.iter().any(|e| e.hardlink.is_some()),
+        "the fixture must hold a hardlink"
+    );
+
+    let mut input = input_for(&path, Vec::new());
+    input.recipe = recipe(&path, Method::Store);
+    let (result, _) = run_apply(&input, &no_cancel());
+    result.expect("rebuilding meta.tar must succeed");
+
+    let after = arch::list_all(&path, None).expect("could not list the rebuild");
+    assert_eq!(after.len(), before.len(), "no member may be lost");
+
+    for old in &before {
+        let new = find(&after, &old.path);
+        assert_eq!(new.uid, old.uid, "{}: uid", old.path);
+        assert_eq!(new.gid, old.gid, "{}: gid", old.path);
+        assert_eq!(new.uname, old.uname, "{}: owner name", old.path);
+        assert_eq!(new.gname, old.gname, "{}: group name", old.path);
+        assert_eq!(new.mtime, old.mtime, "{}: mtime", old.path);
+        assert_eq!(new.symlink, old.symlink, "{}: symlink target", old.path);
+        assert_eq!(new.hardlink, old.hardlink, "{}: hardlink target", old.path);
+        assert_eq!(new.mode & 0o7777, old.mode & 0o7777, "{}: mode", old.path);
+    }
+}
+
+/// P4 §1: "renaming a target must retarget every link that pointed at it." Proven in
+/// `tasks` against a synthetic tree; proven here against a real tar, end to end.
+#[test]
+fn renaming_a_hardlink_target_retargets_the_link_in_the_rebuilt_archive() {
+    let dir = TempDir::new("hardlink");
+    let path = dir.join("meta.tar");
+    fs::copy(fixture("meta.tar"), &path).expect("could not stage meta.tar");
+
+    let before = arch::list_all(&path, None).expect("could not list");
+    let link = before
+        .iter()
+        .find(|e| e.hardlink.is_some())
+        .expect("the fixture holds a hardlink")
+        .clone();
+    let target = link.hardlink.clone().expect("it names a target");
+
+    let mut input = input_for(
+        &path,
+        vec![Task::Rename {
+            from: target.clone(),
+            to: "renamed-target.txt".to_string(),
+        }],
+    );
+    input.recipe = recipe(&path, Method::Store);
+    let (result, _) = run_apply(&input, &no_cancel());
+    result.expect("renaming a hardlink target must succeed");
+
+    let after = arch::list_all(&path, None).expect("could not list the rebuild");
+    let relinked = find(&after, &link.path);
+    assert_eq!(
+        relinked.hardlink.as_deref(),
+        Some("renamed-target.txt"),
+        "the link must name the target's new name, or it extracts broken"
+    );
+    assert!(
+        after.iter().any(|e| e.path == "renamed-target.txt"),
+        "the target itself must be there under its new name"
+    );
+}
+
+/// 7z stores neither symlinks nor hardlinks, so its writer skips them — and verification
+/// must know that, or every rebuild of an archive holding one fails looking for a member
+/// that was never writable. The loss is the one the `W` popup warns about beforehand.
+#[test]
+fn rebuilding_into_7z_drops_links_without_failing_verification() {
+    let dir = TempDir::new("sevenzlinks");
+    let source = dir.join("meta.tar");
+    fs::copy(fixture("meta.tar"), &source).expect("could not stage meta.tar");
+
+    let before = arch::list_all(&source, None).expect("could not list");
+    let links = before
+        .iter()
+        .filter(|e| e.symlink.is_some() || e.hardlink.is_some())
+        .count();
+    assert!(
+        links > 0,
+        "the fixture must hold links for this to mean anything"
+    );
+
+    // Rebuild the tar's contents into a 7z, which is what changing format does.
+    let target = dir.join("out.7z");
+    fs::copy(&source, &target).expect("could not seed the target");
+    let mut input = input_for(&target, Vec::new());
+    input.recipe = Recipe {
+        path: target.clone(),
+        method: Method::Lzma2,
+        level: 6,
+        encrypt: false,
+    };
+
+    let (result, _) = run_apply(&input, &no_cancel());
+    result.expect("a 7z rebuild must not fail merely because links cannot be carried");
+
+    let after = arch::list_all(&target, None).expect("the 7z must read back");
+    assert!(
+        after
+            .iter()
+            .all(|e| e.symlink.is_none() && e.hardlink.is_none()),
+        "7z carries no links, and must not pretend to"
+    );
+    assert_eq!(
+        after.len(),
+        before.len() - links,
+        "exactly the links are missing, and nothing else"
     );
 }
