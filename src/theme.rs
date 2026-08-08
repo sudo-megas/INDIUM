@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 // --- Base ---------------------------------------------------------------------
 //
-// Six grounds, each about one and a half times the *linear* luminance of the one below,
+// Six grounds, each between 1.37 and 1.87 times the *linear* luminance of the one below,
 // all on hue 318–319° — the same family as Canonical Aubergine's 328°, which is the reason
 // CORE §6 gives for `WINDOW` in the first place.
 //
@@ -88,17 +88,25 @@ pub const WARNING: Color32 = Color32::from_rgb(0xFF, 0xD8, 0x00);
 
 /// 1px at 8% white — every rule *inside* a zone: beneath a heading, above a footer.
 pub const HAIRLINE: Color32 = Color32::from_rgba_premultiplied(0x14, 0x14, 0x14, 0x14);
-/// 2px at 22% white — every boundary *around* a zone, a popup or a control. Measures
-/// 1.89–1.96:1 against all six grounds, where the hairline manages 1.23:1.
+/// 2px at 22% white — every boundary *around* a zone, a popup or a control.
+///
+/// Composited over the six grounds it measures **1.88–1.95:1**, where the hairline manages
+/// **1.18–1.23:1**. These are translucent, so the figure is the composite against each
+/// ground and not the raw byte value, which would mean nothing at all.
 pub const EDGE: Color32 = Color32::from_rgba_premultiplied(0x38, 0x38, 0x38, 0x38);
-/// The same boundary under the pointer, or while a control is held. 2.81–3.73:1.
+/// The same boundary under the pointer, or while a control is held: **3.26–3.74:1** over the
+/// six grounds, and **2.81:1** over Aubergine, which is the ground a hovered control has.
 pub const EDGE_HOT: Color32 = Color32::from_rgba_premultiplied(0x66, 0x66, 0x66, 0x66);
 
 /// The wash under a hovered table row, 7% white.
 ///
 /// Deliberately **not** Aubergine. Aubergine means "the active item", and a full-height
-/// table where every row you pass turns Aubergine means nothing at all. Against the orange
-/// selection fill it measures 1.40:1, so the two never read as the same thing.
+/// table where every row you pass turns Aubergine means nothing at all.
+///
+/// Against the orange selection fill the two separate by **2.24–2.45:1** depending on the
+/// ground beneath, so a hovered row and a selected one never read as the same thing. (P7
+/// first published 1.40:1 here, which was reproducible by no method at all; the real figure
+/// is the safer one.)
 pub const ROW_HOVER: Color32 = Color32::from_rgba_premultiplied(0x12, 0x12, 0x12, 0x12);
 
 /// The scrim behind a modal: `VOID` at 78%.
@@ -149,8 +157,13 @@ pub const R_POPUP: u8 = 10;
 /// two neighbours each contribute half; the window's own rim is therefore half a gutter,
 /// there being nothing on the other side of it.
 pub const GUTTER: i8 = 8;
-/// A zone's inner margin. `StrokeKind::Inside` draws the 2px edge *within* this, so the
-/// border costs zero layout — but the margin must always exceed 2, or content sits on the rim.
+/// A zone's inner margin — the clear space between the edge and the content inside it.
+///
+/// **The edge costs layout, and P7 first said it did not.** `Frame::total_margin` is
+/// `inner_margin + stroke.width + outer_margin`, so a 2px edge takes 2px per side on top of
+/// this, and a panel given an `exact_size` that forgot it overflows and paints over its own
+/// gutter. The status bar was measured at four pixels short before anyone noticed, because
+/// `Panel` clamps the rect it *reports* to `exact_size` and paints the overflow anyway.
 pub const PAD: i8 = 12;
 /// One status-bar row: the same 20.0 the entry table uses for a row.
 pub const SB_ROW: f32 = 20.0;
@@ -399,11 +412,26 @@ pub fn install_visuals(ctx: &egui::Context) {
     // as a grey smear on a 1× display, so the weight stays and only the colour changes.
     v.text_cursor.stroke = Stroke::new(2.0, TEXT);
 
+    // And the caret was not the only one. `ime_composition` carries two more strokes in the
+    // same `#C0DEFF`, drawn under preedit text in every field the program has — the filter
+    // bar, the rename cell, both path fields, the archive name, both password boxes. They
+    // are exactly 2.0 wide, so the width rule never caught them; only the colour was wrong,
+    // and a test that measures width alone will go on not catching them.
+    v.ime_composition.active_underline_stroke = Stroke::new(2.0, TEXT);
+    v.ime_composition.inactive_underline_stroke = Stroke::new(1.0, TEXT_MUTED);
+
     // Selection is one of orange's three permitted meanings.
     v.selection.bg_fill = ORANGE.linear_multiply(0.35);
     v.selection.stroke = Stroke::new(1.0, ORANGE);
 
-    ctx.set_visuals(v);
+    // Both styles, not just the current one. `set_visuals` writes only the theme egui thinks
+    // it is in, and `Options::theme()` is refreshed from the platform on every pass — so a
+    // compositor that reported "light" would have thrown away the entire palette and left
+    // stock `Visuals::light()` wearing INDIUM's fonts. It is latent today only because winit
+    // returns no system theme on Linux; CORE §6 says there is no second theme, and this is
+    // what makes that structurally true rather than true by accident. `install_spacing`
+    // below has always written both, which is where the discrepancy showed.
+    ctx.all_styles_mut(|style| style.visuals = v.clone());
     install_spacing(ctx);
 }
 
@@ -470,9 +498,11 @@ fn install_spacing(ctx: &egui::Context) {
 /// One of CORE §4's five zones: a fill, a 2px edge all round, square corners, and half a
 /// gutter of `VOID` outside it.
 ///
-/// `StrokeKind::Inside` — which is what `Frame` uses — draws the edge *within* the inner
-/// margin, so the border costs no layout at all. The caller supplies `inner_margin`, and it
-/// must exceed 2 or the content sits on the rim.
+/// **Budget for the edge.** `Frame::total_margin()` is `inner_margin + stroke.width +
+/// outer_margin`, so this frame consumes `inner + 2 + 4` on every side. Any panel given an
+/// `exact_size` must add all three, or it overflows and paints across the gutter it was
+/// supposed to float in — and it does so invisibly, because `Panel` clamps the rect it
+/// reports to `exact_size` regardless of what it drew.
 ///
 /// Every panel that uses this must also call `.show_separator_line(false)`: egui draws its
 /// own hairline between panels, and it would stack with this border.
@@ -494,7 +524,15 @@ pub fn zone(fill: Color32) -> egui::Frame {
 ///
 /// The disabled arm is an outlined ghost rather than a filled box: a fill at
 /// `disabled_alpha` blends toward whatever is behind it, which is how the invisible-box bug
-/// got in the first time. An outline at 1px says "off" by weight instead of by opacity.
+/// got in the first time. The absent fill is what says "off"; `disabled_alpha` dims the rest.
+///
+/// **The ghost's stroke is 2px, and it has to be.** `Style::button_style` computes the
+/// button's inner margin as `button_padding - bg_stroke.width`, having already budgeted for
+/// the state's 2px edge; `Button::stroke` is then applied *over* that, without recomputing
+/// it. A 1px override — which is what this arm carried when it was written — leaves a pixel
+/// unaccounted on each side, so the button was **2px narrower disabled than enabled** and
+/// jumped sideways the moment its field filled in, shoving whatever stood beside it. The
+/// weight stays matched; only the fill and the ink say the button is off.
 pub fn button(ui: &mut egui::Ui, text: egui::RichText, enabled: bool) -> egui::Response {
     if enabled {
         let r = ui.add(egui::Button::new(text));
@@ -507,28 +545,47 @@ pub fn button(ui: &mut egui::Ui, text: egui::RichText, enabled: bool) -> egui::R
             false,
             egui::Button::new(text.color(TEXT_MUTED))
                 .fill(Color32::TRANSPARENT)
-                .stroke(Stroke::new(1.0, EDGE)),
+                .stroke(edge()),
         )
     }
 }
 
-/// The same, at the smaller padding egui's `small_button` uses.
+/// The same, for a `×` or a `+` that must not be a full-height button.
+///
+/// **It gives up the one-pixel geometry and keeps the other two channels, deliberately.**
+/// egui makes `expansion` layout-neutral by pairing a negative *outer* margin with a
+/// positive *inner* one, so the total is always `button_padding`. `Button::small()` then
+/// zeroes the vertical padding and **leaves the negative outer margin in place** — which
+/// left these buttons 2px shorter on hover and 4px taller while held, moving every label
+/// beside them and reflowing the wrapped row of bookmark chips as the pointer crossed it.
+///
+/// Zeroing the expansion for this scope only is what stops it. A `×` still brightens from
+/// `CONTROL` to Aubergine and its rim still goes hot; it simply does not breathe. The full
+/// three-channel press stays on every button big enough to show it without disturbing its
+/// neighbours.
 pub fn small_button(ui: &mut egui::Ui, text: egui::RichText, enabled: bool) -> egui::Response {
-    if enabled {
-        let r = ui.add(egui::Button::new(text).small());
+    let mut scoped = ui.new_child(egui::UiBuilder::new().max_rect(ui.available_rect_before_wrap()));
+    let v = scoped.visuals_mut();
+    v.widgets.hovered.expansion = 0.0;
+    v.widgets.active.expansion = 0.0;
+
+    let r = if enabled {
+        let r = scoped.add(egui::Button::new(text).small());
         if r.clicked() {
             r.surrender_focus();
         }
         r
     } else {
-        ui.add_enabled(
+        scoped.add_enabled(
             false,
             egui::Button::new(text.color(TEXT_MUTED))
                 .small()
                 .fill(Color32::TRANSPARENT)
-                .stroke(Stroke::new(1.0, EDGE)),
+                .stroke(edge()),
         )
-    }
+    };
+    ui.advance_cursor_after_rect(r.rect);
+    r
 }
 
 /// A clickable row that reacts to the pointer.
@@ -659,6 +716,20 @@ mod tests {
     /// colour as the thing behind it.
     #[test]
     fn no_two_grounds_are_the_same_colour() {
+        // `assert_ne!` alone would pass at 1.001:1 — it would have let the very bug this
+        // test is named for straight through. Each rung must clear its neighbour by a real
+        // margin in *linear* luminance, which is the axis the eye reads at this end of the
+        // scale; the WCAG ratio for a pair this dark is dominated by its own flare term and
+        // says 1.05 for a step you can plainly see.
+        for pair in GROUNDS.windows(2) {
+            let (lo_name, lo) = pair[0];
+            let (hi_name, hi) = pair[1];
+            let step = luminance(hi) / luminance(lo);
+            assert!(
+                step >= 1.30,
+                "{hi_name} is only {step:.3}x {lo_name} — too close to read as a step"
+            );
+        }
         for (i, (an, a)) in GROUNDS.iter().enumerate() {
             for (bn, b) in GROUNDS.iter().skip(i + 1) {
                 assert_ne!(a, b, "{an} and {bn} are the same colour");
@@ -691,6 +762,12 @@ mod tests {
             v.widgets.hovered.weak_bg_fill,
             v.widgets.active.weak_bg_fill,
         ];
+        // `widgets.open` is deliberately not in that list, though `install_visuals` sets it
+        // alongside the other three. It is not a control state — it is the popup title band,
+        // and it is Aubergine for the same reason a hovered control is: CORE §6 gives
+        // Aubergine exactly one meaning, *the active item*. Requiring it to differ would be
+        // requiring the palette to break its own rule. `the_popup_title_bar_is_not_egui_grey`
+        // is what guards that field.
         for (i, a) in fills.iter().enumerate() {
             for b in fills.iter().skip(i + 1) {
                 assert_ne!(a, b, "two control states share a fill");
@@ -730,8 +807,17 @@ mod tests {
             v.window_stroke,
             v.selection.stroke,
             v.text_cursor.stroke,
+            v.ime_composition.active_underline_stroke,
+            v.ime_composition.inactive_underline_stroke,
         ] {
             assert!(s.width <= 2.0, "a stroke is {} wide", s.width);
+            // Width alone let three 2.0px `#C0DEFF` strokes through — the caret and both
+            // IME underlines. A line rule that does not check the colour is half a rule.
+            assert_ne!(
+                s.color,
+                egui::Color32::from_rgb(192, 222, 255),
+                "an off-palette egui default stroke survived"
+            );
         }
     }
 
