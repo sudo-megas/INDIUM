@@ -14,10 +14,28 @@ use crate::util;
 
 const ROW_HEIGHT: f32 = 20.0;
 
+/// The padding of one Recents or Bookmarks line. Both lists wear the same one, because they
+/// are the same shape of thing and the sidebar switches between them.
+const LIST_PAD: egui::Margin = egui::Margin::symmetric(12, 7);
+
 pub fn show(app: &mut Indium, root: &mut egui::Ui, rows: &[Row]) {
     let ctx = root.ctx().clone();
     egui::CentralPanel::default()
-        .frame(egui::Frame::NONE.fill(theme::WINDOW))
+        // The table is a well rather than a raised zone, so this card is `WINDOW` where the
+        // other three are `PANEL` (P7 §1).
+        //
+        // Inner margin 4, not 0 and not 2. `StrokeKind::Inside` puts the 2px edge within the
+        // frame rect, so at an inner margin of 0 or 2 the scrollbar and the first row's
+        // full-bleed selection fill would sit on the rim; 4 leaves two clear pixels inside it.
+        //
+        // The price is **20px of table width, not 16**: `Frame::total_margin` is
+        // `inner_margin + stroke.width + outer_margin` (egui 0.36 `frame.rs`), so each side
+        // costs 4 + 2 + 4 and the edge is not free. Every pixel of it comes out of Name,
+        // because Name is the only `Column::remainder()` and Size/Packed/Method are
+        // `Column::exact`. That is the accepted cost of the floating-card treatment.
+        //
+        // A `CentralPanel` draws no separator line, so there is none to turn off here.
+        .frame(theme::zone(theme::WINDOW).inner_margin(egui::Margin::same(4)))
         .show(root, |ui| match app.section {
             Section::Archive => archive_view(app, ui, rows),
             Section::Recents => recents_view(app, &ctx, ui),
@@ -56,143 +74,179 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
     let mut descend_into: Option<usize> = None;
     let mut commit_rename = false;
 
-    TableBuilder::new(ui)
-        .striped(false)
-        .resizable(true)
-        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .column(Column::remainder().at_least(120.0).clip(true))
-        .column(Column::exact(84.0))
-        .column(Column::exact(84.0))
-        .column(Column::exact(72.0))
-        .header(22.0, |mut header| {
-            for name in ["Name", "Size", "Packed", "Method"] {
-                header.col(|ui| {
-                    ui.label(
-                        egui::RichText::new(name)
-                            .size(13.0)
-                            .color(theme::TEXT_MUTED),
-                    );
-                });
-            }
-        })
-        .body(|body| {
-            // `rows` here is egui_extras' virtualised body: only visible lines are
-            // built, which is what keeps a 100,000-entry archive responsive.
-            body.rows(ROW_HEIGHT, rows.len(), |mut tr| {
-                let i = tr.index();
-                let row = &rows[i];
-                let selected = app.selection.contains(&row.path);
-                let focused = i == app.cursor;
-                tr.set_selected(selected);
+    // Scoped, and never global. `widgets.hovered.bg_fill` is what `egui_extras` paints a
+    // hovered row with, and it is also the fill behind a hovered checkbox and a hovered
+    // slider rail — setting it in `install_visuals` would wash all three. And it is
+    // deliberately `ROW_HOVER` rather than `AUBERGINE`: Aubergine means *the active item*,
+    // and a full-height table where every row you pass turns Aubergine says nothing.
+    //
+    // `selectable_labels` off is the other half, and without it this whole section is
+    // dead. egui's default is `true`, which makes every plain `ui.label` allocate with
+    // `Sense::click_and_drag()` so its text can be selected; a row's hover comes from
+    // `TableRow`'s union of its *cell* responses, and egui marks only the topmost sensing
+    // widget under the pointer as hovered. A selectable label therefore blanks the
+    // highlight over exactly the text — which is most of every row. Nothing in the entry
+    // table is text to select; the Inspector's explicit `.selectable(true)` fields are
+    // where selecting a path belongs, and they are untouched.
+    ui.scope(|ui| {
+        ui.visuals_mut().widgets.hovered.bg_fill = theme::ROW_HOVER;
+        ui.style_mut().interaction.selectable_labels = false;
 
-                // Copied out rather than borrowed: the Name cell needs `&mut` access to
-                // the rename field, and a live `&Entry` would hold `app` immutably
-                // across it.
-                let entry: Option<(bool, bool, u64, Option<u64>, String)> = app
-                    .entry(&row.path)
-                    .map(|e| (e.encrypted, e.is_dir, e.size, e.packed, e.method.clone()));
-
-                tr.col(|ui| {
-                    let colour = if focused {
-                        theme::ORANGE
-                    } else if row.is_dir {
-                        theme::TEXT
-                    } else {
-                        theme::TEXT_SECONDARY
-                    };
-                    // A trailing slash marks a directory, as `ls -F` has since forever.
-                    // CORE names no marker at all — the triangle this comment used to
-                    // credit it with was never in the document — so the slash is
-                    // INDIUM's own choice and stays one: it sorts with the name, costs
-                    // no column, and needs no glyph. P1 Deviation 5 records the
-                    // original reason (the Ubuntu faces carried no `▸`); the face
-                    // carries one now, and the answer is still the slash.
-                    let shown = if row.is_dir {
-                        format!("{}/", row.display)
-                    } else {
-                        row.display.clone()
-                    };
-                    // `F2` turns this cell into a text field rather than opening an
-                    // eighth popup — CORE §4 fixes the count at seven. A focused field
-                    // also makes the existing `typing` guard suppress bare keys, so
-                    // `Del` cannot fire into a half-typed name.
-                    if app.rename_target.as_deref() == Some(row.path.as_str()) {
-                        let field = ui.add(
-                            egui::TextEdit::singleline(&mut app.rename_input)
-                                .font(egui::TextStyle::Monospace)
-                                .desired_width(240.0),
-                        );
-                        field.request_focus();
-                        if ui.input(|inp| inp.key_pressed(egui::Key::Enter)) {
-                            commit_rename = true;
-                        }
-                    } else {
-                        // Named explicitly: without these it inherited egui's 13.0
-                        // proportional default and sat 18% larger than the three mono
-                        // columns beside it, in every row of the program's main view.
-                        let mut text = egui::RichText::new(shown)
-                            .family(theme::MONO)
-                            .size(13.0)
-                            .color(colour);
-                        if row.is_dir {
-                            text = text.family(theme::bold());
-                        }
-                        let resp = ui.add(
-                            egui::Label::new(text)
-                                .sense(egui::Sense::click())
-                                .truncate(),
-                        );
-                        if resp.clicked() {
-                            clicked = Some((i, ui.input(|inp| inp.modifiers.ctrl)));
-                        }
-                        if resp.double_clicked() && row.is_dir {
-                            descend_into = Some(i);
-                        }
-                    }
-                    if entry.as_ref().map(|e| e.0).unwrap_or(false) {
+        TableBuilder::new(ui)
+            .striped(false)
+            .resizable(true)
+            // `egui_extras` gates its hover fill on `self.sense.interactive()`, and the default
+            // is `Sense::hover()`, which is not. This one line is what switches row hover on.
+            .sense(egui::Sense::click())
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .column(Column::remainder().at_least(120.0).clip(true))
+            .column(Column::exact(84.0))
+            .column(Column::exact(84.0))
+            .column(Column::exact(72.0))
+            .header(22.0, |mut header| {
+                for name in ["Name", "Size", "Packed", "Method"] {
+                    header.col(|ui| {
                         ui.label(
-                            egui::RichText::new("enc")
-                                .size(12.0)
+                            egui::RichText::new(name)
+                                .size(13.0)
                                 .color(theme::TEXT_MUTED),
                         );
+                    });
+                }
+            })
+            .body(|body| {
+                // `rows` here is egui_extras' virtualised body: only visible lines are
+                // built, which is what keeps a 100,000-entry archive responsive.
+                body.rows(ROW_HEIGHT, rows.len(), |mut tr| {
+                    let i = tr.index();
+                    let row = &rows[i];
+                    let selected = app.selection.contains(&row.path);
+                    let focused = i == app.cursor;
+                    tr.set_selected(selected);
+
+                    // Copied out rather than borrowed: the Name cell needs `&mut` access to
+                    // the rename field, and a live `&Entry` would hold `app` immutably
+                    // across it.
+                    let entry: Option<(bool, bool, u64, Option<u64>, String)> = app
+                        .entry(&row.path)
+                        .map(|e| (e.encrypted, e.is_dir, e.size, e.packed, e.method.clone()));
+
+                    tr.col(|ui| {
+                        let colour = if focused {
+                            theme::ORANGE
+                        } else if row.is_dir {
+                            theme::TEXT
+                        } else {
+                            theme::TEXT_SECONDARY
+                        };
+                        // A trailing slash marks a directory, as `ls -F` has since forever.
+                        // CORE names no marker at all — the triangle this comment used to
+                        // credit it with was never in the document — so the slash is
+                        // INDIUM's own choice and stays one: it sorts with the name, costs
+                        // no column, and needs no glyph. P1 Deviation 5 records the
+                        // original reason (the Ubuntu faces carried no `▸`); the face
+                        // carries one now, and the answer is still the slash.
+                        let shown = if row.is_dir {
+                            format!("{}/", row.display)
+                        } else {
+                            row.display.clone()
+                        };
+                        // `F2` turns this cell into a text field rather than opening an
+                        // eighth popup — CORE §4 fixes the count at seven. A focused field
+                        // also makes the existing `typing` guard suppress bare keys, so
+                        // `Del` cannot fire into a half-typed name.
+                        if app.rename_target.as_deref() == Some(row.path.as_str()) {
+                            let field = ui.add(
+                                egui::TextEdit::singleline(&mut app.rename_input)
+                                    .font(egui::TextStyle::Monospace)
+                                    .desired_width(240.0),
+                            );
+                            field.request_focus();
+                            if ui.input(|inp| inp.key_pressed(egui::Key::Enter)) {
+                                commit_rename = true;
+                            }
+                        } else {
+                            // Named explicitly: without these it inherited egui's 13.0
+                            // proportional default and sat 18% larger than the three mono
+                            // columns beside it, in every row of the program's main view.
+                            let mut text = egui::RichText::new(shown)
+                                .family(theme::MONO)
+                                .size(13.0)
+                                .color(colour);
+                            if row.is_dir {
+                                text = text.family(theme::bold());
+                            }
+                            // No `.sense(Sense::click())` any more, and that is the whole of
+                            // why hover works. The cell's own sense — `Sense::click()`, from
+                            // the builder above — is registered *below* whatever the cell
+                            // contains, so a click-sensing label sat on top of it and took both
+                            // the click and the hover, leaving the row unhighlighted over
+                            // exactly the filename. The click and the double-click now come off
+                            // the row's unioned cell response below, which is strictly more:
+                            // the whole line answers, not just the width of the text.
+                            ui.add(egui::Label::new(text).truncate());
+                        }
+                        if entry.as_ref().map(|e| e.0).unwrap_or(false) {
+                            ui.label(
+                                egui::RichText::new("enc")
+                                    .size(12.0)
+                                    .color(theme::TEXT_MUTED),
+                            );
+                        }
+                    });
+
+                    tr.col(|ui| {
+                        let text = match entry.as_ref() {
+                            Some((_, is_dir, size, _, _)) if !*is_dir => util::format_bytes(*size),
+                            _ => "—".to_string(),
+                        };
+                        mono_right(ui, &text, theme::TEXT_SECONDARY);
+                    });
+
+                    tr.col(|ui| {
+                        // Reported only where it is knowable. libarchive exposes no
+                        // per-entry compressed size at all, and a 7z gives one only where an
+                        // entry owns its compression block outright — a shared block's total
+                        // belongs to no single member of it, so "—" is the honest answer
+                        // rather than a share of someone else's bytes.
+                        let text = match entry.as_ref().and_then(|e| e.3) {
+                            Some(p) => util::format_bytes(p),
+                            None => "—".to_string(),
+                        };
+                        mono_right(ui, &text, theme::TEXT_MUTED);
+                    });
+
+                    tr.col(|ui| {
+                        let text = entry
+                            .as_ref()
+                            .map(|e| e.4.clone())
+                            .unwrap_or_else(|| "—".into());
+                        ui.label(
+                            egui::RichText::new(text)
+                                .family(theme::MONO)
+                                .size(13.0)
+                                .color(theme::TEXT_MUTED),
+                        );
+                    });
+
+                    // The union of the four cells, which is the whole line. Until P7 only the
+                    // Name *text* was clickable, so clicking a row's size selected nothing;
+                    // `TableRow::response` ORs every cell's response, so the line answers
+                    // wherever you land on it. Safe to call: `col` has run four times, and
+                    // that is the API's only precondition.
+                    //
+                    // The double-click reaches this the same way, so descending into a
+                    // directory now works from any column rather than from the name alone.
+                    let line = tr.response();
+                    if line.clicked() {
+                        clicked = Some((i, ui_ctx.input(|inp| inp.modifiers.ctrl)));
+                    }
+                    if line.double_clicked() && row.is_dir {
+                        descend_into = Some(i);
                     }
                 });
-
-                tr.col(|ui| {
-                    let text = match entry.as_ref() {
-                        Some((_, is_dir, size, _, _)) if !*is_dir => util::format_bytes(*size),
-                        _ => "—".to_string(),
-                    };
-                    mono_right(ui, &text, theme::TEXT_SECONDARY);
-                });
-
-                tr.col(|ui| {
-                    // Reported only where it is knowable. libarchive exposes no
-                    // per-entry compressed size at all, and a 7z gives one only where an
-                    // entry owns its compression block outright — a shared block's total
-                    // belongs to no single member of it, so "—" is the honest answer
-                    // rather than a share of someone else's bytes.
-                    let text = match entry.as_ref().and_then(|e| e.3) {
-                        Some(p) => util::format_bytes(p),
-                        None => "—".to_string(),
-                    };
-                    mono_right(ui, &text, theme::TEXT_MUTED);
-                });
-
-                tr.col(|ui| {
-                    let text = entry
-                        .as_ref()
-                        .map(|e| e.4.clone())
-                        .unwrap_or_else(|| "—".into());
-                    ui.label(
-                        egui::RichText::new(text)
-                            .family(theme::MONO)
-                            .size(13.0)
-                            .color(theme::TEXT_MUTED),
-                    );
-                });
             });
-        });
+    });
 
     if commit_rename {
         app.commit_rename();
@@ -218,9 +272,19 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
     }
 }
 
+/// A breadcrumb segment's padding — tight, because a crumb is a chip in a run and not a
+/// line in a list.
+const CRUMB_PAD: egui::Margin = egui::Margin::symmetric(4, 1);
+
 fn breadcrumb_bar(app: &mut Indium, ui: &mut egui::Ui) {
     let crumbs = crate::model::breadcrumb(&app.cwd);
     let mut go: Option<String> = None;
+
+    // The crumb font, resolved rather than written down: `RichText::family` keeps the
+    // current text style's size and swaps only the family, and this is that by hand,
+    // because the galley has to be built before the row that will hold it.
+    let mut font = egui::TextStyle::Body.resolve(ui.style());
+    font.family = theme::MONO;
 
     egui::Frame::NONE
         .inner_margin(egui::Margin::symmetric(10, 6))
@@ -236,13 +300,30 @@ fn breadcrumb_bar(app: &mut Indium, ui: &mut egui::Ui) {
                     } else {
                         theme::TEXT_SECONDARY
                     };
-                    let resp = ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(label).family(theme::MONO).color(colour),
-                        )
-                        .sense(egui::Sense::click()),
-                    );
-                    if resp.clicked() && !last {
+                    let galley = ui
+                        .ctx()
+                        .fonts_mut(|f| f.layout_no_wrap(label.clone(), font.clone(), colour));
+
+                    if last {
+                        // Where you already are, which is not somewhere you can go. A row
+                        // here would light up and offer a pointing hand for a click that
+                        // does nothing, so the last crumb stays a plain label.
+                        ui.add(egui::Label::new(galley));
+                        continue;
+                    }
+
+                    // `theme::row` ends with `set_width(available_width())` — correct for a
+                    // full-width list line, and enough to make the first crumb swallow the
+                    // whole bar. Allocating exactly the space the galley needs makes that
+                    // claim a no-op, and the galley goes straight into the label, so the
+                    // text is laid out once rather than twice.
+                    let size = galley.size() + CRUMB_PAD.sum();
+                    let crumb = ui.allocate_ui(size, |ui| {
+                        theme::row(ui, false, CRUMB_PAD, |ui| {
+                            ui.add(egui::Label::new(galley));
+                        })
+                    });
+                    if crumb.inner.clicked() {
                         go = Some(path.clone());
                     }
                 }
@@ -260,7 +341,10 @@ fn breadcrumb_bar(app: &mut Indium, ui: &mut egui::Ui) {
 // ---------------------------------------------------------------------------
 
 fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
-    header(ui, "Recent files");
+    // A heading over a list of siblings, so it takes the rule (`theme::section`). The local
+    // `header` this replaces drew 17.0 unbolded with no rule at all — a *value's* size used
+    // as a heading, which is the confusion P7 §4 exists to end.
+    theme::section(ui, "Recent files");
 
     let items: Vec<(String, i64)> = app
         .recents
@@ -294,16 +378,14 @@ fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
                 let exists = std::path::Path::new(path).exists();
                 let focused = i == app.cursor;
 
-                let frame = egui::Frame::NONE
-                    .inner_margin(egui::Margin::symmetric(12, 7))
-                    .fill(if focused {
-                        theme::AUBERGINE
-                    } else {
-                        egui::Color32::TRANSPARENT
-                    });
-
-                let inner = frame.show(ui, |ui| {
-                    ui.set_width(ui.available_width());
+                // `theme::row` paints the focused Aubergine fill, the hover and held fills,
+                // and the pointing hand; the frame plus trailing `ui.interact` this replaces
+                // painted only the first of those, so the list never answered the pointer.
+                let resp = theme::row(ui, focused, LIST_PAD, |ui| {
+                    // A selectable label senses click-and-drag and would out-rank the row
+                    // registered beneath it, so clicking a filename would do nothing. See
+                    // `sidebar::row_body` for the mechanism.
+                    ui.style_mut().interaction.selectable_labels = false;
                     ui.vertical(|ui| {
                         let name = std::path::Path::new(path)
                             .file_name()
@@ -338,11 +420,6 @@ fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
                     });
                 });
 
-                let resp = ui.interact(
-                    inner.response.rect,
-                    ui.id().with(("recent", i)),
-                    egui::Sense::click(),
-                );
                 if resp.clicked() {
                     app.cursor = i;
                 }
@@ -354,7 +431,7 @@ fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
                     }
                 }
                 resp.context_menu(|ui| {
-                    if ui.button("Remove from list").clicked() {
+                    if theme::button(ui, egui::RichText::new("Remove from list"), true).clicked() {
                         forget = Some(path.clone());
                         ui.close();
                     }
@@ -384,7 +461,7 @@ fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
 // ---------------------------------------------------------------------------
 
 fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
-    header(ui, "Bookmarks");
+    theme::section(ui, "Bookmarks");
     ui.label(
         egui::RichText::new("Named directories to extract into.")
             .size(13.0)
@@ -402,43 +479,52 @@ fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
     }
 
     let mut remove: Option<usize> = None;
+    // Set inside the loop, applied after it: the loop holds `app.settings.bookmarks`
+    // immutably, and `app.cursor` cannot be written through that borrow.
+    let mut focus: Option<usize> = None;
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             for (i, b) in app.settings.bookmarks.iter().enumerate() {
                 let focused = i == app.cursor;
-                egui::Frame::NONE
-                    .inner_margin(egui::Margin::symmetric(12, 7))
-                    .fill(if focused {
-                        theme::AUBERGINE
-                    } else {
-                        egui::Color32::TRANSPARENT
-                    })
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.horizontal(|ui| {
-                            ui.vertical(|ui| {
-                                ui.label(egui::RichText::new(&b.name).color(theme::TEXT));
-                                ui.label(
-                                    egui::RichText::new(&b.path)
-                                        .family(theme::MONO)
-                                        .size(13.0)
-                                        .color(theme::TEXT_MUTED),
-                                );
-                            });
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui.small_button("×").clicked() {
-                                        remove = Some(i);
-                                    }
-                                },
+                let resp = theme::row(ui, focused, LIST_PAD, |ui| {
+                    // See `sidebar::row_body`: a selectable label would out-rank the row
+                    // beneath it and eat the click that lands on a bookmark's name.
+                    ui.style_mut().interaction.selectable_labels = false;
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new(&b.name).color(theme::TEXT));
+                            ui.label(
+                                egui::RichText::new(&b.path)
+                                    .family(theme::MONO)
+                                    .size(13.0)
+                                    .color(theme::TEXT_MUTED),
                             );
                         });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // The `×` is a real `Button`, and `theme::row` registers its own
+                            // sense *below* everything added inside it, so the button wins
+                            // the hit test outright — removing a bookmark does not also
+                            // move the cursor onto it. That is `UiBuilder::sense`'s stated
+                            // property, not a coincidence of geometry.
+                            if theme::small_button(ui, egui::RichText::new("×"), true).clicked() {
+                                remove = Some(i);
+                            }
+                        });
                     });
+                });
+                // New at P7: the row had no click of its own before, which left it hovering
+                // and offering a pointing hand for nothing. It now does what a Recents row
+                // does — move the keyboard cursor onto the line you touched.
+                if resp.clicked() {
+                    focus = Some(i);
+                }
             }
         });
 
+    if let Some(i) = focus {
+        app.cursor = i;
+    }
     if let Some(i) = remove {
         let b = app.settings.bookmarks.remove(i);
         app.save_settings();
@@ -449,15 +535,6 @@ fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
 // ---------------------------------------------------------------------------
 // Shared bits
 // ---------------------------------------------------------------------------
-
-fn header(ui: &mut egui::Ui, text: &str) {
-    ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        ui.add_space(12.0);
-        ui.label(egui::RichText::new(text).size(17.0).color(theme::TEXT));
-    });
-    ui.add_space(4.0);
-}
 
 fn empty_state(ui: &mut egui::Ui, title: &str, hint: &str) {
     ui.vertical_centered(|ui| {

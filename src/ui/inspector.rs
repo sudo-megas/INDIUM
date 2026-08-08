@@ -22,16 +22,27 @@ use crate::model::{self, Row};
 use crate::theme;
 use crate::util;
 
+/// The Inspector's inner margin.
+const ZONE_PAD: egui::Margin = egui::Margin::same(12);
+/// What the pane's contents get at rest and at its narrowest: `330 − 24` and `260 − 24`,
+/// which is exactly what P1 gave them.
+const CONTENT: f32 = 306.0;
+const MIN_CONTENT: f32 = 236.0;
+
 pub fn show(app: &mut Indium, root: &mut egui::Ui, rows: &[Row]) {
+    // Both sizes are the panel's *outer* width, so both pay for the whole frame. Asked of
+    // the frame rather than written down, for the reason `sidebar::show` gives at length:
+    // `Frame::total_margin` is `inner_margin + stroke.width + outer_margin`, and a sum that
+    // forgets the 2px edge is four pixels wrong on a pane CORE §1 calls the main event.
+    let frame = theme::zone(theme::PANEL).inner_margin(ZONE_PAD);
+    let chrome = frame.total_margin().sum().x;
     egui::Panel::right("inspector")
         .resizable(true)
-        .default_size(330.0)
-        .min_size(260.0)
-        .frame(
-            egui::Frame::NONE
-                .fill(theme::PANEL)
-                .inner_margin(egui::Margin::symmetric(12, 12)),
-        )
+        .default_size(CONTENT + chrome)
+        .min_size(MIN_CONTENT + chrome)
+        .frame(frame)
+        // The card's own 2px edge is the boundary; egui's panel hairline would stack with it.
+        .show_separator_line(false)
         .show(root, |ui| {
             tabs(app, ui);
             ui.add_space(8.0);
@@ -174,8 +185,12 @@ fn entry_card(app: &mut Indium, ui: &mut egui::Ui, e: &Entry) {
     }
 
     // --- Checksum -----------------------------------------------------------
-    ui.add_space(10.0);
-    section_label(ui, "Checksum");
+    //
+    // Each of the four headings below opens a list of siblings, so each takes the rule
+    // (P7 §4). The local `section_label` they replace drew 12.0 — *smaller* than the 13.0
+    // body beneath it — and no rule; `theme::section` owns the leading space, which is why
+    // the `add_space(10.0)` that used to precede each one is gone rather than doubled.
+    theme::section(ui, "Checksum");
     let computed = app
         .crc_of
         .as_ref()
@@ -202,7 +217,8 @@ fn entry_card(app: &mut Indium, ui: &mut egui::Ui, e: &Entry) {
                         .family(theme::MONO)
                         .color(theme::TEXT_MUTED),
                 );
-            } else if ui.small_button("Compute CRC32").clicked() {
+            } else if theme::small_button(ui, egui::RichText::new("Compute CRC32"), true).clicked()
+            {
                 let path = e.path.clone();
                 app.compute_crc(&path);
             }
@@ -217,8 +233,7 @@ fn entry_card(app: &mut Indium, ui: &mut egui::Ui, e: &Entry) {
     }
 
     // --- Times --------------------------------------------------------------
-    ui.add_space(10.0);
-    section_label(ui, "Times");
+    theme::section(ui, "Times");
     grid(ui, "entry-times", |ui| {
         stamp(ui, "Modified", e.mtime);
         stamp(ui, "Accessed", e.atime);
@@ -227,8 +242,7 @@ fn entry_card(app: &mut Indium, ui: &mut egui::Ui, e: &Entry) {
     });
 
     // --- Ownership ----------------------------------------------------------
-    ui.add_space(10.0);
-    section_label(ui, "Ownership");
+    theme::section(ui, "Ownership");
     grid(ui, "entry-own", |ui| {
         field(
             ui,
@@ -251,8 +265,7 @@ fn entry_card(app: &mut Indium, ui: &mut egui::Ui, e: &Entry) {
 
     // --- Links and encryption ----------------------------------------------
     if e.symlink.is_some() || e.hardlink.is_some() || e.encrypted {
-        ui.add_space(10.0);
-        section_label(ui, "Other");
+        theme::section(ui, "Other");
         grid(ui, "entry-other", |ui| {
             if let Some(t) = &e.symlink {
                 field(ui, "Symlink ->", t);
@@ -630,16 +643,6 @@ fn stamp(ui: &mut egui::Ui, label: &str, value: Option<i64>) {
         Some(t) => field(ui, label, &util::format_timestamp(t)),
         None => field_muted(ui, label, "— not stored"),
     }
-}
-
-fn section_label(ui: &mut egui::Ui, text: &str) {
-    ui.label(
-        egui::RichText::new(text)
-            .size(12.0)
-            .color(theme::TEXT)
-            .family(theme::bold()),
-    );
-    ui.add_space(2.0);
 }
 
 fn note(ui: &mut egui::Ui, text: &str) {
