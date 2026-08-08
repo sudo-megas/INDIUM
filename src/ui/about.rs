@@ -95,7 +95,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             theme::section_bare(ui, "The licence, in full");
 
             egui::ScrollArea::vertical()
-                .max_height(240.0)
+                .max_height(theme::list_height(ctx, 330.0, 240.0))
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     ui.add(

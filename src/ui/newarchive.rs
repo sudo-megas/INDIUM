@@ -129,7 +129,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
 
             theme::section(ui, "METHOD");
             egui::ScrollArea::vertical()
-                .max_height(210.0)
+                .max_height(theme::list_height(ctx, 452.0, 210.0))
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     for method in METHODS {
@@ -185,45 +185,49 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             app.new_advanced = advanced.openness > 0.0;
 
             ui.add_space(10.0);
-            ui.separator();
 
-            // CORE §4.1's live sentence: "states exactly what will be built".
-            let recipe = recipe_of(app);
-            ui.label(
-                egui::RichText::new(tasks::recipe_sentence(&recipe))
-                    .family(theme::MONO)
-                    .size(13.0)
-                    .color(theme::TEXT_SECONDARY),
-            );
-            if app.new_encrypt {
+            // The separator that used to divide these off is gone: the foot band is the
+            // division, and a hairline drawn on top of a change of ground is a rule that
+            // separates nothing from nothing.
+            theme::foot(ui, |ui| {
+                // CORE §4.1's live sentence: "states exactly what will be built".
+                let recipe = recipe_of(app);
                 ui.label(
-                    egui::RichText::new(
-                        "You will be asked for the password when you Apply, and again to \
-                         confirm it. INDIUM never stores it.",
-                    )
-                    .size(12.0)
-                    .italics()
-                    .color(theme::TEXT_MUTED),
+                    egui::RichText::new(tasks::recipe_sentence(&recipe))
+                        .family(theme::MONO)
+                        .size(13.0)
+                        .color(theme::TEXT_SECONDARY),
                 );
-            }
-
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                let ready = !app.new_name.trim().is_empty() && !app.new_dir.trim().is_empty();
-                // Orange while it can be pressed, and the helper's muted ghost when it
-                // cannot: CORE §6 gives orange to "something *will* happen", and a Create
-                // with no name and no directory is exactly the case where nothing will.
-                create = theme::button(
-                    ui,
-                    egui::RichText::new("Create").color(theme::ORANGE),
-                    ready,
-                )
-                .clicked();
-                ui.label(
-                    egui::RichText::new("Nothing is written until you Apply · Esc closes")
+                if app.new_encrypt {
+                    ui.label(
+                        egui::RichText::new(
+                            "You will be asked for the password when you Apply, and again to \
+                             confirm it. INDIUM never stores it.",
+                        )
                         .size(12.0)
+                        .italics()
                         .color(theme::TEXT_MUTED),
-                );
+                    );
+                }
+
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let ready = !app.new_name.trim().is_empty() && !app.new_dir.trim().is_empty();
+                    // Orange while it can be pressed, and the helper's muted ghost when it
+                    // cannot: CORE §6 gives orange to "something *will* happen", and a Create
+                    // with no name and no directory is exactly the case where nothing will.
+                    create = theme::button(
+                        ui,
+                        egui::RichText::new("Create").color(theme::ORANGE),
+                        ready,
+                    )
+                    .clicked();
+                    ui.label(
+                        egui::RichText::new("Nothing is written until you Apply · Esc closes")
+                            .size(12.0)
+                            .color(theme::TEXT_MUTED),
+                    );
+                });
             });
         });
 

@@ -77,7 +77,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             }
 
             egui::ScrollArea::vertical()
-                .max_height(300.0)
+                .max_height(theme::list_height(ctx, 210.0, 300.0))
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     for c in &visible {

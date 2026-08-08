@@ -38,8 +38,38 @@ pub const STATUS_BAR: Color32 = Color32::from_rgb(0x24, 0x07, 0x1B);
 pub const WINDOW: Color32 = Color32::from_rgb(0x30, 0x0A, 0x24);
 /// The raised zones: sidebar, Inspector, tray.
 pub const PANEL: Color32 = Color32::from_rgb(0x3D, 0x0D, 0x2E);
-/// Popups. A popup covers every zone, so it is lighter than every zone.
-pub const POPUP: Color32 = Color32::from_rgb(0x4A, 0x10, 0x38);
+/// Popups. A popup covers every zone, so it is lighter than every zone — and it is now the
+/// one surface in INDIUM that is **not** aubergine.
+///
+/// P7 §3 made a popup lighter than the zones and stopped there, and it was not enough: at
+/// one step of luminance inside a single hue family, a popup over the window read as more
+/// window. The maker's verdict after looking at it was that the recolouring "still failed
+/// to distinguish" the popup at all. So the separation moved from lightness to **hue**.
+/// This is steel blue — the maker's own choice — at exactly the luminance the aubergine
+/// popup had, which is what lets the ground ladder and every contrast test below stand
+/// unchanged while the surface becomes unmistakable.
+///
+/// The luminance is not a matter of taste. The colour as first picked, `#4682B4`, measures
+/// **1.44:1 against `TEXT_MUTED`** and 3.54:1 against `TEXT`; on a ground that light the
+/// brightest text that exists — pure white — still reaches only **4.11:1**, so no choice of
+/// text colour could have rescued it. Scaling linear RGB by a constant preserves
+/// chromaticity exactly, so this is that blue, and only its lightness was spent.
+pub const POPUP: Color32 = Color32::from_rgb(0x13, 0x2A, 0x3D);
+/// The band across the top of a popup, carrying its title.
+///
+/// Sapphire, from the same scaling as `POPUP`, and darker than the popup's own ground for
+/// the reason the maker drew it that way: the band is a lid, not a highlight. It replaces
+/// Aubergine, which P7 put here to mean *this is the active item* — a meaning that stopped
+/// being available the moment the popup stopped being aubergine, because an aubergine band
+/// on a blue popup would have been the window's colour sitting on top of the thing covering
+/// the window.
+pub const POPUP_HEAD: Color32 = Color32::from_rgb(0x02, 0x17, 0x3F);
+/// The band across the foot of a popup, carrying what it is about to do.
+///
+/// Cobalt, from the same scaling, and the darkest of the three: the foot is where the
+/// sentence naming the consequence lives, and it is read against the deepest ground in the
+/// popup so that the Orange of an Apply or a Create has the most to push against.
+pub const POPUP_FOOT: Color32 = Color32::from_rgb(0x00, 0x13, 0x3A);
 /// The resting face of every button, and the lightest resting surface in the window — so a
 /// button reads the same on the status bar, on a panel and inside a popup, without knowing
 /// which one it is standing on.
@@ -381,12 +411,16 @@ pub fn install_visuals(ctx: &egui::Context) {
     // neutral grey title bar: egui fills the header with `widgets.open.weak_bg_fill` when
     // the window is the topmost layer, and `Visuals::dark()`'s value is `#2D2D2D`.
     //
-    // Aubergine, which is CORE §6's existing meaning used exactly — *this is the active
-    // item*. That egui only lights the band on the top layer is worth keeping deliberately:
+    // P7 put Aubergine here, meaning *this is the active item*. That meaning is no longer
+    // available: the popup is blue, and an aubergine band on it would be the window's own
+    // colour sitting on top of the thing covering the window — the exact confusion the
+    // recolouring exists to end. The band is now the popup's own darkest-but-one ground.
+    //
+    // That egui only lights the band on the top layer is still worth keeping deliberately:
     // when the password modal opens over New Archive, New Archive's band drops back to
     // plain POPUP and the modal is unmistakably the thing holding the keyboard.
-    v.widgets.open.bg_fill = AUBERGINE;
-    v.widgets.open.weak_bg_fill = AUBERGINE;
+    v.widgets.open.bg_fill = POPUP_HEAD;
+    v.widgets.open.weak_bg_fill = POPUP_HEAD;
     v.widgets.open.bg_stroke = edge();
     v.widgets.open.fg_stroke = Stroke::new(1.0, TEXT);
     v.widgets.open.expansion = 0.0;
@@ -513,6 +547,55 @@ pub fn zone(fill: Color32) -> egui::Frame {
         .corner_radius(R_ZONE)
         .inner_margin(egui::Margin::same(PAD))
         .outer_margin(egui::Margin::same(GUTTER / 2))
+}
+
+/// How tall a popup's scrolling middle may be, in the window it actually has.
+///
+/// `egui::Window` sizes itself from its content and is then **clipped** by the viewport
+/// rather than shrunk to it, so a list with a fixed height is a popup that fits until the
+/// window is small and then loses its own title band off the top and its foot off the
+/// bottom — at which point the thing the popup exists to say is the thing that is gone. The
+/// window has a minimum inner size of 480 (`main.rs`), and every popup here wanted more
+/// than that on its own.
+///
+/// `chrome` is everything in the popup that is not the list: its title band, its fields,
+/// its foot. `want` is the height the list was designed to have and is never exceeded — a
+/// big screen does not get a longer list, it gets the list the popup was drawn with. The
+/// floor of 80 is three rows: below that a scrolling list is worse than useless, and a
+/// popup that cannot fit three rows is one the user must resize the window for.
+pub fn list_height(ctx: &egui::Context, chrome: f32, want: f32) -> f32 {
+    let room = ctx.content_rect().height() - chrome;
+    want.min(room).max(80.0)
+}
+
+/// The band across the foot of a popup, holding what the popup is about to do.
+///
+/// The third of the popup's three grounds, and the one that carries the consequence — the
+/// button that acts and the sentence saying what happens if it is pressed. It is drawn as a
+/// full-width band rather than as a row on the popup's own ground so that the eye finds the
+/// action without reading for it, which is the same argument P7 §5 made for giving the
+/// status bar rows of fixed height.
+///
+/// The negative outer margin is what makes it a band. `egui::Window` resolves to
+/// `Frame::popup`, whose inner margin insets its whole content; a footer that respected that
+/// inset would be a floating strip with popup-coloured gutters down both sides and along the
+/// bottom, which is a panel, not a foot. Pulling back by the inner margin puts the band's
+/// edges back on the popup's edges. `PAD` is the value `install_spacing` gives that margin,
+/// so the two move together.
+pub fn foot(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::NONE
+        .fill(POPUP_FOOT)
+        .inner_margin(egui::Margin::symmetric(PAD, PAD - 2))
+        .outer_margin(egui::Margin {
+            left: -PAD,
+            right: -PAD,
+            top: 0,
+            bottom: -PAD,
+        })
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add_contents(ui);
+        });
 }
 
 /// A button, with the focus problem solved.
@@ -777,10 +860,9 @@ mod tests {
         ];
         // `widgets.open` is deliberately not in that list, though `install_visuals` sets it
         // alongside the other three. It is not a control state — it is the popup title band,
-        // and it is Aubergine for the same reason a hovered control is: CORE §6 gives
-        // Aubergine exactly one meaning, *the active item*. Requiring it to differ would be
-        // requiring the palette to break its own rule. `the_popup_title_bar_is_not_egui_grey`
-        // is what guards that field.
+        // and it belongs to the popup's own grounds rather than to the four faces of a
+        // button. `the_popup_title_bar_is_not_egui_grey` and `the_popup_wears_its_own_three
+        // _grounds` are what guard that field.
         for (i, a) in fills.iter().enumerate() {
             for b in fills.iter().skip(i + 1) {
                 assert_ne!(a, b, "two control states share a fill");
@@ -799,6 +881,54 @@ mod tests {
             egui::Visuals::dark().widgets.open.weak_bg_fill
         );
         assert_ne!(v.widgets.open.weak_bg_fill, v.window_fill);
+    }
+
+    /// Named after the verdict that ordered it: the popup "still failed to distinguish"
+    /// itself from the window behind it while both were aubergine one step apart.
+    ///
+    /// The three grounds must be a popup's own, must be legible, and must not be the
+    /// window's colour — and the last of those is checked on **hue**, because the whole
+    /// point of the change is that luminance was never going to do it. The popup body and
+    /// the window sit 1.19:1 apart by luminance and always will; what tells them apart is
+    /// that one is blue-dominant and the other red-dominant.
+    #[test]
+    fn the_popup_wears_its_own_three_grounds() {
+        let bands = [
+            ("POPUP_HEAD", POPUP_HEAD),
+            ("POPUP", POPUP),
+            ("POPUP_FOOT", POPUP_FOOT),
+        ];
+
+        for (name, g) in bands {
+            assert!(
+                contrast(TEXT, g) >= 7.0,
+                "TEXT on {name} is {:.2}:1",
+                contrast(TEXT, g)
+            );
+            assert!(
+                contrast(TEXT_MUTED, g) >= 4.5,
+                "TEXT_MUTED on {name} is {:.2}:1 — the first pick of this palette failed \
+                 here at 1.44:1, and that is the whole reason these values are not it",
+                contrast(TEXT_MUTED, g)
+            );
+            assert!(
+                g.b() > g.r(),
+                "{name} must be blue-dominant, or it is the window wearing a different hat"
+            );
+        }
+
+        for (name, g) in bands {
+            for (wn, w) in [("WINDOW", WINDOW), ("PANEL", PANEL), ("CONTROL", CONTROL)] {
+                assert!(
+                    w.r() > w.b() && g.b() > g.r(),
+                    "{name} and {wn} must not share a hue family"
+                );
+            }
+        }
+
+        // The band is a lid, not a highlight: both bands sit below the popup's own ground.
+        assert!(luminance(POPUP) > luminance(POPUP_HEAD));
+        assert!(luminance(POPUP_HEAD) > luminance(POPUP_FOOT));
     }
 
     /// CORE §6's rewritten Lines rule: two weights, and nothing thicker than the second.
