@@ -312,3 +312,159 @@ fn a_writer_that_is_abandoned_does_not_leave_a_readable_archive() {
         ),
     }
 }
+
+// ---------------------------------------------------------------------------
+// 7z, in both directions — P4 §4
+// ---------------------------------------------------------------------------
+
+fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name)
+}
+
+/// P4 §4: "An entry's packed size is reported when that entry is the sole occupant of
+/// its block. When a block holds several entries, apportioning it between them would be
+/// a guess, and INDIUM shows nothing rather than guess."
+///
+/// `basic.7z` is solid — one LZMA block holding all three files — and the crate stamps
+/// the whole block's packed size onto whichever entry comes first. This is the fixture
+/// that catches an implementation which checks for a non-zero size instead of counting
+/// the block's occupants.
+#[test]
+fn a_solid_7z_reports_no_packed_size_for_any_entry() {
+    let entries = indium::sevenz::list_all(&fixture("basic.7z"), None)
+        .expect("basic.7z should list through sevenz-rust2");
+
+    for entry in &entries {
+        assert_eq!(
+            entry.packed, None,
+            "{} shares its block, so its packed size is not knowable",
+            entry.path
+        );
+    }
+
+    let (solid, blocks) = indium::sevenz::solid_info(&fixture("basic.7z"), None)
+        .expect("basic.7z should report its block layout");
+    assert!(solid, "basic.7z is a solid archive");
+    assert_eq!(blocks, 1, "and it holds exactly one block");
+}
+
+/// P2 §6 wanted "with the passphrase, lists and extracts" and could not have it:
+/// libarchive answers every header on this fixture with "currently not supported",
+/// with or without the password, which P2 recorded as its first Deviation. P4 puts a
+/// reader behind the prompt that has been waiting since then.
+#[test]
+fn secret_headers_7z_lists_with_its_password_at_last() {
+    let path = fixture("secret-headers.7z");
+    let secret = indium::secret::Secret::from_text("indium");
+
+    let entries = indium::sevenz::list_all(&path, Some(&secret))
+        .expect("an encrypted-header 7z must list once the password is known");
+    assert_eq!(entries.len(), 1, "the fixture holds one member");
+    assert_eq!(entries[0].path, "f.txt");
+    assert!(entries[0].encrypted, "its block is AES-256");
+
+    // Sole occupant of its block, so this one *can* be reported.
+    assert_eq!(
+        entries[0].packed,
+        Some(48),
+        "f.txt owns its block outright, so its packed size is knowable"
+    );
+
+    assert!(
+        indium::sevenz::list_all(&path, None).is_err(),
+        "without the password the names are ciphertext and must not be listed"
+    );
+}
+
+/// CORE §5: "Encryption is 7z AES-256 and nothing else." The archive INDIUM writes must
+/// be unreadable without the password and correct with it.
+#[test]
+fn an_aes256_7z_indium_wrote_needs_its_password_to_open() {
+    let dir = TempDir::new("aes");
+    let path = dir.join("secret.7z");
+    let secret = indium::secret::Secret::from_text("indium");
+
+    let recipe = Recipe {
+        path: path.clone(),
+        method: Method::Lzma2,
+        level: 6,
+        encrypt: true,
+    };
+
+    {
+        let mut writer = indium::sevenz::Writer::create(&path, &recipe, Some(&secret))
+            .expect("could not open the 7z writer");
+        for (meta, data) in payload() {
+            match data {
+                Some(bytes) => {
+                    let mut cursor = Cursor::new(bytes);
+                    writer.put(&meta, Some(&mut cursor)).expect("could not put");
+                }
+                None => writer.put(&meta, None).expect("could not put"),
+            }
+        }
+        writer.finish().expect("could not finish the 7z");
+    }
+
+    assert!(
+        indium::sevenz::list_all(&path, None).is_err(),
+        "an encrypted-header archive must not list without its password"
+    );
+
+    let entries = indium::sevenz::list_all(&path, Some(&secret))
+        .expect("it must list with the right password");
+    let alpha = entries
+        .iter()
+        .find(|e| e.path == "alpha.txt")
+        .expect("alpha.txt must be in the archive");
+    assert_eq!(alpha.size, ALPHA.len() as u64);
+    assert!(alpha.encrypted, "every member is AES-256");
+}
+
+/// A plain 7z INDIUM writes must carry its metadata back, and be readable by the other
+/// reader too — libarchive, a genuinely independent implementation.
+#[test]
+fn a_plain_7z_round_trips_through_both_readers() {
+    let dir = TempDir::new("sevenz");
+    let path = dir.join("out.7z");
+    let recipe = Recipe {
+        path: path.clone(),
+        method: Method::Lzma2,
+        level: 6,
+        encrypt: false,
+    };
+
+    {
+        let mut writer = indium::sevenz::Writer::create(&path, &recipe, None)
+            .expect("could not open the 7z writer");
+        for (meta, data) in payload() {
+            match data {
+                Some(bytes) => {
+                    let mut cursor = Cursor::new(bytes);
+                    writer.put(&meta, Some(&mut cursor)).expect("could not put");
+                }
+                None => writer.put(&meta, None).expect("could not put"),
+            }
+        }
+        writer.finish().expect("could not finish the 7z");
+    }
+
+    let ours = indium::sevenz::list_all(&path, None).expect("our own reader must read it");
+    let theirs = arch::list_all(&path, None).expect("libarchive must read it too");
+
+    let mut a: Vec<&str> = ours.iter().map(|e| e.path.as_str()).collect();
+    let mut b: Vec<&str> = theirs.iter().map(|e| e.path.as_str()).collect();
+    a.sort_unstable();
+    b.sort_unstable();
+    assert_eq!(
+        a, b,
+        "the two readers must agree on the entry list, or routing listing to one and \
+         data to the other is unsound"
+    );
+
+    let beta = find(&ours, "sub/beta.txt");
+    assert_eq!(beta.mtime, Some(1_704_164_645), "mtime must survive");
+    assert_eq!(beta.mode & 0o7777, 0o600, "the unix mode must survive");
+}
