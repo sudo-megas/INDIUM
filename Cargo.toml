@@ -1,6 +1,6 @@
 [package]
 name = "indium"
-version = "0.1.0"
+version = "0.4.0"
 edition = "2021"
 license = "GPL-3.0-only"
 description = "An archive manager for Linux on Wayland where the metadata is the main event."
@@ -9,6 +9,7 @@ description = "An archive manager for Linux on Wayland where the metadata is the
 eframe = { version = "0.36.1", default-features = false, features = ["glow", "wayland"] }
 egui_extras = "0.36.1"
 serde = { version = "1.0.229", features = ["derive"] }
+sevenz-rust2 = { version = "0.21.4", default-features = false, features = ["aes256", "compress"] }
 toml = "1.1.4"
 wl-clipboard-rs = "0.9.3"
 

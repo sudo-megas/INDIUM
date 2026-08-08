@@ -9,6 +9,7 @@ pub mod arch;
 pub mod model;
 pub mod platform;
 pub mod secret;
+pub mod tasks;
 pub mod theme;
 pub mod ui;
 pub mod util;
