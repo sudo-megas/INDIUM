@@ -21,6 +21,20 @@ pub fn state_home() -> PathBuf {
     xdg_dir("XDG_STATE_HOME", ".local/state")
 }
 
+/// `$XDG_RUNTIME_DIR`, or the cache directory when it is unset.
+///
+/// The runtime directory is the right home for state that should not outlive the
+/// session — P4's Apply locks live here, so a crash leaves nothing a logout will not
+/// clear. `$XDG_RUNTIME_DIR` can be legitimately absent (CORE §9 permits running as
+/// root, and root often has none), and the fallback is silent, exactly as
+/// `platform::scratch` already treats the same absence.
+pub fn runtime_or_cache_dir() -> PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| xdg_dir("XDG_CACHE_HOME", ".cache"))
+}
+
 fn xdg_dir(var: &str, fallback: &str) -> PathBuf {
     match std::env::var_os(var) {
         // The spec says a relative value is invalid and must be ignored.

@@ -543,7 +543,7 @@ impl Reader {
         Ok(Some(entry))
     }
 
-    fn skip_data(&mut self) {
+    pub fn skip_data(&mut self) {
         // SAFETY: `self.raw` is live.
         unsafe { archive_read_data_skip(self.raw) };
     }

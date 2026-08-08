@@ -5,17 +5,23 @@
 //! walking its entries, then atomically renames over the original. The original is never
 //! touched until the replacement is proven."
 //!
-//! This file is the pure half: the queue you edit, the fold that turns it into a plan,
-//! and the judgements that decide whether a rebuild is allowed at all. It performs no
-//! I/O and opens no archive, which is why nearly every rule below is directly testable.
+//! Most of this file is pure: the queue you edit, the fold that turns it into a plan, and
+//! the judgements that decide whether a rebuild is allowed at all. None of that opens an
+//! archive or touches a disk, which is why nearly every rule below is directly testable.
+//! `apply` at the foot is the one part that does, and it is deliberately the last thing
+//! here — by the time it runs, every decision has already been made.
 //!
 //! Copyright © sudo-megas. GPL-3.0-only.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Sender;
+use std::sync::Arc;
 
 use crate::arch::{path_escapes, ArchiveInfo, Entry};
+use crate::secret::Secret;
 use crate::util::normalize_archive_path;
 
 // ---------------------------------------------------------------------------
@@ -966,6 +972,410 @@ fn container_label(container: Container) -> &'static str {
         Container::Zip => "zip",
         Container::SevenZ => "7z",
     }
+}
+
+// ---------------------------------------------------------------------------
+// Apply — P4 §2. The only part of this file that touches a disk.
+// ---------------------------------------------------------------------------
+
+/// Which half of the work a progress report belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    Building,
+    Verifying,
+}
+
+impl Phase {
+    pub fn label(self) -> &'static str {
+        match self {
+            Phase::Building => "Building",
+            Phase::Verifying => "Verifying",
+        }
+    }
+}
+
+/// What Apply reports back to the window.
+///
+/// `Cancelled` is a variant of its own, unlike `ExtractMsg`, where its absence means a
+/// cancelled extraction is indistinguishable from a finished one. An Apply that stopped
+/// early must never look like an Apply that succeeded.
+#[derive(Debug)]
+pub enum ApplyMsg {
+    Progress {
+        phase: Phase,
+        done: usize,
+        total: usize,
+    },
+    Done {
+        entries: usize,
+    },
+    Cancelled,
+    Failed(String),
+}
+
+/// The advisory lock that stops two windows rebuilding one archive.
+///
+/// P3 §4 carried this requirement forward as "an advisory lock on the archive path", and
+/// the obvious implementation — lock the archive file — **does not work**, which was
+/// measured rather than reasoned about. `File::try_lock` is `flock(2)`, whose lock lives
+/// on the inode; Apply finishes by renaming a different inode over the name; so the
+/// holder keeps a lock on an unlinked inode nobody can reach, and the next window opens
+/// the new one and locks it happily. The guard would hold for the first Apply and fail
+/// silently for every one after — exactly the case it exists for.
+///
+/// So the lock is taken on a file named for the archive under `$XDG_RUNTIME_DIR`, which
+/// nothing ever renames over. It sits there rather than beside the archive so INDIUM
+/// leaves no litter in the user's folders, and so the session's own logout wipe clears
+/// whatever a crash leaves behind.
+pub struct Lock {
+    _file: std::fs::File,
+}
+
+impl Lock {
+    /// Take the lock for `target`, or report why not.
+    pub fn take(target: &Path) -> Result<Lock, String> {
+        let path = lock_path_for(target);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("could not make the lock directory: {e}"))?;
+        }
+        let file = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|e| format!("could not open the lock file: {e}"))?;
+
+        match file.try_lock() {
+            Ok(()) => Ok(Lock { _file: file }),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                Err("Another INDIUM window is rebuilding this archive.".to_string())
+            }
+            Err(std::fs::TryLockError::Error(e)) => {
+                Err(format!("could not lock this archive: {e}"))
+            }
+        }
+    }
+}
+
+/// Where an archive's lock file lives.
+///
+/// The name is derived from the full path so two archives of the same name in different
+/// directories do not collide, and it is sanitised so it is always one flat filename.
+/// Pure, so the rule is testable without a runtime directory.
+pub fn lock_name_for(target: &Path) -> String {
+    let full = target.to_string_lossy();
+    let mut name = String::with_capacity(full.len() + 5);
+    for ch in full.chars() {
+        match ch {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '.' | '-' | '_' => name.push(ch),
+            _ => name.push('%'),
+        }
+    }
+    // A very deep path would make a filename no filesystem accepts. Keeping the tail
+    // keeps the part that differs between neighbours.
+    if name.len() > 180 {
+        name = name.split_off(name.len() - 180);
+    }
+    format!("{name}.lock")
+}
+
+fn lock_path_for(target: &Path) -> PathBuf {
+    crate::platform::runtime_or_cache_dir()
+        .join("indium")
+        .join("locks")
+        .join(lock_name_for(target))
+}
+
+/// Everything Apply needs, gathered before a worker thread is spawned.
+pub struct ApplyInput {
+    pub target: PathBuf,
+    pub recipe: Recipe,
+    pub tasks: Vec<Task>,
+    pub adds: Vec<AddItem>,
+    /// The password the source was read with, if it was encrypted.
+    pub source_password: Option<Secret>,
+    /// The password the rebuilt archive is encrypted with, if it is.
+    pub target_password: Option<Secret>,
+}
+
+/// Rebuild the archive, and replace the original only once the replacement is proven.
+///
+/// CORE §3, in order: lock, re-list, fold, build beside the target, verify by walking the
+/// new archive's entries, rename over, sync. Any failure and any cancellation removes the
+/// temp file and leaves the original exactly as it was.
+pub fn apply(
+    input: &ApplyInput,
+    tx: &Sender<ApplyMsg>,
+    cancel: &Arc<AtomicBool>,
+) -> Result<usize, String> {
+    let creating = input.tasks.iter().any(|t| matches!(t, Task::Create { .. }));
+
+    // 1. The lock, held for everything below.
+    let _lock = Lock::take(&input.target)?;
+
+    // A new archive must never silently replace an existing file. `create_new` failing
+    // with `AlreadyExists` is the check, and it costs nothing.
+    if creating && input.target.exists() {
+        return Err(format!(
+            "{} already exists.",
+            input.target.to_string_lossy()
+        ));
+    }
+
+    // 2. Re-list the source inside the worker. The archive may have changed since the
+    //    queue was staged against it, and a guard that assumes otherwise is not a guard.
+    let source: Vec<Entry> = if creating {
+        Vec::new()
+    } else {
+        crate::arch::list_all(&input.target, input.source_password.as_ref())
+            .map_err(|e| e.to_string())?
+    };
+
+    // 3. Fold. Any conflict fails here, before a byte is written.
+    let plan = plan(&source, &input.tasks, &input.adds).map_err(|c| c.to_string())?;
+
+    // 4. Build into a temp beside the target. A leftover from an interrupted Apply is
+    //    removed first — that is the whole of the orphan policy, and it only ever
+    //    touches a file whose name is provably ours.
+    let temp = temp_path_for(&input.target);
+    if let Some(name) = temp.file_name().and_then(|n| n.to_str()) {
+        if is_our_temp(name) && temp.exists() {
+            let _ = std::fs::remove_file(&temp);
+        }
+    }
+
+    let outcome = build_and_verify(input, &plan, &source, &temp, tx, cancel);
+
+    match outcome {
+        Err(e) => {
+            let _ = std::fs::remove_file(&temp);
+            Err(e)
+        }
+        Ok(None) => {
+            // Cancelled. The temp goes; the original was never touched.
+            let _ = std::fs::remove_file(&temp);
+            let _ = tx.send(ApplyMsg::Cancelled);
+            Ok(0)
+        }
+        Ok(Some(count)) => {
+            // 7. Commit. The rename is atomic; the parent directory is synced because
+            //    the durability of a rename needs it, exactly as `store::atomic_write`
+            //    already does for the settings file.
+            std::fs::rename(&temp, &input.target).map_err(|e| {
+                let _ = std::fs::remove_file(&temp);
+                format!("could not replace the archive: {e}")
+            })?;
+            if let Some(dir) = input.target.parent() {
+                if let Ok(handle) = std::fs::File::open(dir) {
+                    let _ = handle.sync_all();
+                }
+            }
+            let _ = tx.send(ApplyMsg::Done { entries: count });
+            Ok(count)
+        }
+    }
+}
+
+/// Build the replacement and prove it. `Ok(None)` means cancelled.
+fn build_and_verify(
+    input: &ApplyInput,
+    plan: &Plan,
+    source: &[Entry],
+    temp: &Path,
+    tx: &Sender<ApplyMsg>,
+    cancel: &Arc<AtomicBool>,
+) -> Result<Option<usize>, String> {
+    let total = plan.out_count();
+    let mut written = 0usize;
+    let mut added_sizes: Vec<(String, u64)> = Vec::new();
+
+    {
+        let mut sink: Box<dyn Sink> = match input.recipe.container() {
+            Container::SevenZ => Box::new(crate::sevenz::Writer::create(
+                temp,
+                &input.recipe,
+                input.target_password.as_ref(),
+            )?),
+            _ => Box::new(crate::arch::Writer::create(temp, &input.recipe)?),
+        };
+
+        // The kept members, streamed one pass over the source.
+        if !source.is_empty() {
+            let mut reader =
+                crate::arch::Reader::open(&input.target, input.source_password.as_ref())
+                    .map_err(|e| e.to_string())?;
+            let mut index = 0usize;
+
+            while let Some(entry) = reader.next_entry().map_err(|e| e.to_string())? {
+                if cancel.load(Ordering::Relaxed) {
+                    sink.abandon();
+                    return Ok(None);
+                }
+
+                let disposition = plan.source.get(index);
+                index += 1;
+
+                match disposition {
+                    Some(Disposition::Keep { out_path, hardlink }) => {
+                        let meta = Meta::from_entry(&entry, out_path, hardlink.as_deref());
+                        if meta.has_data() {
+                            let mut data = crate::arch::EntryData::new(&mut reader);
+                            sink.put(&meta, Some(&mut data))?;
+                        } else {
+                            reader.skip_data();
+                            sink.put(&meta, None)?;
+                        }
+                        written += 1;
+                        let _ = tx.send(ApplyMsg::Progress {
+                            phase: Phase::Building,
+                            done: written,
+                            total,
+                        });
+                    }
+                    _ => reader.skip_data(),
+                }
+            }
+        }
+
+        // Then the new members, appended.
+        for item in &plan.adds {
+            if cancel.load(Ordering::Relaxed) {
+                sink.abandon();
+                return Ok(None);
+            }
+            let meta = meta_from_fs(&item.source, &item.out_path)?;
+            added_sizes.push((item.out_path.clone(), meta.size));
+            if meta.has_data() {
+                let mut file = std::fs::File::open(&item.source)
+                    .map_err(|e| format!("could not read {}: {e}", item.source.display()))?;
+                sink.put(&meta, Some(&mut file))?;
+            } else {
+                sink.put(&meta, None)?;
+            }
+            written += 1;
+            let _ = tx.send(ApplyMsg::Progress {
+                phase: Phase::Building,
+                done: written,
+                total,
+            });
+        }
+
+        // 5. Finish and sync, so what is verified is what is on the disk.
+        sink.finish()?;
+    }
+
+    if let Ok(handle) = std::fs::File::open(temp) {
+        let _ = handle.sync_all();
+    }
+
+    if cancel.load(Ordering::Relaxed) {
+        return Ok(None);
+    }
+
+    // 6. Verify by walking the new archive's entries.
+    let _ = tx.send(ApplyMsg::Progress {
+        phase: Phase::Verifying,
+        done: 0,
+        total,
+    });
+    let built = match input.recipe.container() {
+        Container::SevenZ => crate::sevenz::list_all(temp, input.target_password.as_ref())
+            .map_err(|e| e.to_string())?,
+        _ => crate::arch::list_all(temp, None).map_err(|e| e.to_string())?,
+    };
+    let expected = plan.expected(source, &added_sizes);
+    verify_against(&expected, &built)?;
+    let _ = tx.send(ApplyMsg::Progress {
+        phase: Phase::Verifying,
+        done: total,
+        total,
+    });
+
+    Ok(Some(written))
+}
+
+/// The metadata a file on disk brings into the archive.
+fn meta_from_fs(source: &Path, out_path: &str) -> Result<Meta, String> {
+    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::fs::PermissionsExt;
+
+    // `symlink_metadata`, not `metadata`: a symlink staged for adding is added as a
+    // symlink, not silently followed and stored as a copy of whatever it points at.
+    let md = std::fs::symlink_metadata(source)
+        .map_err(|e| format!("could not read {}: {e}", source.display()))?;
+
+    let symlink = if md.file_type().is_symlink() {
+        std::fs::read_link(source)
+            .ok()
+            .map(|t| t.to_string_lossy().to_string())
+    } else {
+        None
+    };
+
+    Ok(Meta {
+        out_path: out_path.to_string(),
+        size: if md.is_dir() || symlink.is_some() {
+            0
+        } else {
+            md.len()
+        },
+        is_dir: md.is_dir(),
+        mode: md.permissions().mode() & 0o7777,
+        mtime: Some(md.mtime()),
+        atime: None,
+        ctime: None,
+        uid: md.uid() as i64,
+        gid: md.gid() as i64,
+        uname: None,
+        gname: None,
+        symlink,
+        hardlink: None,
+    })
+}
+
+/// Expand a directory staged for adding into the members it contributes.
+///
+/// Side-effecting, and therefore kept out of `plan`, which must stay pure. The queue
+/// keeps one row — *"Add photos/"* — rather than four thousand.
+pub fn expand_add(source: &Path, dest: &str) -> std::io::Result<Vec<AddItem>> {
+    let mut out = Vec::new();
+    let md = std::fs::symlink_metadata(source)?;
+    if !md.is_dir() {
+        out.push(AddItem {
+            source: source.to_path_buf(),
+            out_path: normalize_archive_path(dest),
+        });
+        return Ok(out);
+    }
+
+    let mut stack = vec![(source.to_path_buf(), normalize_archive_path(dest))];
+    while let Some((dir, prefix)) = stack.pop() {
+        out.push(AddItem {
+            source: dir.clone(),
+            out_path: prefix.clone(),
+        });
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            let child_out = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}/{name}")
+            };
+            let child_md = std::fs::symlink_metadata(entry.path())?;
+            if child_md.is_dir() {
+                stack.push((entry.path(), child_out));
+            } else {
+                out.push(AddItem {
+                    source: entry.path(),
+                    out_path: child_out,
+                });
+            }
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

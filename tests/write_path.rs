@@ -468,3 +468,247 @@ fn a_plain_7z_round_trips_through_both_readers() {
     assert_eq!(beta.mtime, Some(1_704_164_645), "mtime must survive");
     assert_eq!(beta.mode & 0o7777, 0o600, "the unix mode must survive");
 }
+
+// ---------------------------------------------------------------------------
+// Apply — P4 §2. "The original is never touched until the replacement is proven."
+// ---------------------------------------------------------------------------
+
+use indium::tasks::{self, AddItem, ApplyInput, ApplyMsg, Task};
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::channel;
+use std::sync::Arc;
+
+fn no_cancel() -> Arc<AtomicBool> {
+    Arc::new(AtomicBool::new(false))
+}
+
+/// Run Apply and collect what it reported.
+fn run_apply(
+    input: &ApplyInput,
+    cancel: &Arc<AtomicBool>,
+) -> (Result<usize, String>, Vec<ApplyMsg>) {
+    let (tx, rx) = channel();
+    let result = tasks::apply(input, &tx, cancel);
+    drop(tx);
+    (result, rx.into_iter().collect())
+}
+
+fn input_for(path: &Path, tasks: Vec<Task>) -> ApplyInput {
+    ApplyInput {
+        target: path.to_path_buf(),
+        recipe: recipe(path, Method::Gzip),
+        tasks,
+        adds: Vec::new(),
+        source_password: None,
+        target_password: None,
+    }
+}
+
+/// The load-bearing one. Apply with nothing staged must reproduce the archive it read,
+/// or every stronger claim in this milestone rests on nothing.
+#[test]
+fn an_apply_with_no_tasks_reproduces_the_archive() {
+    let dir = TempDir::new("identity");
+    let path = dir.join("out.tar.gz");
+    write_payload(&path, &recipe(&path, Method::Gzip));
+
+    let before = arch::list_all(&path, None).expect("could not list before");
+    let (result, _) = run_apply(&input_for(&path, Vec::new()), &no_cancel());
+    result.expect("an empty Apply must succeed");
+
+    let after = arch::list_all(&path, None).expect("could not list after");
+    assert_eq!(
+        before.len(),
+        after.len(),
+        "the entry count must be unchanged"
+    );
+    for old in &before {
+        let new = find(&after, &old.path);
+        assert_eq!(new.size, old.size, "{}: size", old.path);
+        assert_eq!(new.mtime, old.mtime, "{}: mtime", old.path);
+        assert_eq!(new.uid, old.uid, "{}: uid", old.path);
+        assert_eq!(new.uname, old.uname, "{}: owner name", old.path);
+        assert_eq!(new.mode & 0o7777, old.mode & 0o7777, "{}: mode", old.path);
+    }
+    assert!(
+        !tasks::temp_path_for(&path).exists(),
+        "the temp file must not survive a successful Apply"
+    );
+}
+
+/// A removed entry goes, and every survivor keeps its exact bytes.
+#[test]
+fn a_removed_entry_is_gone_and_every_survivor_is_byte_identical() {
+    let dir = TempDir::new("remove");
+    let path = dir.join("out.tar.gz");
+    write_payload(&path, &recipe(&path, Method::Gzip));
+
+    let before = arch::crc32_of(&path, "alpha.txt", None).expect("could not checksum before");
+
+    let tasks_list = vec![Task::Remove {
+        path: "sub/beta.txt".to_string(),
+    }];
+    let (result, _) = run_apply(&input_for(&path, tasks_list), &no_cancel());
+    result.expect("the removal must apply");
+
+    let after = arch::list_all(&path, None).expect("could not list after");
+    assert!(
+        after.iter().all(|e| e.path != "sub/beta.txt"),
+        "the removed entry must be gone"
+    );
+    assert_eq!(
+        arch::crc32_of(&path, "alpha.txt", None).expect("could not checksum after"),
+        before,
+        "a survivor's bytes must not change because a sibling was removed"
+    );
+}
+
+/// CORE §3's sentence, tested directly. The failure is injected honestly — an add whose
+/// source file does not exist — rather than by a fault harness.
+#[test]
+fn a_failed_apply_leaves_the_original_untouched() {
+    let dir = TempDir::new("fail");
+    let path = dir.join("out.tar.gz");
+    write_payload(&path, &recipe(&path, Method::Gzip));
+
+    let original = fs::read(&path).expect("could not snapshot the original");
+
+    let mut input = input_for(&path, Vec::new());
+    input.adds = vec![AddItem {
+        source: dir.join("does-not-exist.txt"),
+        out_path: "ghost.txt".to_string(),
+    }];
+
+    let (result, _) = run_apply(&input, &no_cancel());
+    assert!(result.is_err(), "an add with no source must fail the Apply");
+
+    assert_eq!(
+        fs::read(&path).expect("the original must still be readable"),
+        original,
+        "the original must be byte-for-byte what it was"
+    );
+    assert!(
+        !tasks::temp_path_for(&path).exists(),
+        "a failed Apply must not leave its temp file behind"
+    );
+}
+
+/// A cancelled Apply must be distinguishable from a finished one, and must leave the
+/// original alone. This is the bug extraction still has and Apply must not inherit.
+#[test]
+fn a_cancelled_apply_leaves_the_original_untouched_and_says_so() {
+    let dir = TempDir::new("cancel");
+    let path = dir.join("out.tar.gz");
+    write_payload(&path, &recipe(&path, Method::Gzip));
+
+    let original = fs::read(&path).expect("could not snapshot the original");
+
+    // Cancelled before the first member is written.
+    let cancel = Arc::new(AtomicBool::new(true));
+    let (result, messages) = run_apply(&input_for(&path, Vec::new()), &cancel);
+    result.expect("a cancelled Apply is not an error");
+
+    assert!(
+        messages.iter().any(|m| matches!(m, ApplyMsg::Cancelled)),
+        "a cancelled Apply must say so, and never look like a finished one"
+    );
+    assert_eq!(
+        fs::read(&path).expect("the original must still be readable"),
+        original,
+        "the original must be untouched"
+    );
+    assert!(
+        !tasks::temp_path_for(&path).exists(),
+        "a cancelled Apply must remove its temp file"
+    );
+}
+
+/// P3 §4's carried-forward requirement: two windows must not rebuild one archive. The
+/// test takes the lock itself, exactly as a second window would.
+#[test]
+fn a_second_apply_on_a_locked_archive_refuses() {
+    let dir = TempDir::new("locked");
+    let path = dir.join("out.tar.gz");
+    write_payload(&path, &recipe(&path, Method::Gzip));
+    let original = fs::read(&path).expect("could not snapshot");
+
+    let held = tasks::Lock::take(&path).expect("the first lock must be granted");
+
+    let (result, _) = run_apply(&input_for(&path, Vec::new()), &no_cancel());
+    let err = result.expect_err("a second Apply must refuse while the first holds the lock");
+    assert!(
+        err.contains("Another INDIUM window"),
+        "it must say why, in the sentence P4 §2 fixes: {err}"
+    );
+    assert_eq!(
+        fs::read(&path).expect("the original must be readable"),
+        original,
+        "a refused Apply writes nothing"
+    );
+
+    drop(held);
+    let (result, _) = run_apply(&input_for(&path, Vec::new()), &no_cancel());
+    result.expect("once the lock is released, Apply must proceed");
+}
+
+/// P4 §2: "a crashed Apply leaves exactly one leftover per archive rather than an
+/// accumulating pile, and the next Apply on that archive clears it."
+#[test]
+fn an_orphaned_temp_from_a_crashed_apply_is_overwritten_not_multiplied() {
+    let dir = TempDir::new("orphan");
+    let path = dir.join("out.tar.gz");
+    write_payload(&path, &recipe(&path, Method::Gzip));
+
+    let temp = tasks::temp_path_for(&path);
+    fs::write(&temp, b"a leftover from an Apply that never finished")
+        .expect("could not plant the orphan");
+
+    let (result, _) = run_apply(&input_for(&path, Vec::new()), &no_cancel());
+    result.expect("Apply must proceed over a leftover");
+
+    assert!(!temp.exists(), "the leftover must be gone, not multiplied");
+    let leftovers: Vec<_> = fs::read_dir(dir.join(""))
+        .expect("could not read the directory")
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name()
+                .to_str()
+                .map(tasks::is_our_temp)
+                .unwrap_or(false)
+        })
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "no temp file of ours may remain: {leftovers:?}"
+    );
+}
+
+/// A rename must move the member without touching its bytes.
+#[test]
+fn a_renamed_entry_keeps_its_bytes_and_its_metadata() {
+    let dir = TempDir::new("rename");
+    let path = dir.join("out.tar.gz");
+    write_payload(&path, &recipe(&path, Method::Gzip));
+
+    let before = arch::list_all(&path, None).expect("could not list before");
+    let beta_before = find(&before, "sub/beta.txt").clone();
+
+    let tasks_list = vec![Task::Rename {
+        from: "sub/beta.txt".to_string(),
+        to: "sub/renamed.txt".to_string(),
+    }];
+    let (result, _) = run_apply(&input_for(&path, tasks_list), &no_cancel());
+    result.expect("the rename must apply");
+
+    let after = arch::list_all(&path, None).expect("could not list after");
+    let renamed = find(&after, "sub/renamed.txt");
+    assert_eq!(renamed.size, beta_before.size, "size must survive a rename");
+    assert_eq!(renamed.uid, beta_before.uid, "uid must survive");
+    assert_eq!(renamed.uname, beta_before.uname, "owner name must survive");
+    assert_eq!(renamed.mtime, beta_before.mtime, "mtime must survive");
+    assert_eq!(
+        arch::crc32_of(&path, "sub/renamed.txt", None).expect("could not checksum"),
+        indium::util::crc32(BETA),
+        "the bytes must be the bytes"
+    );
+}
