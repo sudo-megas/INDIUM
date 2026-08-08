@@ -9,7 +9,7 @@
 </p>
 
 <p>
-  <img alt="Debian package" src="https://img.shields.io/badge/Debian%20package-4.6%20MB-772953?style=for-the-badge&logo=debian&logoColor=white">
+  <img alt="Debian package" src="https://img.shields.io/badge/Debian%20package-6.5%20MB-772953?style=for-the-badge&logo=debian&logoColor=white">
   <img alt="Platform"       src="https://img.shields.io/badge/Linux-Wayland-E95420?style=for-the-badge&logo=linux&logoColor=white">
 </p>
 
@@ -73,15 +73,28 @@ sudo apt install ./indium_1.0.0-1_amd64.deb
 ```
 
 **The two packages do not have the same floor, and it matters more than the file extension
-does.** The `.deb` is built on Debian bookworm and needs **glibc 2.35 or newer** — which is
-what it declares, and which covers bookworm, trixie and Ubuntu 22.04 onward. The
-`.pkg.tar.zst` is built on Arch and needs **glibc 2.43**, as does the plain tarball beside
-it — so the tarball is not a way to run INDIUM on Debian. It is the Arch binary without the
-package around it, and on bookworm it will refuse to start.
+does.** The `.deb` is built inside `debian:bookworm` and needs **glibc 2.35 or newer** —
+which is what it declares, and which covers bookworm, trixie and Ubuntu 22.04 onward. The
+`.pkg.tar.zst` is built inside `archlinux:base-devel` and needs **glibc 2.43**, which is
+right for the distribution it is for and wrong everywhere else.
+
+### 3.C Anything else
+
+`indium-1.0-x86_64.tar.gz` is the `.deb`'s binary with no packaging around it, so it carries
+the lower of the two floors — glibc 2.35. Unpack it, put `indium` wherever you keep such
+things, and satisfy `libarchive.so.13`, `libwayland-client`, `libxkbcommon` and `libEGL`
+yourself. It installs no icon and no menu entry; `./build/install-desktop.sh` from a source
+checkout is what does that.
+
+All three artefacts are built by
+[`.github/workflows/release.yml`](.github/workflows/release.yml), in containers, from the
+tag — none of them on the maker's machine. The workflow file is the whole provenance, and
+before either package is released INDIUM's own reader opens both and checks they put
+identical files on a machine.
 
 No AppImage, no Flatpak, no Snap.
 
-### 3.C Build From Source
+### 3.D Build From Source
 
 ```sh
 git clone https://github.com/sudo-megas/INDIUM.git
