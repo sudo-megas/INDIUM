@@ -340,7 +340,28 @@ impl Indium {
     // Opening and listing
     // -----------------------------------------------------------------------
 
+    /// Open an archive, unless something is already writing files.
+    ///
+    /// This is reached from seven places — the command line, a drop, `Ctrl+O`, a click or
+    /// `Enter` on a recent, the password prompt's List resume, and Apply's own re-open —
+    /// and until P7 it checked nothing at all. The two lines below are a rug-pull: they
+    /// raise the old cancellation flag and then hand the window a new one, which stops a
+    /// running extraction dead in the middle and leaves the user with a directory of
+    /// half a selection under a status line about a different archive.
+    ///
+    /// `work_running` is the same refusal `E`, `Ctrl+C` and Apply already make, and its
+    /// two sentences are now visible while work is in flight — row 2 of the status bar
+    /// stopped hiding them. It is asked **first**, before anything is cleared: a refusal
+    /// that has already wiped the selection, the cwd and the entry list is a rug-pull
+    /// with an apology attached.
+    ///
+    /// A *listing* is not work in this sense and is still cancelled without ceremony:
+    /// nothing has been written, CORE §1 gives the window one archive, and opening the
+    /// next one is the whole of what the user asked for.
     pub fn open_archive(&mut self, ctx: &egui::Context, path: PathBuf, passphrase: Option<Secret>) {
+        if self.work_running() {
+            return;
+        }
         self.cancel.store(true, Ordering::Relaxed);
         self.cancel = Arc::new(AtomicBool::new(false));
 
@@ -435,6 +456,8 @@ impl Indium {
                         label: "Extracting".to_string(),
                     });
                 }
+                // `Done` now means done. The worker decides, so nothing here re-reads a
+                // flag that may already belong to a later operation.
                 ExtractMsg::Done { written } => {
                     self.progress = None;
                     self.extract_rx = None;
@@ -445,19 +468,34 @@ impl Indium {
                     // The password's job is over. Neither post-step below needs it: one
                     // reads the scratch directory, the other reads `.desktop` files.
                     self.passphrase = None;
-                    // A cancelled extraction returns `Ok` with however much it managed to
-                    // write, so the flag is the only thing that tells the two apart — and
-                    // half a selection is not what `Ctrl+C` or Open With asked for. A plain
-                    // extract keeps the count it always reported.
-                    let cancelled = self.cancel.load(Ordering::Relaxed);
                     match std::mem::replace(&mut self.post_extract, PostExtract::None) {
                         PostExtract::None => {}
-                        _ if cancelled => {
-                            self.status = "Cancelled. Nothing was offered.".to_string();
-                        }
                         PostExtract::Clipboard { on_disk } => self.finish_copy_out(on_disk),
                         PostExtract::OpenWith { entry } => self.finish_open_with(&entry),
                     }
+                }
+                ExtractMsg::Cancelled { written } => {
+                    self.progress = None;
+                    self.extract_rx = None;
+                    self.passphrase = None;
+                    // The post-step is dropped rather than run. Half a selection is not
+                    // what `Ctrl+C` asked for, and half a file is not what Open With would
+                    // hand an application — and neither of them can tell, because a
+                    // partial extraction leaves whole files on disk beside the missing
+                    // ones. What was asked for decides what the sentence can honestly say.
+                    let outward = !matches!(self.post_extract, PostExtract::None);
+                    self.post_extract = PostExtract::None;
+                    let entries = if written == 1 { "entry" } else { "entries" };
+                    self.status = if written == 0 {
+                        "Cancelled. Nothing was extracted.".to_string()
+                    } else if outward {
+                        format!("Cancelled after {written} {entries}. Nothing was offered.")
+                    } else {
+                        format!(
+                            "Cancelled after {written} {entries}; \
+                             what came out is still in the destination."
+                        )
+                    };
                 }
                 ExtractMsg::Failed(msg) => {
                     self.progress = None;
@@ -1064,6 +1102,12 @@ impl Indium {
     /// progress bar, so starting an extraction over a rebuild would leave the rebuild's
     /// Cancel pointing at a flag nothing reads. CORE §3 has one worker, and this is what
     /// keeps it to one.
+    ///
+    /// P7 added `open_archive` to the callers, which is the entry point that was doing
+    /// the replacing rather than being refused it. Both sentences below are written to be
+    /// read by someone who has just pressed a key and had nothing happen — and from P7
+    /// they can be, because row 2 of the status bar no longer hides the status text while
+    /// work is running.
     fn work_running(&mut self) -> bool {
         if self.extract_rx.is_some() {
             self.status =
@@ -1110,7 +1154,19 @@ impl Indium {
         std::thread::spawn(move || {
             match arch::extract(&archive, &wanted, &dest, pass.as_ref(), Some(&tx), &cancel) {
                 Ok(written) => {
-                    let _ = tx.send(ExtractMsg::Done { written });
+                    // A cancelled extraction returns `Ok` with however much it managed to
+                    // write, so the two answers have to be told apart here — and by *this*
+                    // worker's own `Arc`, the one moved into the closure, never by
+                    // `self.cancel`. The window replaces that field on every `spawn_extract`
+                    // and every `open_archive`, so a UI-side read answers for whichever
+                    // operation is newest rather than for the one that just landed. That is
+                    // the shape `tasks::apply` already uses for `ApplyMsg::Cancelled`, and
+                    // its doc comment named this very defect.
+                    if cancel.load(Ordering::Relaxed) {
+                        let _ = tx.send(ExtractMsg::Cancelled { written });
+                    } else {
+                        let _ = tx.send(ExtractMsg::Done { written });
+                    }
                 }
                 Err(e) => {
                     let _ = tx.send(ExtractMsg::Failed(e.to_string()));
@@ -1451,7 +1507,12 @@ pub fn archive_stem(path: &std::path::Path) -> String {
 
 impl eframe::App for Indium {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        let c = theme::WINDOW;
+        // `VOID`, because this is the only thing that shows *between* the zones: every
+        // zone is a `theme::zone()` frame with half a gutter of outer margin (P7's
+        // spacing note on `GUTTER`), and what fills that gutter is whatever eframe
+        // cleared the framebuffer to. `WINDOW` here made the gutter the same colour as
+        // the entry table's well, so the cards had nothing to float above.
+        let c = theme::VOID;
         [
             c.r() as f32 / 255.0,
             c.g() as f32 / 255.0,
@@ -1471,8 +1532,17 @@ impl eframe::App for Indium {
 
         // Panels are shown into the root `Ui`; the order fixes the layout, with the
         // table taking whatever the four edges leave behind.
-        sidebar::show(self, ui);
+        //
+        // The status bar goes **first**, before the sidebar, and that ordering is the
+        // whole of it: egui gives an earlier panel priority over the space, so the bar
+        // now spans the full window and the sidebar stops on top of it rather than
+        // running past it to the bottom edge. Row 3 of the new bar is the *program's*
+        // progress — a rebuild is not the table's work, and neither is a copy-out — so
+        // the zone that carries it has no business being inset under one of the four it
+        // reports on. A floor that reaches both walls is also what makes the sidebar,
+        // the tray, the Inspector and the table read as cards standing on something.
         status_bar(self, ui);
+        sidebar::show(self, ui);
         tray::show(self, ui);
         inspector::show(self, ui, &rows);
         table::show(self, ui, &rows);
@@ -1750,79 +1820,294 @@ impl Indium {
 // Status bar — CORE §4's fifth zone
 // ---------------------------------------------------------------------------
 
+/// The whole panel, gutter included.
+///
+/// 3 × SB_ROW(20) + 2 × SB_GAP(4) = 68 of content, + 10 + 10 of inner margin, + the 2 + 2
+/// the edge costs, + the 4 + 4 of `zone()`'s outer gutter = 100. `exact_size` counts every
+/// one of those, so this number is the panel and its half-gutter rim together.
+///
+/// **The edge is in that sum, and has to be.** `Frame::total_margin` is `inner_margin +
+/// stroke.width + outer_margin`, and the box egui actually paints is `content +
+/// inner_margin + stroke.width` — so a 2px border costs 2px of layout on every side,
+/// whatever `StrokeKind::Inside` suggests about where the line lands. At 96 the panel
+/// overflowed by exactly those 4 and paid for it out of its own outer margin: measured on
+/// screen, the gutter above the bar came out half the width of every other gutter in the
+/// window, and the bottom rim vanished entirely. `the_status_bar_is_as_tall_as_it_says`
+/// pins the arithmetic, because a panel that overflows `exact_size` is reported at the
+/// size it asked for — the clamp is on the number, not on the paint.
+const SB_HEIGHT: f32 = 100.0;
+
+/// The status bar's frame, named so the height above can be checked against it.
+fn sb_frame() -> egui::Frame {
+    theme::zone(theme::STATUS_BAR).inner_margin(egui::Margin::symmetric(12, 10))
+}
+
+/// Three rows, each exactly [`theme::SB_ROW`] tall, in a panel that never changes size.
+///
+/// The old bar was one row, content-driven, and it **moved**: a `Cancel` button and a
+/// progress bar are taller than a label, so the floor of the window rose by about a pixel
+/// the instant work started and dropped back when it finished. `exact_size` is what stops
+/// that — the panel is now the same height whether INDIUM is idle, listing or rebuilding,
+/// and nothing above it can be nudged by anything below it.
+///
+/// The rows answer three different questions and never each other's: *what is open*,
+/// *what is in it and what is INDIUM saying*, and *is anything running*.
 fn status_bar(app: &mut Indium, ui: &mut egui::Ui) {
     egui::Panel::bottom("status")
-        .frame(
-            egui::Frame::NONE
-                .fill(theme::STATUS_BAR)
-                .inner_margin(egui::Margin::symmetric(10, 5)),
-        )
+        .resizable(false)
+        .exact_size(SB_HEIGHT)
+        // `theme::zone`'s own requirement: egui draws a hairline between panels, and it
+        // would stack with the 2px edge the frame already paints.
+        .show_separator_line(false)
+        .frame(sb_frame())
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if app.has_archive() {
-                    let agg = model::aggregate(app.entries.iter());
-                    ui.label(
-                        egui::RichText::new(format!("{} entries", agg.count))
-                            .family(theme::MONO)
-                            .color(theme::TEXT_SECONDARY),
-                    );
-                    ui.label(egui::RichText::new("·").color(theme::TEXT_MUTED));
+            // The 4 in the arithmetic above is this line. egui's default is 5.0, which
+            // makes the three rows 70 tall in a lane that is 68 — and the third row is
+            // the one that gets clipped.
+            ui.spacing_mut().item_spacing.y = theme::SB_GAP;
+            // And this is what keeps row 3 to its 20. `interact_size.y` is SB_ROW, so a
+            // button is a row tall by default — but the theme's 3px of vertical padding
+            // would push Cancel to 23 and take the row with it, in a panel that can no
+            // longer grow to absorb it.
+            ui.spacing_mut().button_padding.y = 1.0;
 
-                    // Archive-level real -> packed, which is honest: the packed side
-                    // is the archive's own size on disk.
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{} -> {} ({})",
-                            crate::util::format_bytes(agg.total_real),
-                            crate::util::format_bytes(app.archive_bytes),
-                            crate::util::format_ratio(agg.total_real, app.archive_bytes),
-                        ))
-                        .family(theme::MONO)
-                        .color(theme::TEXT_SECONDARY),
-                    );
-
-                    if let Some(info) = &app.archive_info {
-                        ui.label(egui::RichText::new("·").color(theme::TEXT_MUTED));
-                        ui.label(
-                            egui::RichText::new(&info.format)
-                                .family(theme::MONO)
-                                .color(theme::TEXT),
-                        );
-                        if !info.filter.is_empty() && info.filter != "none" {
-                            ui.label(
-                                egui::RichText::new(&info.filter)
-                                    .family(theme::MONO)
-                                    .color(theme::TEXT_MUTED),
-                            );
-                        }
-                    }
-                }
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(p) = &app.progress {
-                        if ui.button("Cancel").clicked() {
-                            app.cancel.store(true, Ordering::Relaxed);
-                        }
-                        let frac = if p.total == 0 {
-                            0.0
-                        } else {
-                            p.done as f32 / p.total as f32
-                        };
-                        ui.add(
-                            egui::ProgressBar::new(frac)
-                                .desired_width(160.0)
-                                .fill(theme::ORANGE)
-                                .text(format!("{} {}/{}", p.label, p.done, p.total)),
-                        );
-                    } else if app.listing {
-                        ui.add(egui::Spinner::new().color(theme::ORANGE));
-                        ui.label(egui::RichText::new("Reading…").color(theme::TEXT_SECONDARY));
-                    } else {
-                        ui.label(egui::RichText::new(&app.status).color(theme::TEXT_MUTED));
-                    }
-                });
-            });
+            sb_what_is_open(app, ui);
+            sb_the_numbers(app, ui);
+            sb_progress(app, ui);
         });
+}
+
+/// Open one status-bar row: a lane of exactly one [`theme::SB_ROW`], whatever goes in it.
+///
+/// `allocate_ui_with_layout` hands the closure a `Ui` of that size but advances the cursor
+/// by the *content's* extent, so a row holding nothing — the idle progress lane — would
+/// collapse to nothing and the arithmetic in `status_bar` would stop being true.
+/// `set_min_height` pins it from inside.
+fn sb_row(ui: &mut egui::Ui, layout: egui::Layout, add: impl FnOnce(&mut egui::Ui)) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), theme::SB_ROW),
+        layout,
+        |ui| {
+            ui.set_min_height(theme::SB_ROW);
+            add(ui);
+        },
+    );
+}
+
+/// Row 1 — what is open.
+///
+/// The name on the left because it is the answer to "which window is this"; the directory
+/// on the right because it is the longest thing in the bar and the least urgent, so it is
+/// what gives way when the window narrows.
+fn sb_what_is_open(app: &Indium, ui: &mut egui::Ui) {
+    sb_row(ui, egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        match app.archive_path.as_ref().and_then(|p| p.file_name()) {
+            Some(name) => ui.label(
+                egui::RichText::new(name.to_string_lossy())
+                    .family(theme::MONO)
+                    .size(13.0)
+                    .color(theme::TEXT),
+            ),
+            None => ui.label(
+                egui::RichText::new("No archive open.")
+                    .family(theme::MONO)
+                    .size(13.0)
+                    .color(theme::TEXT_MUTED),
+            ),
+        };
+
+        if let Some(info) = &app.archive_info {
+            ui.label(egui::RichText::new("·").color(theme::TEXT_MUTED));
+            ui.label(
+                egui::RichText::new(&info.format)
+                    .family(theme::MONO)
+                    .size(13.0)
+                    .color(theme::TEXT_SECONDARY),
+            );
+            if !info.filter.is_empty() && info.filter != "none" {
+                ui.label(
+                    egui::RichText::new(&info.filter)
+                        .family(theme::MONO)
+                        .size(13.0)
+                        .color(theme::TEXT_MUTED),
+                );
+            }
+        }
+
+        let dir = app
+            .archive_path
+            .as_ref()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if !dir.is_empty() {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(dir)
+                            .family(theme::MONO)
+                            .size(12.0)
+                            .color(theme::TEXT_MUTED),
+                    )
+                    // Truncated rather than wrapped: a second line has nowhere to go
+                    // in a lane of fixed height, and a path elided at the end still
+                    // says which tree the archive lives in.
+                    .truncate(),
+                );
+            });
+        }
+    });
+}
+
+/// Row 2 — the numbers, and the voice.
+///
+/// **`app.status` is drawn unconditionally, and that is the point of the row.** Until P7
+/// the status text lived in the `else` of a branch that `progress.is_some()` pre-empted,
+/// so every sentence INDIUM says *while something is running* was written to a field
+/// nothing drew. The four "already running" refusals in `begin_apply` and `work_running`
+/// are set at exactly the moments that branch was hiding — a user who pressed `E` twice
+/// got silence, which reads as the program ignoring the key. Nothing in this row may
+/// consult `progress`; that is row 3's job and only row 3's.
+fn sb_the_numbers(app: &Indium, ui: &mut egui::Ui) {
+    sb_row(ui, egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        if app.has_archive() {
+            let agg = model::aggregate(app.entries.iter());
+            ui.label(
+                egui::RichText::new(format!("{} entries", agg.count))
+                    .family(theme::MONO)
+                    .size(13.0)
+                    .color(theme::TEXT_SECONDARY),
+            );
+            ui.label(egui::RichText::new("·").color(theme::TEXT_MUTED));
+
+            // Archive-level real -> packed, which is honest: the packed side
+            // is the archive's own size on disk.
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} -> {} ({})",
+                    crate::util::format_bytes(agg.total_real),
+                    crate::util::format_bytes(app.archive_bytes),
+                    crate::util::format_ratio(agg.total_real, app.archive_bytes),
+                ))
+                .family(theme::MONO)
+                .size(13.0)
+                .color(theme::TEXT_SECONDARY),
+            );
+
+            if !app.selection.is_empty() {
+                ui.label(egui::RichText::new("·").color(theme::TEXT_MUTED));
+                ui.label(
+                    egui::RichText::new(format!("{} selected", app.selection.len()))
+                        .family(theme::MONO)
+                        .size(13.0)
+                        .color(theme::TEXT_SECONDARY),
+                );
+            }
+        }
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(&app.status)
+                        .family(theme::MONO)
+                        .size(13.0)
+                        .color(theme::TEXT_SECONDARY),
+                )
+                .truncate(),
+            );
+        });
+    });
+}
+
+/// Row 3 — progress, and nothing else.
+///
+/// The lane is laid out right-to-left so Cancel and the count take their space from the
+/// right edge first; the label and the bar then fill whatever is left, which is what lets
+/// the bar be as wide as the window rather than a fixed 160px stub.
+fn sb_progress(app: &Indium, ui: &mut egui::Ui) {
+    // Copied out before the row opens: the closure needs `app.cancel` while it holds a
+    // reading of `app.progress`, and a label is three words.
+    let running = app
+        .progress
+        .as_ref()
+        .map(|p| (p.done, p.total, p.label.clone()));
+
+    sb_row(ui, egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        // The track is `extreme_bg_color`, which `install_visuals` sets to `WINDOW` —
+        // the colour of the entry table's well, and *lighter* than the floor this bar
+        // paints. A rail lighter than the surface it lies on reads as raised, which is
+        // exactly backwards for a groove that something fills up. `VOID` is the only
+        // ground darker than `STATUS_BAR`, so the track recedes and the orange sits
+        // down in it. Scoped to this row: `visuals_mut` is clone-on-write per `Ui`, and
+        // every text field in the program wants the lighter well (theme §Base).
+        ui.visuals_mut().extreme_bg_color = theme::VOID;
+
+        if let Some((done, total, label)) = running {
+            // Orange with a Cancel beside it is CORE §6's third permitted meaning —
+            // Apply/progress — and this is the only place in the window that draws it.
+            if theme::button(ui, "Cancel".into(), true).clicked() {
+                app.cancel.store(true, Ordering::Relaxed);
+            }
+            ui.label(
+                egui::RichText::new(format!("{done}/{total}"))
+                    .family(theme::MONO)
+                    .size(13.0)
+                    .color(theme::TEXT),
+            );
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.label(
+                    egui::RichText::new(label)
+                        .family(theme::MONO)
+                        .size(13.0)
+                        .color(theme::TEXT_SECONDARY),
+                );
+                let frac = if total == 0 {
+                    0.0
+                } else {
+                    done as f32 / total as f32
+                };
+                // **No `.text(...)`.** `ProgressBar` paints its label with
+                // `override_text_color`, which this theme sets to `TEXT` — 2.4:1 on
+                // `ORANGE`, and unfixable from outside the widget. The phase and the
+                // count are therefore drawn as ordinary labels on either side of the
+                // bar, where they are read against the bar's own ground.
+                ui.add(
+                    egui::ProgressBar::new(frac)
+                        .desired_width(ui.available_width())
+                        .desired_height(12.0)
+                        .corner_radius(theme::R_CTRL)
+                        .fill(theme::ORANGE),
+                );
+            });
+        } else if app.listing {
+            // `progress` is consulted first and `listing` second, as the old bar did:
+            // `E` works while a listing is still streaming in, and when both are true
+            // the Cancel has to reach the worker that is writing files.
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                // Sized explicitly: a `Spinner` left to itself takes
+                // `interact_size.y`, which is a whole SB_ROW, and a lane-height
+                // spinner is the tallest thing in a bar that is otherwise all text.
+                ui.add(egui::Spinner::new().color(theme::ORANGE).size(14.0));
+                let n = app.entries.len();
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Reading… {n} {}",
+                        if n == 1 { "entry" } else { "entries" }
+                    ))
+                    .family(theme::MONO)
+                    .size(13.0)
+                    .color(theme::TEXT_SECONDARY),
+                );
+            });
+        } else {
+            // Idle. A hairline down the middle of an empty lane, because a row that is
+            // simply blank reads as a layout mistake, and the emptiness is the answer:
+            // nothing is running. CORE §6 — 1px hairlines, inside a zone.
+            let lane = ui.available_rect_before_wrap();
+            ui.painter()
+                .hline(lane.x_range(), lane.center().y, theme::hairline());
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1895,6 +2180,20 @@ mod tests {
         );
         assert_eq!(archive_stem(std::path::Path::new("/x/backup.7z")), "backup");
         assert_eq!(archive_stem(std::path::Path::new("/x/noext")), "noext");
+    }
+
+    /// The one thing `exact_size` cannot tell you itself.
+    ///
+    /// A `Panel` clamps the *reported* rect to `outer_size_range.max` and then paints
+    /// whatever its content needed, so a status bar four pixels too tall reports 96 and
+    /// silently eats its own gutter. The height is therefore checked against the frame it
+    /// is a height *of* — which fails if the edge gets thicker, if `PAD` or `GUTTER`
+    /// move, if a fourth row is added, or if a future egui changes what `total_margin`
+    /// counts.
+    #[test]
+    fn the_status_bar_is_as_tall_as_it_says() {
+        let content = 3.0 * theme::SB_ROW + 2.0 * theme::SB_GAP;
+        assert_eq!(content + sb_frame().total_margin().sum().y, SB_HEIGHT);
     }
 
     #[test]

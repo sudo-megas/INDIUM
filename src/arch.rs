@@ -742,8 +742,26 @@ fn list_7z(path: &Path, passphrase: Option<&Secret>) -> Option<Result<Vec<Entry>
 
 #[derive(Debug)]
 pub enum ExtractMsg {
-    Progress { done: usize, total: usize },
-    Done { written: usize },
+    Progress {
+        done: usize,
+        total: usize,
+    },
+    Done {
+        written: usize,
+    },
+    /// The cancellation flag was set, and `extract` stopped with `written` entries on
+    /// disk out of however many were asked for.
+    ///
+    /// `ApplyMsg::Cancelled` in `tasks.rs` is the precedent, and its doc comment named
+    /// this defect while it still stood: "unlike `ExtractMsg`, where its absence means a
+    /// cancelled extraction is indistinguishable from a finished one". A cancelled
+    /// extraction returns `Ok(written)` like any other, so without this variant the only
+    /// way to tell the two apart was for the UI to re-read a flag the window may already
+    /// have replaced — which is how half a selection reached the clipboard as if it were
+    /// the whole of it. The worker decides, with its own clone, and says so in band.
+    Cancelled {
+        written: usize,
+    },
     Failed(String),
 }
 
