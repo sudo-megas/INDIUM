@@ -43,6 +43,10 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 Some(PendingAction::CopyOut) => {
                     "This selection is encrypted. A password is needed to copy it out."
                 }
+                Some(PendingAction::Apply) => {
+                    "Choose the password for this archive. INDIUM never stores it, so \
+                     there is no way to recover it if you forget it."
+                }
                 _ => "This selection is encrypted. A password is needed to extract it.",
             })
             .size(11.0)
@@ -58,6 +62,29 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
         );
         resp.request_focus();
 
+        // A fresh encrypted archive is asked twice. There is nothing to check a typo
+        // against — no existing archive to try the password on — and a typo would build
+        // something nobody, including its author, can ever open.
+        let confirming = app.pending == Some(PendingAction::Apply) && app.tasks.creates_encrypted();
+        if confirming {
+            ui.add_space(6.0);
+            ui.add(
+                egui::TextEdit::singleline(&mut app.password_confirm)
+                    .password(true)
+                    .font(egui::TextStyle::Monospace)
+                    .hint_text("confirm")
+                    .desired_width(f32::INFINITY),
+            );
+            if !app.password_confirm.is_empty() && app.password_confirm != app.password_input {
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new("The two passwords are not the same.")
+                        .size(11.0)
+                        .color(theme::ORANGE),
+                );
+            }
+        }
+
         if app.password_attempts > 0 {
             let left = MAX_ATTEMPTS.saturating_sub(app.password_attempts);
             ui.add_space(4.0);
@@ -72,8 +99,11 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
         }
 
         ui.add_space(10.0);
+        let ready = !confirming
+            || (!app.password_input.is_empty() && app.password_confirm == app.password_input);
         ui.horizontal(|ui| {
-            if ui.button("Unlock").clicked() {
+            let label = if confirming { "Set" } else { "Unlock" };
+            if ui.add_enabled(ready, egui::Button::new(label)).clicked() {
                 submit = true;
             }
             if ui.button("Cancel").clicked() {
@@ -86,7 +116,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             );
         });
 
-        if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+        if ready && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             submit = true;
         }
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -106,8 +136,9 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
 
 fn attempt(app: &mut Indium, ctx: &egui::Context) {
     let secret = Secret::from_text(&app.password_input);
-    // The plain-text field is cleared the moment its contents are in a Secret.
+    // Both plain-text fields are cleared the moment their contents are in a Secret.
     app.password_input.clear();
+    app.password_confirm.clear();
 
     let Some(archive) = app.archive_path.clone() else {
         dismiss(app);
@@ -119,7 +150,13 @@ fn attempt(app: &mut Indium, ctx: &egui::Context) {
     // For encrypted *headers* there is nothing to verify against without opening;
     // the reopen itself is the test. For encrypted *entries*, P2 §5 requires the
     // throwaway-reader check so a wrong password writes nothing.
+    // A password being *chosen* for an archive that does not exist yet cannot be
+    // verified against anything — there is nothing to try it on. That is exactly why it
+    // was typed twice, and the confirmation is the check.
+    let choosing = pending == Some(PendingAction::Apply) && app.tasks.creates_encrypted();
+
     let accepted = match &pending {
+        _ if choosing => true,
         Some(PendingAction::List(_)) => arch::list_all(&archive, Some(&secret)).is_ok(),
         _ => arch::verify_passphrase(&archive, &secret).unwrap_or(false),
     };
@@ -176,6 +213,7 @@ fn attempt(app: &mut Indium, ctx: &egui::Context) {
 
 fn dismiss(app: &mut Indium) {
     app.password_input.clear();
+    app.password_confirm.clear();
     app.password_attempts = 0;
     app.pending = None;
     app.popup = None;
