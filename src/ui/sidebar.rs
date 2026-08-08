@@ -22,13 +22,13 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
             ui.vertical(|ui| {
                 ui.label(
                     egui::RichText::new("INDIUM")
-                        .size(21.0)
+                        .size(23.0)
                         .color(theme::TEXT)
                         .family(theme::bold()),
                 );
                 ui.label(
                     egui::RichText::new("archive manager")
-                        .size(11.0)
+                        .size(13.0)
                         .color(theme::TEXT_MUTED),
                 );
                 ui.add_space(18.0);
@@ -124,7 +124,7 @@ fn row(
                 if let Some(t) = tag {
                     ui.label(
                         egui::RichText::new(t)
-                            .size(10.0)
+                            .size(12.0)
                             .family(theme::MONO)
                             .color(theme::TEXT_MUTED),
                     );
@@ -132,7 +132,7 @@ fn row(
                     ui.label(
                         egui::RichText::new(key)
                             .family(theme::MONO)
-                            .size(11.0)
+                            .size(13.0)
                             .color(theme::TEXT_MUTED),
                     );
                 }

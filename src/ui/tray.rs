@@ -36,7 +36,7 @@ pub fn show(app: &mut Indium, ui: &mut egui::Ui) {
             ui.label(
                 egui::RichText::new(app.tasks.tray_summary())
                     .family(theme::MONO)
-                    .size(11.0)
+                    .size(13.0)
                     .color(theme::ORANGE),
             );
 

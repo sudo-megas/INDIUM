@@ -28,7 +28,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
         ui.set_width(400.0);
         ui.label(
             egui::RichText::new("Password")
-                .size(15.0)
+                .size(17.0)
                 .color(theme::TEXT),
         );
         ui.add_space(4.0);
@@ -49,7 +49,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 }
                 _ => "This selection is encrypted. A password is needed to extract it.",
             })
-            .size(11.0)
+            .size(13.0)
             .color(theme::TEXT_SECONDARY),
         );
         ui.add_space(10.0);
@@ -79,7 +79,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 ui.add_space(4.0);
                 ui.label(
                     egui::RichText::new("The two passwords are not the same.")
-                        .size(11.0)
+                        .size(13.0)
                         .color(theme::WARNING),
                 );
             }
@@ -93,7 +93,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     "Wrong password. {left} {} left.",
                     if left == 1 { "attempt" } else { "attempts" }
                 ))
-                .size(11.0)
+                .size(13.0)
                 .color(theme::WARNING),
             );
         }
@@ -111,7 +111,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             }
             ui.label(
                 egui::RichText::new("Never stored — used once, then wiped.")
-                    .size(10.0)
+                    .size(12.0)
                     .color(theme::TEXT_MUTED),
             );
         });

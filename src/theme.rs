@@ -198,20 +198,20 @@ fn install_spacing(ctx: &egui::Context) {
         style.text_styles = [
             (
                 TextStyle::Heading,
-                FontId::new(15.0, FontFamily::Proportional),
+                FontId::new(17.0, FontFamily::Proportional),
             ),
-            (TextStyle::Body, FontId::new(11.0, FontFamily::Proportional)),
+            (TextStyle::Body, FontId::new(13.0, FontFamily::Proportional)),
             (
                 TextStyle::Button,
-                FontId::new(11.0, FontFamily::Proportional),
+                FontId::new(13.0, FontFamily::Proportional),
             ),
             (
                 TextStyle::Small,
-                FontId::new(10.0, FontFamily::Proportional),
+                FontId::new(12.0, FontFamily::Proportional),
             ),
             (
                 TextStyle::Monospace,
-                FontId::new(11.0, FontFamily::Monospace),
+                FontId::new(13.0, FontFamily::Monospace),
             ),
         ]
         .into();

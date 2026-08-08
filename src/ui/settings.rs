@@ -32,7 +32,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                         "settings.toml could not be parsed. INDIUM is running on defaults and \
                          will not overwrite the file.",
                     )
-                    .size(11.0)
+                    .size(13.0)
                     .color(theme::WARNING),
                 );
                 ui.add_space(8.0);
@@ -44,7 +44,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Preselect")
-                        .size(11.0)
+                        .size(13.0)
                         .color(theme::TEXT_MUTED),
                 );
                 let cur = app.settings.extract.default;
@@ -80,13 +80,13 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     ui.label(
                         egui::RichText::new(&b.name)
                             .family(theme::MONO)
-                            .size(11.0)
+                            .size(13.0)
                             .color(theme::TEXT),
                     );
                     ui.label(
                         egui::RichText::new(&b.path)
                             .family(theme::MONO)
-                            .size(11.0)
+                            .size(13.0)
                             .color(theme::TEXT_MUTED),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -133,7 +133,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(format!("{} remembered", app.recents.items.len()))
-                        .size(11.0)
+                        .size(13.0)
                         .color(theme::TEXT_MUTED),
                 );
                 if ui.button("Clear list").clicked() {
@@ -152,12 +152,12 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     "settings.toml · {}",
                     app.store.settings_path().display()
                 ))
-                .size(10.0)
+                .size(12.0)
                 .color(theme::TEXT_MUTED),
             );
             ui.label(
                 egui::RichText::new("Hand-editable. INDIUM respects what you write there.")
-                    .size(10.0)
+                    .size(12.0)
                     .color(theme::TEXT_MUTED),
             );
         });
@@ -170,7 +170,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
 fn group(ui: &mut egui::Ui, title: &str) {
     ui.label(
         egui::RichText::new(title)
-            .size(10.0)
+            .size(12.0)
             .color(theme::TEXT)
             .family(theme::bold()),
     );

@@ -36,7 +36,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
 
             ui.label(
                 egui::RichText::new(INSTRUCTION)
-                    .size(11.0)
+                    .size(13.0)
                     .color(theme::TEXT_SECONDARY),
             );
             ui.add_space(8.0);
@@ -45,7 +45,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Name")
-                        .size(10.0)
+                        .size(12.0)
                         .color(theme::TEXT_MUTED),
                 );
                 ui.add(
@@ -56,14 +56,14 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 ui.label(
                     egui::RichText::new(extension_for(app.new_method, app.new_encrypt))
                         .family(theme::MONO)
-                        .size(11.0)
+                        .size(13.0)
                         .color(theme::TEXT_MUTED),
                 );
             });
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("In")
-                        .size(10.0)
+                        .size(12.0)
                         .color(theme::TEXT_MUTED),
                 );
                 ui.add(
@@ -78,13 +78,13 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     ui.horizontal(|ui| {
                         ui.label(
                             egui::RichText::new("Tab ->")
-                                .size(10.0)
+                                .size(12.0)
                                 .color(theme::TEXT_MUTED),
                         );
                         ui.label(
                             egui::RichText::new(&completed)
                                 .family(theme::MONO)
-                                .size(10.0)
+                                .size(12.0)
                                 .color(theme::TEXT_MUTED),
                         );
                     });
@@ -139,7 +139,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                         None => {
                             ui.label(
                                 egui::RichText::new("Store has no level to choose.")
-                                    .size(10.0)
+                                    .size(12.0)
                                     .italics()
                                     .color(theme::TEXT_MUTED),
                             );
@@ -163,7 +163,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                                     range.start(),
                                     range.end()
                                 ))
-                                .size(10.0)
+                                .size(12.0)
                                 .italics()
                                 .color(theme::TEXT_MUTED),
                             );
@@ -180,7 +180,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             ui.label(
                 egui::RichText::new(tasks::recipe_sentence(&recipe))
                     .family(theme::MONO)
-                    .size(11.0)
+                    .size(13.0)
                     .color(theme::TEXT_SECONDARY),
             );
             if app.new_encrypt {
@@ -189,7 +189,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                         "You will be asked for the password when you Apply, and again to \
                          confirm it. INDIUM never stores it.",
                     )
-                    .size(10.0)
+                    .size(12.0)
                     .italics()
                     .color(theme::TEXT_MUTED),
                 );
@@ -206,7 +206,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     .clicked();
                 ui.label(
                     egui::RichText::new("Nothing is written until you Apply · Esc closes")
-                        .size(10.0)
+                        .size(12.0)
                         .color(theme::TEXT_MUTED),
                 );
             });
@@ -240,14 +240,14 @@ fn method_row(ui: &mut egui::Ui, app: &mut Indium, method: Method) {
                 ui.label(
                     egui::RichText::new(method.label())
                         .family(theme::bold())
-                        .size(12.0)
+                        .size(14.0)
                         .color(theme::TEXT),
                 );
                 if method == Method::Lzma2 {
                     ui.label(
                         egui::RichText::new("AES-256")
                             .family(theme::MONO)
-                            .size(9.0)
+                            .size(11.0)
                             .color(theme::TEXT_MUTED),
                     );
                 }
@@ -255,7 +255,7 @@ fn method_row(ui: &mut egui::Ui, app: &mut Indium, method: Method) {
             // Verbatim from CORE §5, held once in `tasks` and pinned by a test.
             ui.label(
                 egui::RichText::new(method.verdict())
-                    .size(10.0)
+                    .size(12.0)
                     .italics()
                     .color(theme::TEXT_SECONDARY),
             );
@@ -325,7 +325,7 @@ fn recipe_of(app: &Indium) -> Recipe {
 fn group(ui: &mut egui::Ui, title: &str) {
     ui.label(
         egui::RichText::new(title)
-            .size(10.0)
+            .size(12.0)
             .color(theme::TEXT)
             .family(theme::bold()),
     );

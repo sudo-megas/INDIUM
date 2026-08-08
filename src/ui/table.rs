@@ -68,7 +68,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                 header.col(|ui| {
                     ui.label(
                         egui::RichText::new(name)
-                            .size(11.0)
+                            .size(13.0)
                             .color(theme::TEXT_MUTED),
                     );
                 });
@@ -131,7 +131,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                         // columns beside it, in every row of the program's main view.
                         let mut text = egui::RichText::new(shown)
                             .family(theme::MONO)
-                            .size(11.0)
+                            .size(13.0)
                             .color(colour);
                         if row.is_dir {
                             text = text.family(theme::bold());
@@ -151,7 +151,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                     if entry.as_ref().map(|e| e.0).unwrap_or(false) {
                         ui.label(
                             egui::RichText::new("enc")
-                                .size(10.0)
+                                .size(12.0)
                                 .color(theme::TEXT_MUTED),
                         );
                     }
@@ -186,7 +186,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                     ui.label(
                         egui::RichText::new(text)
                             .family(theme::MONO)
-                            .size(11.0)
+                            .size(13.0)
                             .color(theme::TEXT_MUTED),
                     );
                 });
@@ -312,13 +312,13 @@ fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
                             ui.label(
                                 egui::RichText::new(path)
                                     .family(theme::MONO)
-                                    .size(11.0)
+                                    .size(13.0)
                                     .color(theme::TEXT_MUTED),
                             );
                             if !exists {
                                 ui.label(
                                     egui::RichText::new("missing")
-                                        .size(10.0)
+                                        .size(12.0)
                                         .color(theme::TEXT_MUTED),
                                 );
                             }
@@ -326,7 +326,7 @@ fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
                         ui.label(
                             egui::RichText::new(util::format_timestamp(*opened))
                                 .family(theme::MONO)
-                                .size(10.0)
+                                .size(12.0)
                                 .color(theme::TEXT_MUTED),
                         );
                     });
@@ -376,7 +376,7 @@ fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
     header(ui, "Bookmarks");
     ui.label(
         egui::RichText::new("Named directories to extract into.")
-            .size(11.0)
+            .size(13.0)
             .color(theme::TEXT_MUTED),
     );
     ui.add_space(6.0);
@@ -411,7 +411,7 @@ fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
                                 ui.label(
                                     egui::RichText::new(&b.path)
                                         .family(theme::MONO)
-                                        .size(11.0)
+                                        .size(13.0)
                                         .color(theme::TEXT_MUTED),
                                 );
                             });
@@ -443,7 +443,7 @@ fn header(ui: &mut egui::Ui, text: &str) {
     ui.add_space(10.0);
     ui.horizontal(|ui| {
         ui.add_space(12.0);
-        ui.label(egui::RichText::new(text).size(15.0).color(theme::TEXT));
+        ui.label(egui::RichText::new(text).size(17.0).color(theme::TEXT));
     });
     ui.add_space(4.0);
 }
@@ -453,13 +453,13 @@ fn empty_state(ui: &mut egui::Ui, title: &str, hint: &str) {
         ui.add_space(70.0);
         ui.label(
             egui::RichText::new(title)
-                .size(14.0)
+                .size(16.0)
                 .color(theme::TEXT_SECONDARY),
         );
         ui.add_space(4.0);
         ui.label(
             egui::RichText::new(hint)
-                .size(11.0)
+                .size(13.0)
                 .color(theme::TEXT_MUTED),
         );
     });
@@ -470,7 +470,7 @@ fn mono_right(ui: &mut egui::Ui, text: &str, colour: egui::Color32) {
         ui.label(
             egui::RichText::new(text)
                 .family(theme::MONO)
-                .size(11.0)
+                .size(13.0)
                 .color(colour),
         );
     });

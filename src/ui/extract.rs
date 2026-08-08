@@ -111,13 +111,13 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     ui.horizontal(|ui| {
                         ui.label(
                             egui::RichText::new("Tab ->")
-                                .size(10.0)
+                                .size(12.0)
                                 .color(theme::TEXT_MUTED),
                         );
                         ui.label(
                             egui::RichText::new(&completed)
                                 .family(theme::MONO)
-                                .size(11.0)
+                                .size(13.0)
                                 .color(theme::TEXT_MUTED),
                         );
                     });
@@ -150,7 +150,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 }
                 ui.label(
                     egui::RichText::new("Enter extracts · Esc closes")
-                        .size(10.0)
+                        .size(12.0)
                         .color(theme::TEXT_MUTED),
                 );
             });
