@@ -14,11 +14,15 @@ use std::sync::Arc;
 
 // --- Base ---------------------------------------------------------------------
 /// The window itself.
-pub const WINDOW: Color32 = Color32::from_rgb(0x22, 0x12, 0x26);
-/// Raised panels: sidebar, Inspector, popups.
-pub const PANEL: Color32 = Color32::from_rgb(0x2B, 0x18, 0x30);
+///
+/// The maker's own terminal ground, adopted at P5. It sits at hue 319° against the old
+/// value's 288°, which puts it in the same family as Canonical Aubergine (328°) — so the
+/// window became *more* faithful to CORE §6's structural colour, not less.
+pub const WINDOW: Color32 = Color32::from_rgb(0x30, 0x0A, 0x24);
+/// Raised panels: sidebar, Inspector, popups. One step lighter, same hue.
+pub const PANEL: Color32 = Color32::from_rgb(0x3D, 0x0D, 0x2E);
 /// The status bar, darker than the window so it reads as a floor.
-pub const STATUS_BAR: Color32 = Color32::from_rgb(0x1C, 0x0F, 0x20);
+pub const STATUS_BAR: Color32 = Color32::from_rgb(0x24, 0x07, 0x1B);
 
 // --- Structure ----------------------------------------------------------------
 /// Canonical Aubergine — selection context and the active sidebar item.
@@ -31,9 +35,20 @@ pub const AUBERGINE: Color32 = Color32::from_rgb(0x77, 0x29, 0x53);
 pub const ORANGE: Color32 = Color32::from_rgb(0xE9, 0x54, 0x20);
 
 // --- Text ---------------------------------------------------------------------
-pub const TEXT: Color32 = Color32::from_rgb(0xF0, 0xE6, 0xEE);
-pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(0xC9, 0xB3, 0xC4);
-pub const TEXT_MUTED: Color32 = Color32::from_rgb(0xA9, 0x8B, 0xA3);
+/// Primary text. Neutral rather than tinted: sampled from the maker's terminal, where a
+/// near-white on aubergine is what he actually reads all day.
+pub const TEXT: Color32 = Color32::from_rgb(0xEE, 0xEE, 0xEC);
+pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(0xBD, 0xBD, 0xBB);
+pub const TEXT_MUTED: Color32 = Color32::from_rgb(0x99, 0x99, 0x97);
+
+// --- Warning ------------------------------------------------------------------
+/// CORE §6's fourth colour, and the narrowest: a wrong password, two passwords that
+/// differ, a settings file that would not parse. Nothing else.
+///
+/// It exists because those three messages used to be painted orange, which falsified §6's
+/// own sentence — "Orange means *something will happen*" — at exactly the moments when
+/// nothing could.
+pub const WARNING: Color32 = Color32::from_rgb(0xFF, 0xD8, 0x00);
 
 // --- Lines --------------------------------------------------------------------
 /// 1px hairlines at 8% white. CORE §6: "Nothing thicker, anywhere."
@@ -130,8 +145,13 @@ pub fn install_visuals(ctx: &egui::Context) {
     v.widgets.noninteractive.bg_stroke = hairline();
     v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, TEXT_SECONDARY);
 
-    v.widgets.inactive.bg_fill = PANEL;
-    v.widgets.inactive.weak_bg_fill = PANEL;
+    // An interactive surface must not be the colour of the thing behind it. These were
+    // all `PANEL`, and popups are `PANEL`, so every button was a bare label inside an
+    // invisible box, every unfocused text field had no boundary at all, and the checkbox
+    // was a panel-coloured square on a panel. P4 diagnosed exactly this on the slider and
+    // patched it in one popup; the cause was always here.
+    v.widgets.inactive.bg_fill = WINDOW;
+    v.widgets.inactive.weak_bg_fill = WINDOW;
     v.widgets.inactive.bg_stroke = hairline();
     v.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT);
 
@@ -142,7 +162,11 @@ pub fn install_visuals(ctx: &egui::Context) {
 
     v.widgets.active.bg_fill = AUBERGINE;
     v.widgets.active.weak_bg_fill = AUBERGINE;
-    v.widgets.active.bg_stroke = Stroke::new(1.0, ORANGE);
+    // Not orange. `widgets.active` is the being-pressed state of *every* widget, so an
+    // orange stroke here put CORE §6's accent around Cancel, Discard, Clear list and the
+    // checkbox — orange as a generic press affordance, which is decoration, which the
+    // comment on ORANGE above forbids in its own words.
+    v.widgets.active.bg_stroke = hairline();
     v.widgets.active.fg_stroke = Stroke::new(1.0, TEXT);
 
     // Selection is one of orange's three permitted meanings.
@@ -153,6 +177,56 @@ pub fn install_visuals(ctx: &egui::Context) {
     v.popup_shadow = egui::epaint::Shadow::NONE;
 
     ctx.set_visuals(v);
+    install_spacing(ctx);
+}
+
+/// The shape of the window: type scale, spacing, and scrollbars that exist.
+///
+/// None of this was ever set, so egui's defaults have been quietly in charge of the two
+/// most prominent sizes in the program — 13.0 for every unstyled label and button, 18.0
+/// for every popup title — neither of which appears anywhere in the source. Writing them
+/// down is most of the fix.
+fn install_spacing(ctx: &egui::Context) {
+    use egui::{FontId, TextStyle};
+
+    // `all_styles_mut` rather than `set_style`: egui 0.36 keeps a style per theme, and
+    // INDIUM has exactly one look (CORE §6), so both get the same one.
+    ctx.all_styles_mut(|style| {
+        // Four roles, not ten sizes. Body is the value you read; Button matches it so a
+        // button never shouts; Small is a label or a hint; Heading is a popup title, which
+        // egui resolves for us and which had been 18.0 by nobody's decision.
+        style.text_styles = [
+            (
+                TextStyle::Heading,
+                FontId::new(15.0, FontFamily::Proportional),
+            ),
+            (TextStyle::Body, FontId::new(11.0, FontFamily::Proportional)),
+            (
+                TextStyle::Button,
+                FontId::new(11.0, FontFamily::Proportional),
+            ),
+            (
+                TextStyle::Small,
+                FontId::new(10.0, FontFamily::Proportional),
+            ),
+            (
+                TextStyle::Monospace,
+                FontId::new(11.0, FontFamily::Monospace),
+            ),
+        ]
+        .into();
+
+        // egui's defaults are 3px between stacked widgets and 1px of vertical button padding,
+        // which is why every popup read as a dense block. A verbose pane has to breathe or the
+        // verbosity is just noise.
+        style.spacing.item_spacing = egui::vec2(8.0, 5.0);
+        style.spacing.button_padding = egui::vec2(8.0, 3.0);
+
+        // Scrollbars were floating with zero dormant opacity and zero allocated width —
+        // invisible until hovered, and painted *over* the content rather than beside it. The
+        // Inspector is the pane this program exists for and had no cue that it scrolled.
+        style.spacing.scroll = egui::style::ScrollStyle::solid();
+    });
 }
 
 pub fn install(ctx: &egui::Context) {

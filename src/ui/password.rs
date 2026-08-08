@@ -80,7 +80,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 ui.label(
                     egui::RichText::new("The two passwords are not the same.")
                         .size(11.0)
-                        .color(theme::ORANGE),
+                        .color(theme::WARNING),
                 );
             }
         }
@@ -94,7 +94,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     if left == 1 { "attempt" } else { "attempts" }
                 ))
                 .size(11.0)
-                .color(theme::ORANGE),
+                .color(theme::WARNING),
             );
         }
 

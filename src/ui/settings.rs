@@ -33,7 +33,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                          will not overwrite the file.",
                     )
                     .size(11.0)
-                    .color(theme::ORANGE),
+                    .color(theme::WARNING),
                 );
                 ui.add_space(8.0);
             }
@@ -171,7 +171,7 @@ fn group(ui: &mut egui::Ui, title: &str) {
     ui.label(
         egui::RichText::new(title)
             .size(10.0)
-            .color(theme::AUBERGINE.to_opaque())
+            .color(theme::TEXT)
             .family(theme::bold()),
     );
     ui.add_space(3.0);

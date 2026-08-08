@@ -126,7 +126,13 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                             commit_rename = true;
                         }
                     } else {
-                        let mut text = egui::RichText::new(shown).color(colour);
+                        // Named explicitly: without these it inherited egui's 13.0
+                        // proportional default and sat 18% larger than the three mono
+                        // columns beside it, in every row of the program's main view.
+                        let mut text = egui::RichText::new(shown)
+                            .family(theme::MONO)
+                            .size(11.0)
+                            .color(colour);
                         if row.is_dir {
                             text = text.family(theme::bold());
                         }

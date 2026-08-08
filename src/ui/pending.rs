@@ -52,7 +52,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                             ui.label(
                                 egui::RichText::new(task.verb())
                                     .size(10.0)
-                                    .color(theme::AUBERGINE.to_opaque())
+                                    .color(theme::TEXT)
                                     .family(theme::bold()),
                             );
                             ui.label(

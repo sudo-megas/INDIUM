@@ -92,7 +92,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                                             egui::RichText::new("default")
                                                 .size(10.0)
                                                 .family(theme::MONO)
-                                                .color(theme::AUBERGINE.to_opaque()),
+                                                .color(theme::TEXT),
                                         );
                                     }
                                     if c.app.terminal {

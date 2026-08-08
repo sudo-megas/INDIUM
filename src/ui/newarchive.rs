@@ -145,18 +145,12 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                             );
                         }
                         Some(range) => {
-                            // The slider's rail is `widgets.inactive.bg_fill`, which this
-                            // theme sets to PANEL — the same colour as the popup behind
-                            // it, leaving an invisible groove. Darkened locally rather
-                            // than globally, so checkboxes elsewhere keep their look.
-                            // `trailing_fill` is deliberately left off: it would paint
-                            // orange, and "how far along a slider is" is not one of the
-                            // three meanings CORE §6 reserves that colour for.
-                            let v = ui.visuals_mut();
-                            v.widgets.inactive.bg_fill = theme::WINDOW;
-                            v.widgets.hovered.bg_fill = theme::AUBERGINE;
-                            v.widgets.active.bg_fill = theme::AUBERGINE;
-
+                            // No local visuals patch here any more: P4 darkened the rail
+                            // in this one popup because it was PANEL on PANEL, and P5
+                            // fixed that in `theme.rs` where it belonged. `trailing_fill`
+                            // stays off, though — it paints the selection colour, and
+                            // "how far along a slider is" is not one of the three
+                            // meanings CORE §6 reserves orange for.
                             ui.add(
                                 egui::Slider::new(&mut app.new_level, range.clone())
                                     .text("Level")
@@ -234,7 +228,7 @@ fn method_row(ui: &mut egui::Ui, app: &mut Indium, method: Method) {
     let frame = egui::Frame::NONE
         .inner_margin(egui::Margin::symmetric(8, 5))
         .fill(if selected {
-            theme::AUBERGINE.to_opaque()
+            theme::AUBERGINE
         } else {
             theme::PANEL
         });
@@ -332,7 +326,7 @@ fn group(ui: &mut egui::Ui, title: &str) {
     ui.label(
         egui::RichText::new(title)
             .size(10.0)
-            .color(theme::AUBERGINE.to_opaque())
+            .color(theme::TEXT)
             .family(theme::bold()),
     );
     ui.add_space(3.0);

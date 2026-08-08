@@ -476,7 +476,7 @@ fn section_label(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)
             .size(10.0)
-            .color(theme::AUBERGINE.to_opaque())
+            .color(theme::TEXT)
             .family(theme::bold()),
     );
     ui.add_space(2.0);

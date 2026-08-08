@@ -1464,7 +1464,7 @@ fn status_bar(app: &mut Indium, ui: &mut egui::Ui) {
                         ui.label(
                             egui::RichText::new(&info.format)
                                 .family(theme::MONO)
-                                .color(theme::AUBERGINE.to_opaque()),
+                                .color(theme::TEXT),
                         );
                         if !info.filter.is_empty() && info.filter != "none" {
                             ui.label(
