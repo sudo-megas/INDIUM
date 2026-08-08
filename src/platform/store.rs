@@ -173,6 +173,57 @@ impl Store {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         atomic_write(&self.recents_path(), text.as_bytes())
     }
+
+    /// Apply a change to the recents file **as it is now** — P8 §3.
+    ///
+    /// A window reads these files once, at startup, and CORE §1 puts as many windows on
+    /// screen as the user has archives open. A window that saved its own copy back whole
+    /// therefore undid everything every other window had done since it started: one
+    /// window opening an archive was enough to drop a bookmark another had just added,
+    /// and nothing anywhere said so, because from each window's side the write succeeded.
+    ///
+    /// What travels here is the change, not the caller's copy of the file. That is also
+    /// what keeps a removal removed — merging two lists instead would resurrect in one
+    /// window every entry the other had just deleted, which is a worse bug than the one
+    /// being fixed.
+    ///
+    /// Returns what was written, so the caller can hold exactly what the file holds. The
+    /// race is narrowed, not closed: two windows can still read, change and write across
+    /// each other within the same few milliseconds. P4's lock is deliberately not taken
+    /// for this — it guards a rebuild that runs for minutes, and a lock file per bookmark
+    /// would cost more than the entry it saves.
+    pub fn change_recents(&self, change: impl FnOnce(&mut Recents)) -> Result<Recents, String> {
+        let fresh = self.load_recents();
+        if fresh.was_broken {
+            return Err(fresh
+                .notice
+                .unwrap_or_else(|| "recents.toml could not be read.".to_string()));
+        }
+        let mut recents = fresh.value;
+        change(&mut recents);
+        self.save_recents(&recents)
+            .map_err(|e| format!("Could not save recent files: {e}"))?;
+        Ok(recents)
+    }
+
+    /// Apply a change to the settings file as it is now. Shaped exactly like
+    /// `change_recents`, and for every reason given there.
+    ///
+    /// One trap the callers carry: a change expressed as an **index** is a change to a
+    /// list this window has not seen. Bookmarks are therefore removed by identity.
+    pub fn change_settings(&self, change: impl FnOnce(&mut Settings)) -> Result<Settings, String> {
+        let fresh = self.load_settings();
+        if fresh.was_broken {
+            return Err(fresh
+                .notice
+                .unwrap_or_else(|| "settings.toml could not be read.".to_string()));
+        }
+        let mut settings = fresh.value;
+        change(&mut settings);
+        self.save_settings(&settings)
+            .map_err(|e| format!("Could not save settings: {e}"))?;
+        Ok(settings)
+    }
 }
 
 impl Default for Store {
@@ -242,11 +293,18 @@ fn set_extension_suffix(path: &Path, suffix: &str) -> PathBuf {
 /// P2 §1: "Atomic writes only ... The same discipline the archive rebuild will use in
 /// P4." A half-written settings file must never be possible, whatever happens
 /// mid-write.
+///
+/// **The temporary file carries the writer's process id — P8 §3.** P2 named it
+/// `settings.toml.tmp`, which is one name for every INDIUM on the machine: two windows
+/// saving at the same moment both truncate it, both write into it, and the two
+/// serialisations interleave before either rename. The rename was always atomic; what
+/// it committed was not necessarily either window's file. The pid makes the scratch
+/// name a window's own, and the rename stays exactly as atomic as it was.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = set_extension_suffix(path, "tmp");
+    let tmp = set_extension_suffix(path, &format!("tmp.{}", std::process::id()));
 
     {
         let mut f = std::fs::File::create(&tmp)?;
@@ -334,8 +392,25 @@ mod tests {
         assert!(!back.was_broken);
         assert!(back.notice.is_none());
 
-        let tmp_path = set_extension_suffix(&store.settings_path(), "tmp");
-        assert!(!tmp_path.exists(), "the .tmp file was left behind");
+        assert!(
+            no_scratch_beside(&store.settings_path()),
+            "the .tmp file was left behind"
+        );
+    }
+
+    /// Is there nothing beside `path` that looks like a half-finished write?
+    ///
+    /// Asked by prefix rather than by one exact name. The two callers used to name
+    /// `settings.toml.tmp` outright, and P8 §3 put the writer's process id on the end of
+    /// it — which would have left both of them asserting the absence of a file the
+    /// program had stopped writing, passing for ever and testing nothing.
+    fn no_scratch_beside(path: &Path) -> bool {
+        let dir = path.parent().unwrap();
+        let prefix = format!("{}.tmp", path.file_name().unwrap().to_string_lossy());
+        !std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().starts_with(prefix.as_str()))
     }
 
     #[test]
@@ -486,7 +561,114 @@ mod tests {
         atomic_write(&path, b"first, and longer than the second").unwrap();
         atomic_write(&path, b"second").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "second");
-        assert!(!set_extension_suffix(&path, "tmp").exists());
+        assert!(no_scratch_beside(&path));
+    }
+
+    /// P8 §3. CORE §1 puts two windows on screen the moment a user opens two archives,
+    /// and each of them read this file once, at startup. A window that wrote its own copy
+    /// back whole undid everything the other had done since — silently, because from
+    /// each side the write succeeded.
+    #[test]
+    fn a_second_windows_save_does_not_undo_the_first() {
+        let tmp = Tmp::new("two-windows");
+        let store = tmp.store();
+
+        // Two windows, each changing the file without having seen the other's change.
+        store
+            .change_recents(|r| r.bump("/archives/photos.7z", 100))
+            .unwrap();
+        store
+            .change_recents(|r| r.bump("/archives/docs.zip", 200))
+            .unwrap();
+
+        let back = store.load_recents().value;
+        let paths: Vec<&str> = back.items.iter().map(|r| r.path.as_str()).collect();
+        assert!(
+            paths.contains(&"/archives/photos.7z"),
+            "the first window's archive was dropped by the second window's save: {paths:?}"
+        );
+        assert!(paths.contains(&"/archives/docs.zip"));
+    }
+
+    /// The reason the change travels rather than the copy. Merging the two lists instead
+    /// would have made every removal temporary: the window that had not seen it would put
+    /// the entry back the next time it saved anything at all.
+    #[test]
+    fn a_removal_in_one_window_is_not_resurrected_by_the_other() {
+        let tmp = Tmp::new("resurrect");
+        let store = tmp.store();
+
+        store
+            .change_recents(|r| r.bump("/archives/photos.7z", 100))
+            .unwrap();
+        store
+            .change_recents(|r| r.bump("/archives/docs.zip", 200))
+            .unwrap();
+
+        // One window forgets an archive.
+        store
+            .change_recents(|r| r.remove("/archives/photos.7z"))
+            .unwrap();
+        // The other window, which still has it listed, opens something else.
+        store
+            .change_recents(|r| r.bump("/archives/music.tar.zst", 300))
+            .unwrap();
+
+        let paths: Vec<String> = store
+            .load_recents()
+            .value
+            .items
+            .iter()
+            .map(|r| r.path.clone())
+            .collect();
+        assert!(
+            !paths.contains(&"/archives/photos.7z".to_string()),
+            "a forgotten archive came back: {paths:?}"
+        );
+        assert_eq!(paths.len(), 2);
+    }
+
+    /// P2 §1's rule survives the new path: a file that cannot be parsed is never written
+    /// over, and the caller is given the sentence rather than a silent success.
+    #[test]
+    fn a_change_never_overwrites_a_file_that_will_not_parse() {
+        let tmp = Tmp::new("change-broken");
+        let store = tmp.store();
+
+        std::fs::create_dir_all(store.recents_path().parent().unwrap()).unwrap();
+        std::fs::write(store.recents_path(), "this is not [ toml").unwrap();
+
+        let refused = store.change_recents(|r| r.bump("/archives/photos.7z", 100));
+        assert!(refused.is_err(), "a broken file must not be written over");
+        assert_eq!(
+            std::fs::read_to_string(store.recents_path()).unwrap(),
+            "this is not [ toml",
+            "the user's file was changed anyway"
+        );
+    }
+
+    /// P8 §3's other half. The scratch file P2 wrote was `settings.toml.tmp` — one name
+    /// for every INDIUM on the machine, so two windows saving together truncated and
+    /// wrote into the same file and the rename committed a splice of both. A window's
+    /// scratch name is now its own, and it leaves everyone else's alone.
+    #[test]
+    fn a_write_does_not_touch_another_windows_half_finished_one() {
+        let tmp = Tmp::new("foreign-tmp");
+        let path = tmp.0.join("settings.toml");
+        std::fs::create_dir_all(&tmp.0).unwrap();
+
+        // A different window, mid-write.
+        let theirs = tmp.0.join("settings.toml.tmp.999999");
+        std::fs::write(&theirs, b"half of another window's settings").unwrap();
+
+        atomic_write(&path, b"ours").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "ours");
+        assert_eq!(
+            std::fs::read_to_string(&theirs).unwrap(),
+            "half of another window's settings",
+            "one window's save wrote through another window's scratch file"
+        );
     }
 
     /// CORE §9: passwords are never written anywhere. Nothing in these shapes can
