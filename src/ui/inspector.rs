@@ -38,7 +38,7 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui, rows: &[Row]) {
 
             match app.inspector_tab {
                 InspectorTab::Details => details(app, ui, rows),
-                InspectorTab::Preview => preview_stub(ui),
+                InspectorTab::Preview => preview(app, ui, rows),
             }
         });
 }
@@ -406,13 +406,171 @@ fn ratio_bar(ui: &mut egui::Ui, real: u64, packed: u64) {
 // Preview — P5
 // ---------------------------------------------------------------------------
 
-fn preview_stub(ui: &mut egui::Ui) {
+fn preview(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
+    if !app.has_archive() {
+        ui.label(egui::RichText::new("No archive open.").color(theme::TEXT_MUTED));
+        return;
+    }
+
+    // Preview follows the cursor rather than the multi-selection: there is one pane and
+    // one file can be in it. `subject_paths` would give the whole selection, which is the
+    // right subject for extraction and the wrong one for looking at something.
+    let subject = app
+        .selected_entries()
+        .first()
+        .map(|e| e.path.clone())
+        .or_else(|| rows.get(app.cursor).map(|r| r.path.clone()));
+
+    let Some(path) = subject else {
+        empty_note(
+            ui,
+            "Nothing selected.",
+            "Arrow keys move; Space returns to Details.",
+        );
+        return;
+    };
+
+    let Some(entry) = app.entry(&path).cloned() else {
+        empty_note(
+            ui,
+            "Nothing to preview.",
+            "This directory is inferred from entry paths and has no contents of its own.",
+        );
+        return;
+    };
+
+    if entry.is_dir {
+        empty_note(ui, "A directory.", "Enter descends into it.");
+        return;
+    }
+    if entry.size == 0 {
+        empty_note(
+            ui,
+            "An empty file.",
+            "Zero bytes, so there is nothing to show.",
+        );
+        return;
+    }
+
+    let ctx = ui.ctx().clone();
+    app.request_preview(&ctx, &path);
+
+    // The header names what is being looked at, whatever state the read is in.
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(util::base_name(&path))
+                .size(17.0)
+                .color(theme::TEXT),
+        )
+        .truncate(),
+    );
+
+    let ready = app.preview.as_ref().filter(|p| p.path == path);
+    let Some(data) = ready else {
+        ui.add_space(6.0);
+        if app.preview_loading.as_deref() == Some(path.as_str()) {
+            ui.horizontal(|ui| {
+                ui.add(egui::Spinner::new().color(theme::ORANGE));
+                ui.label(
+                    egui::RichText::new("Reading…")
+                        .size(13.0)
+                        .color(theme::TEXT_SECONDARY),
+                );
+            });
+        } else {
+            note(ui, "Nothing was read for this entry.");
+        }
+        return;
+    };
+
+    ui.label(
+        egui::RichText::new(kind_line(data, entry.size))
+            .size(12.0)
+            .color(theme::TEXT_MUTED),
+    );
+    ui.add_space(8.0);
+
+    match data.content {
+        util::Content::Image(_) if data.truncated => {
+            // A head is enough to sniff an image and never enough to decode one. Handing
+            // a truncated PNG to the decoder would surface a loader error where an honest
+            // sentence belongs.
+            note(
+                ui,
+                "Too large to preview. INDIUM reads the first few megabytes of an entry, \
+                 and an image cannot be decoded from part of itself.",
+            );
+        }
+        util::Content::Image(_) => {
+            egui::ScrollArea::both()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::Image::from_bytes(data.uri.clone(), data.bytes.clone())
+                            .maintain_aspect_ratio(true)
+                            .max_width(ui.available_width())
+                            .show_loading_spinner(true),
+                    );
+                });
+        }
+        util::Content::Text => {
+            // The About-licence idiom, plus `.wrap()`: the Inspector is a third the width
+            // of that window.
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(String::from_utf8_lossy(&data.bytes))
+                                .family(theme::MONO)
+                                .size(13.0)
+                                .color(theme::TEXT_SECONDARY),
+                        )
+                        .selectable(true)
+                        .wrap(),
+                    );
+                });
+        }
+        util::Content::Binary => {
+            // CORE §4 puts hex at V1.1, so the honest answer is a sentence and not a
+            // half-built hex view.
+            note(
+                ui,
+                "Neither text nor an image INDIUM decodes. A hex view arrives in V1.1; \
+                 until then there is nothing truthful to show here.",
+            );
+        }
+        util::Content::Empty => note(ui, "Nothing was read for this entry."),
+    }
+}
+
+/// What Preview is looking at, in one line.
+fn kind_line(data: &super::PreviewData, size: u64) -> String {
+    let kind = match data.content {
+        util::Content::Image(k) => k.to_string(),
+        util::Content::Text => "text".to_string(),
+        util::Content::Binary => "binary".to_string(),
+        util::Content::Empty => "empty".to_string(),
+    };
+    if data.truncated {
+        format!(
+            "{kind} · {} · showing the first {}",
+            util::format_bytes(size),
+            util::format_bytes(data.bytes.len() as u64)
+        )
+    } else {
+        format!("{kind} · {}", util::format_bytes(size))
+    }
+}
+
+/// A centred two-line state, the shape the old Preview stub used.
+fn empty_note(ui: &mut egui::Ui, title: &str, hint: &str) {
     ui.vertical_centered(|ui| {
         ui.add_space(50.0);
-        ui.label(egui::RichText::new("Preview arrives in P5.").color(theme::TEXT_SECONDARY));
+        ui.label(egui::RichText::new(title).color(theme::TEXT_SECONDARY));
         ui.add_space(4.0);
         ui.label(
-            egui::RichText::new("Text and images first; hex in V1.1.")
+            egui::RichText::new(hint)
                 .size(13.0)
                 .color(theme::TEXT_MUTED),
         );

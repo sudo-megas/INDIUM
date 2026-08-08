@@ -79,9 +79,37 @@ pub enum PendingAction {
     CopyOut,
     /// Extract one entry and offer it to an application.
     OpenWith { entry: String },
+    /// Read one entry's head for the Preview tab.
+    Preview { entry: String },
     /// Rebuild the archive once a password has been given.
     Apply,
 }
+
+/// How much of an entry Preview will read.
+///
+/// Large enough that ordinary images and text files fit whole, small enough that a
+/// gigabyte member cannot make the window disappear. An archive is untrusted input, and
+/// a preview is a convenience — it does not get to spend unbounded memory.
+pub const PREVIEW_CAP: usize = 8 * 1024 * 1024;
+
+/// What the Preview tab is showing, and for which entry.
+///
+/// Keyed by path and checked before use, exactly as `crc_of` is: a value belonging to a
+/// different entry is discarded rather than shown against the wrong name.
+pub struct PreviewData {
+    pub path: String,
+    pub content: crate::util::Content,
+    pub bytes: Vec<u8>,
+    /// True when the entry was longer than `PREVIEW_CAP`. An image cannot be decoded from
+    /// a truncated head, so this is what stops Preview handing a half a PNG to a decoder.
+    pub truncated: bool,
+    /// A stable key for egui's texture cache, unique per archive and member.
+    pub uri: String,
+}
+
+/// One entry's head, or why it could not be read. Named because clippy is right that the
+/// tuple was getting hard to read at the two places it appears.
+type PreviewRead = (String, Result<(Vec<u8>, bool), String>);
 
 pub struct Progress {
     pub done: usize,
@@ -134,6 +162,12 @@ pub struct Indium {
     /// owns the selection finishes writing, so it never happens on the UI thread.
     paste_rx: Option<Receiver<Result<Vec<PathBuf>, String>>>,
 
+    // --- Preview (P5) -----------------------------------------------------
+    pub preview: Option<PreviewData>,
+    /// Set while a head is being read, so the tab can say so rather than look empty.
+    pub preview_loading: Option<String>,
+    preview_rx: Option<Receiver<PreviewRead>>,
+
     // --- popups -----------------------------------------------------------
     pub popup: Option<Popup>,
     pub extract_path: String,
@@ -184,6 +218,10 @@ pub struct Indium {
 impl Indium {
     pub fn new(cc: &eframe::CreationContext<'_>, open: Option<PathBuf>) -> Indium {
         theme::install(&cc.egui_ctx);
+        // Without this, `Image::from_bytes` has no loader and every preview fails. It is
+        // idempotent by contract, and with only the `image` feature it registers exactly
+        // one thing.
+        egui_extras::install_image_loaders(&cc.egui_ctx);
 
         let store = Store::new();
         let settings = store.load_settings();
@@ -226,6 +264,9 @@ impl Indium {
             new_encrypt: false,
             apply_rx: None,
             paste_rx: None,
+            preview: None,
+            preview_loading: None,
+            preview_rx: None,
             password_input: String::new(),
             password_confirm: String::new(),
             password_attempts: 0,
@@ -323,10 +364,15 @@ impl Indium {
             Some(rx) => rx.try_iter().collect(),
             None => Vec::new(),
         };
+        let preview_msgs: Vec<PreviewRead> = match &self.preview_rx {
+            Some(rx) => rx.try_iter().collect(),
+            None => Vec::new(),
+        };
         let wake = !list_msgs.is_empty()
             || !extract_msgs.is_empty()
             || !apply_msgs.is_empty()
-            || !paste_msgs.is_empty();
+            || !paste_msgs.is_empty()
+            || !preview_msgs.is_empty();
 
         for msg in list_msgs {
             match msg {
@@ -376,6 +422,37 @@ impl Indium {
                     self.extract_rx = None;
                     self.status = msg;
                     self.passphrase = None;
+                }
+            }
+        }
+
+        for (path, result) in preview_msgs {
+            self.preview_rx = None;
+            self.preview_loading = None;
+            match result {
+                Ok((bytes, truncated)) => {
+                    let content = crate::util::sniff(&bytes);
+                    // The URI keys egui's texture cache. It must be unique per archive and
+                    // member, or two different images would share one texture.
+                    let uri = format!(
+                        "bytes://{}#{}",
+                        self.archive_path
+                            .as_ref()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_default(),
+                        path
+                    );
+                    self.preview = Some(PreviewData {
+                        path,
+                        content,
+                        bytes,
+                        truncated,
+                        uri,
+                    });
+                }
+                Err(e) => {
+                    self.preview = None;
+                    self.status = e;
                 }
             }
         }
@@ -562,6 +639,73 @@ impl Indium {
             None => "INDIUM".to_string(),
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+    }
+
+    // -----------------------------------------------------------------------
+    // Preview — P5 §B
+    // -----------------------------------------------------------------------
+
+    /// Read an entry's head on a worker so the Preview tab has something to show.
+    ///
+    /// Nothing here decodes an image: `egui_extras`' loader does that on its own
+    /// background thread and repaints itself when it is done. What needs a worker is the
+    /// archive read, because `arch::Reader` is not `Send` — only the path and the
+    /// passphrase cross the boundary, and the worker opens its own reader.
+    pub fn request_preview(&mut self, ctx: &egui::Context, entry_path: &str) {
+        if self.preview.as_ref().map(|p| p.path.as_str()) == Some(entry_path) {
+            return; // already showing this one
+        }
+        if self.preview_loading.as_deref() == Some(entry_path) {
+            return; // already on its way
+        }
+        let Some(archive) = self.archive_path.clone() else {
+            return;
+        };
+        let Some(entry) = self.entry(entry_path) else {
+            return;
+        };
+        if entry.is_dir {
+            self.forget_preview(ctx);
+            return;
+        }
+        // An encrypted entry rides P2's park-and-resume path, exactly as a checksum does.
+        if entry.encrypted && self.passphrase.is_none() {
+            self.pending = Some(PendingAction::Preview {
+                entry: entry_path.to_string(),
+            });
+            self.popup = Some(Popup::Password);
+            self.password_input.clear();
+            self.password_attempts = 0;
+            return;
+        }
+
+        self.forget_preview(ctx);
+        self.preview_loading = Some(entry_path.to_string());
+
+        let (tx, rx) = channel();
+        self.preview_rx = Some(rx);
+        let want = entry_path.to_string();
+        let pass = self.passphrase.clone();
+        let ctx2 = ctx.clone();
+        std::thread::spawn(move || {
+            let got = arch::head_of(&archive, &want, PREVIEW_CAP, pass.as_ref())
+                .map_err(|e| e.to_string());
+            let _ = tx.send((want, got));
+            ctx2.request_repaint();
+        });
+    }
+
+    /// Drop whatever Preview was showing, and the texture behind it.
+    ///
+    /// Without the `forget_image` every previewed image would stay in egui's texture cache
+    /// for the life of the process — a browse through a few hundred photographs would
+    /// leak all of them.
+    pub fn forget_preview(&mut self, ctx: &egui::Context) {
+        if let Some(old) = self.preview.take() {
+            ctx.forget_image(&old.uri);
+        }
+        self.preview_loading = None;
+        self.preview_rx = None;
     }
 
     /// Can anything be staged against what is currently open?
@@ -1374,12 +1518,14 @@ impl Indium {
             // A checksum belongs to the entry it was computed for, so it is dropped.
             if moved && self.section == Section::Archive {
                 self.crc_of = None;
+                self.forget_preview(ctx);
                 self.selection.clear();
                 if let Some(row) = rows.get(self.cursor) {
                     self.selection.insert(row.path.clone());
                 }
             } else if moved {
                 self.crc_of = None;
+                self.forget_preview(ctx);
             }
         } else {
             self.cursor = 0;

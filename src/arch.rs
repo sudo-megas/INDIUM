@@ -935,6 +935,65 @@ pub fn extract(
 // CRC32 on demand
 // ---------------------------------------------------------------------------
 
+/// The first `cap` bytes of one entry, and whether more was left unread.
+///
+/// P5 §B1. There was no way to get an entry's bytes into memory: `crc32_of` consumed them
+/// as it went and `extract` only ever wrote to disk. This is shaped like `crc32_of` and
+/// built on P4's `EntryData`, so `archive_read_data`'s short-read and sparse-hole
+/// behaviour is shared with the rebuild path rather than derived a second time.
+///
+/// The cap is not a nicety. An archive is untrusted input and a member may be gigabytes;
+/// a preview that read all of it would be a way to make the window disappear. The `bool`
+/// is true when the entry was longer than the cap, which is what tells Preview it may
+/// sniff but must not try to decode an image.
+pub fn head_of(
+    path: &Path,
+    entry_path: &str,
+    cap: usize,
+    passphrase: Option<&Secret>,
+) -> Result<(Vec<u8>, bool), ArchiveError> {
+    // Same routing as every other read path: libarchive first, and the 7z reader only
+    // where libarchive refuses. See §A1b.
+    match head_via_libarchive(path, entry_path, cap, passphrase) {
+        Err(ArchiveError::EncryptedHeaders) if looks_like_7z(path) => {
+            crate::sevenz::read_entry(path, entry_path, cap, passphrase)
+        }
+        other => other,
+    }
+}
+
+fn head_via_libarchive(
+    path: &Path,
+    entry_path: &str,
+    cap: usize,
+    passphrase: Option<&Secret>,
+) -> Result<(Vec<u8>, bool), ArchiveError> {
+    use std::io::Read as _;
+
+    let mut reader = Reader::open(path, passphrase)?;
+    while let Some(entry) = reader.next_entry()? {
+        if entry.path != entry_path {
+            reader.skip_data();
+            continue;
+        }
+        let mut out = Vec::new();
+        // One byte past the cap, so "there is more" is known without a second pass.
+        let mut data = EntryData::new(&mut reader).take(cap as u64 + 1);
+        data.read_to_end(&mut out).map_err(|e| {
+            let msg = e.to_string();
+            if mentions_passphrase(&msg) {
+                ArchiveError::WrongPassword
+            } else {
+                ArchiveError::Other(msg)
+            }
+        })?;
+        let truncated = out.len() > cap;
+        out.truncate(cap);
+        return Ok((out, truncated));
+    }
+    Err(ArchiveError::Other(format!("no such entry: {entry_path}")))
+}
+
 /// Stream one entry through the hand-written CRC32.
 ///
 /// CORE §4: libarchive does not expose an entry's *stored* CRC, so INDIUM computes it

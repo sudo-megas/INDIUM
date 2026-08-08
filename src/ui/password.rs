@@ -37,7 +37,9 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 Some(PendingAction::List(_)) => {
                     "This archive's file names are encrypted. A password is needed to list it."
                 }
-                Some(PendingAction::Crc { .. }) | Some(PendingAction::OpenWith { .. }) => {
+                Some(PendingAction::Crc { .. })
+                | Some(PendingAction::OpenWith { .. })
+                | Some(PendingAction::Preview { .. }) => {
                     "This entry is encrypted. A password is needed to read it."
                 }
                 Some(PendingAction::CopyOut) => {
@@ -197,6 +199,13 @@ fn attempt(app: &mut Indium, ctx: &egui::Context) {
         Some(PendingAction::OpenWith { entry }) => {
             app.passphrase = Some(secret);
             app.open_with(&entry);
+            app.passphrase = None;
+        }
+        Some(PendingAction::Preview { entry }) => {
+            app.passphrase = Some(secret);
+            app.request_preview(ctx, &entry);
+            // The worker holds its own clone, and Preview caches the bytes rather than
+            // the password.
             app.passphrase = None;
         }
         Some(PendingAction::Apply) => {

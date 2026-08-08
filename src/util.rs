@@ -226,6 +226,69 @@ pub fn parent_dir(path: &str) -> &str {
     }
 }
 
+// ---------------------------------------------------------------------------
+// What a preview is looking at — P5 §B2
+// ---------------------------------------------------------------------------
+
+/// What INDIUM can make of an entry's first bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Content {
+    /// An image in a format the Preview tab decodes.
+    Image(&'static str),
+    /// Text: no NUL byte, and valid UTF-8.
+    Text,
+    /// Something else. CORE §4 reserves hex for V1.1, so the honest answer is a sentence.
+    Binary,
+    /// No bytes at all.
+    Empty,
+}
+
+/// Judge an entry's head.
+///
+/// The order matters. An image is recognised **by its bytes, never its extension**: a PNG
+/// named `notes.txt` is a PNG, and reporting what is actually there rather than what a
+/// name claims is the same principle that makes the Inspector worth having.
+pub fn sniff(head: &[u8]) -> Content {
+    if head.is_empty() {
+        return Content::Empty;
+    }
+    if let Some(kind) = image_format(head) {
+        return Content::Image(kind);
+    }
+    // A NUL byte is the classic tell, and it is what `grep` and `file` have used
+    // forever. UTF-8 validity is checked rather than assumed, because a preview that
+    // lossily decoded arbitrary bytes into replacement characters would be inventing
+    // content — the one thing this program does not do.
+    if !head.contains(&0) && std::str::from_utf8(head).is_ok() {
+        return Content::Text;
+    }
+    Content::Binary
+}
+
+/// The image format a head's magic bytes announce, if it is one INDIUM decodes.
+///
+/// Only the four formats CORE §2's row now covers. A format that is recognised here but
+/// not compiled in would produce a decoder error instead of an honest sentence, so this
+/// list and `Cargo.toml`'s feature list are the same list.
+pub fn image_format(head: &[u8]) -> Option<&'static str> {
+    const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    if head.starts_with(PNG) {
+        return Some("PNG");
+    }
+    if head.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Some("JPEG");
+    }
+    if head.starts_with(b"GIF87a") || head.starts_with(b"GIF89a") {
+        return Some("GIF");
+    }
+    // BMP's magic is only two bytes, so the declared file size is checked too — "BM"
+    // alone matches far too much to trust on its own.
+    if head.starts_with(b"BM") && head.len() >= 6 {
+        return Some("BMP");
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,5 +366,55 @@ mod tests {
     fn ratios_refuse_to_divide_by_zero() {
         assert_eq!(format_ratio(0, 0), "—");
         assert_eq!(format_ratio(100, 50), "50.0%");
+    }
+
+    // --- Preview sniffing — P5 §B2 -------------------------------------------
+
+    /// The whole point: bytes decide, not names. A PNG called `notes.txt` is a PNG.
+    #[test]
+    fn an_image_is_recognised_by_its_bytes_not_its_extension() {
+        let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];
+        assert_eq!(sniff(&png), Content::Image("PNG"));
+        assert_eq!(image_format(&png), Some("PNG"));
+
+        assert_eq!(
+            sniff(&[0xFF, 0xD8, 0xFF, 0xE0, 0, 16]),
+            Content::Image("JPEG")
+        );
+        assert_eq!(sniff(b"GIF89a\x01\x00"), Content::Image("GIF"));
+        assert_eq!(sniff(b"BM\x8a\x00\x00\x00"), Content::Image("BMP"));
+    }
+
+    /// A NUL byte is the tell `file` and `grep` have used forever.
+    #[test]
+    fn a_file_with_a_nul_byte_is_not_offered_as_text() {
+        assert_eq!(sniff(b"hello\0world"), Content::Binary);
+        assert_eq!(sniff(b"hello world"), Content::Text);
+    }
+
+    /// Lossily decoding arbitrary bytes into replacement characters would be inventing
+    /// content, which is the one thing this program refuses to do.
+    #[test]
+    fn non_utf8_bytes_are_reported_rather_than_lossily_decoded() {
+        // A lone continuation byte: valid Latin-1, invalid UTF-8.
+        assert_eq!(sniff(&[b'a', 0xC3, 0x28, b'b']), Content::Binary);
+        // Valid multi-byte UTF-8 is text.
+        assert_eq!(sniff("ödev".as_bytes()), Content::Text);
+    }
+
+    #[test]
+    fn an_empty_entry_is_neither_text_nor_binary() {
+        assert_eq!(sniff(b""), Content::Empty);
+    }
+
+    /// "BM" alone matches far too much to trust, so a BMP needs its size field too.
+    #[test]
+    fn two_bytes_are_not_enough_to_call_something_a_bitmap() {
+        assert_eq!(image_format(b"BM"), None);
+        assert_eq!(
+            sniff(b"BM"),
+            Content::Text,
+            "it is printable, so it reads as text"
+        );
     }
 }

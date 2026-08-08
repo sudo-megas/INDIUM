@@ -51,6 +51,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
         return;
     }
 
+    let ui_ctx = ui.ctx().clone();
     let mut clicked: Option<(usize, bool)> = None;
     let mut descend_into: Option<usize> = None;
     let mut commit_rename = false;
@@ -200,6 +201,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
     if let Some((i, additive)) = clicked {
         app.cursor = i;
         app.crc_of = None;
+        app.forget_preview(&ui_ctx);
         let path = rows[i].path.clone();
         if additive {
             if !app.selection.remove(&path) {

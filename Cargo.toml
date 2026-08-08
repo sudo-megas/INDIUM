@@ -7,7 +7,16 @@ description = "An archive manager for Linux on Wayland where the metadata is the
 
 [dependencies]
 eframe = { version = "0.36.1", default-features = false, features = ["glow", "wayland"] }
-egui_extras = "0.36.1"
+egui_extras = { version = "0.36.1", features = ["image"] }
+# `egui_extras/image` on its own decodes nothing — it enables the crate with
+# `default-features = false`, and the crate's own docs say twice that the formats must be
+# opted into separately. `image` is not a new dependency: eframe already links it through
+# its clipboard path with PNG on, which is what CORE §2's row now records.
+#
+# Deliberately absent: TIFF, whose C-freedom rests on an upstream crate's default
+# excluding its optional zstd feature; and WebP, one more decoder for a format that is
+# common on the web and rare inside an archive.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp"] }
 serde = { version = "1.0.229", features = ["derive"] }
 sevenz-rust2 = { version = "0.21.4", default-features = false, features = ["aes256", "compress"] }
 toml = "1.1.4"
