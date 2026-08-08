@@ -1,6 +1,9 @@
 #!/bin/sh
 # CORE §2: "No GTK. No Qt. No KF6. No portal." This script is the enforcement.
-# It runs by hand until V1.4 wires it into CI, and it runs before every release.
+#
+# It runs by hand before every release, inside the Arch package's own check() so no package
+# can be built from a binary that grew a toolkit, and inside the release workflow. What
+# V1.4 adds is the rest of it: CI on every push, with this script as a gate on a merge.
 set -e
 out=$(ldd target/release/indium)
 echo "$out"

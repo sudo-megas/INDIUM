@@ -150,8 +150,10 @@ stores, not as the single arrow a programmer's font would prefer to draw.
 
 No GTK. No Qt. No KF6. No portal. No X11. This is enforced rather than intended:
 `build/check-deps.sh` runs `ldd target/release/indium` and fails if the output contains
-`gtk`, `Qt`, `KF6`, `X11`, or `portal`. It runs before every release, and CI takes it over
-at V1.4.
+`gtk`, `Qt`, `KF6`, `X11`, or `portal`, and it also asserts that the binary is PIE and
+full-RELRO. It runs by hand before every release, inside the Arch package's own `check()`,
+and inside the release workflow. What arrives at V1.4 is the rest of it: CI on every push,
+with this script as a gate that blocks a merge.
 
 ## Formats
 
