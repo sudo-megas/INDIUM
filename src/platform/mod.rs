@@ -2,12 +2,14 @@
 //!
 //! CORE §3 gives this module "clipboard, `.desktop` parsing for Open With,
 //! default-app registration, XDG paths". P1 and P2 need only the paths and the TOML
-//! store; the rest arrives with P3.
+//! store; the rest arrives with P3. P8 adds the second window, which is a Linux
+//! specific like the others: on this platform a window is a process.
 
 pub mod apps;
 pub mod clipboard;
 pub mod scratch;
 pub mod store;
+pub mod window;
 
 use std::path::PathBuf;
 

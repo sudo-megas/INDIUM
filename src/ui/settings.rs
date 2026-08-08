@@ -42,7 +42,10 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             // carries `SECTION_ABOVE` itself, so the gap is declared once in `theme.rs`
             // rather than hand-tuned three times here. P7 §1.
             theme::section(ui, "Extract");
-            let mut changed = false;
+            // Set inside the row's closure, applied after it: the change is made to the
+            // settings file rather than to this window's copy of it, which needs `app`
+            // mutably and cannot have it while the row is drawing.
+            let mut changed: Option<ExtractDefault> = None;
             ui.horizontal(|ui| {
                 // Which default is chosen is "this mode is active", not "something will
                 // happen". The ink carries it too, because Aubergine alone sits 1.72:1
@@ -63,19 +66,17 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     ui.selectable_label(on, text).clicked()
                 };
                 if toggle(ui, cur == ExtractDefault::Here, "here") && cur != ExtractDefault::Here {
-                    app.settings.extract.default = ExtractDefault::Here;
-                    changed = true;
+                    changed = Some(ExtractDefault::Here);
                 }
                 if toggle(ui, cur == ExtractDefault::Subdir, "into a subdirectory")
                     && cur != ExtractDefault::Subdir
                 {
-                    app.settings.extract.default = ExtractDefault::Subdir;
-                    changed = true;
+                    changed = Some(ExtractDefault::Subdir);
                 }
             });
-            if changed {
+            if let Some(want) = changed {
+                app.change_settings(move |s| s.extract.default = want);
                 app.extract_to_subdir = app.settings.extract.default == ExtractDefault::Subdir;
-                app.save_settings();
             }
 
             // --- 2. Bookmarks -------------------------------------------------
@@ -103,9 +104,11 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     });
                 });
             }
-            if let Some(i) = remove {
-                app.settings.bookmarks.remove(i);
-                app.save_settings();
+            // Removed by identity rather than by index: the index came from this
+            // window's list, and the change is applied to the file, which another
+            // window may have reordered or shortened since.
+            if let Some(gone) = remove.and_then(|i| app.settings.bookmarks.get(i).cloned()) {
+                app.change_settings(move |s| s.bookmarks.retain(|b| *b != gone));
             }
 
             ui.add_space(4.0);
@@ -124,13 +127,13 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 let ready =
                     !app.bookmark_name.trim().is_empty() && !app.bookmark_path.trim().is_empty();
                 if theme::button(ui, egui::RichText::new("Add"), ready).clicked() {
-                    app.settings.bookmarks.push(Bookmark {
+                    let added = Bookmark {
                         name: app.bookmark_name.trim().to_string(),
                         path: app.bookmark_path.trim().to_string(),
-                    });
+                    };
                     app.bookmark_name.clear();
                     app.bookmark_path.clear();
-                    app.save_settings();
+                    app.change_settings(move |s| s.bookmarks.push(added));
                 }
             });
 
@@ -143,12 +146,11 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                         .color(theme::TEXT_MUTED),
                 );
                 if theme::button(ui, egui::RichText::new("Clear list"), true).clicked() {
-                    app.recents.items.clear();
                     // Status first, save last, so a refusal or a write error is what the
                     // status bar carries rather than a cheerful line about a file that is
                     // still full of what it always held.
                     app.status = "Recent files cleared.".to_string();
-                    app.save_recents();
+                    app.change_recents(|r| r.items.clear());
                 }
             });
 

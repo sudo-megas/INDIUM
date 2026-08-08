@@ -99,8 +99,15 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                             .map(|s| s.to_string_lossy().to_string())
                             .unwrap_or_else(|| path.clone());
                         if !app.settings.bookmarks.iter().any(|b| b.path == path) {
-                            app.settings.bookmarks.push(Bookmark { name, path });
-                            app.save_settings();
+                            let added = Bookmark { name, path };
+                            app.change_settings(move |s| {
+                                // Asked again of the file, not of this window's copy:
+                                // another window may have pinned the same path since
+                                // this one last read it.
+                                if !s.bookmarks.iter().any(|b| b.path == added.path) {
+                                    s.bookmarks.push(added);
+                                }
+                            });
                             app.status = "Bookmark pinned.".to_string();
                         }
                     }

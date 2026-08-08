@@ -32,6 +32,7 @@ use crate::platform::apps::{self, Candidate};
 use crate::platform::clipboard;
 use crate::platform::scratch::{self, Scratch};
 use crate::platform::store::{self, ExtractDefault, Recents, Settings, Store};
+use crate::platform::window::{self, Destination};
 use crate::secret::Secret;
 use crate::tasks::{self, ApplyMsg, Queue, Task};
 use crate::theme;
@@ -340,25 +341,49 @@ impl Indium {
     // Opening and listing
     // -----------------------------------------------------------------------
 
-    /// Open an archive, unless something is already writing files.
+    /// Open an archive — here if this window is free to take it, and in a second window
+    /// if it is not.
     ///
     /// This is reached from seven places — the command line, a drop, `Ctrl+O`, a click or
     /// `Enter` on a recent, the password prompt's List resume, and Apply's own re-open —
-    /// and until P7 it checked nothing at all. The two lines below are a rug-pull: they
-    /// raise the old cancellation flag and then hand the window a new one, which stops a
-    /// running extraction dead in the middle and leaves the user with a directory of
-    /// half a selection under a status line about a different archive.
+    /// and all seven ask the same question of `platform::window::destination` because
+    /// CORE §1's rule does not have seven readings. P8 §2 is that rule; the call sites
+    /// were not touched to add it.
     ///
-    /// `work_running` is the same refusal `E`, `Ctrl+C` and Apply already make, and its
-    /// two sentences are now visible while work is in flight — row 2 of the status bar
-    /// stopped hiding them. It is asked **first**, before anything is cleared: a refusal
-    /// that has already wiped the selection, the cwd and the entry list is a rug-pull
-    /// with an apology attached.
+    /// **The order of the two refusals below is the whole of P8 §2.** Until P8 this
+    /// function began with `work_running`, because opening an archive replaced what was
+    /// on screen: P7 §7 added the check after a copy-out was cut in half by a user who
+    /// clicked a recent while it ran, and the two lines that follow are the rug-pull it
+    /// stopped — they raise the old cancellation flag and hand the window a new one.
+    ///
+    /// A second window replaces nothing. So the destination is asked **first**, and a
+    /// window busy extracting will now happily open a different archive next to itself
+    /// rather than refuse — the refusal was never about the archive, it was about this
+    /// window's own running work, and it still guards exactly that. Asking `work_running`
+    /// first would have made the busiest window the one that could not do the one thing
+    /// that costs it nothing.
     ///
     /// A *listing* is not work in this sense and is still cancelled without ceremony:
     /// nothing has been written, CORE §1 gives the window one archive, and opening the
     /// next one is the whole of what the user asked for.
     pub fn open_archive(&mut self, ctx: &egui::Context, path: PathBuf, passphrase: Option<Secret>) {
+        if window::destination(self.archive_path.as_deref(), &path) == Destination::NewWindow {
+            // The secret dies on this line rather than travelling to a command line.
+            // No caller reaches here holding one — the two that hold one re-open the
+            // archive already open — and `Secret`'s own `Drop` wipes it, so the day a
+            // caller does, CORE §9 is kept by the code rather than by the argument.
+            drop(passphrase);
+            self.status = match window::open_new(&path) {
+                Ok(()) => format!(
+                    "Opening {} in a second window.",
+                    path.file_name()
+                        .unwrap_or(path.as_os_str())
+                        .to_string_lossy()
+                ),
+                Err(e) => e,
+            };
+            return;
+        }
         if self.work_running() {
             return;
         }
@@ -638,35 +663,44 @@ impl Indium {
             return;
         };
         let path = path.to_string_lossy().to_string();
-        self.recents.bump(&path, store::now());
-        self.save_recents();
+        let now = store::now();
+        self.change_recents(|r| r.bump(&path, now));
     }
 
-    /// P2 §1: writes happen on change, and never over a file that failed to parse.
+    /// Change the recents file, and hold exactly what the file now holds.
     ///
-    /// Shaped exactly like `save_settings`, and for the same reason: a save that did not
-    /// happen must say so. Three call sites used to swallow both answers with `let _`,
-    /// which meant a full disk or a read-only state directory looked identical to a
-    /// successful write — and the recents file the user was told about never changed.
-    pub fn save_recents(&mut self) {
+    /// P2 §1: writes happen on change, and never over a file that failed to parse. A
+    /// save that did not happen must say so; three call sites once swallowed both answers
+    /// with `let _`, which made a full disk look exactly like a successful write.
+    ///
+    /// `store::Store::change_recents` owns the rest and says why. The window's part is
+    /// the startup latch and the sentence — and its own copy is replaced only by what was
+    /// actually written, because a list on screen that does not match the file is how a
+    /// failed save gets mistaken for a successful one. A file that has *become*
+    /// unparseable since startup needs no new latch: every change re-reads, so every
+    /// change refuses again on its own.
+    pub fn change_recents(&mut self, change: impl FnOnce(&mut Recents)) {
         if self.recents_broken {
             self.status =
                 "recents.toml could not be parsed earlier; it will not be overwritten.".to_string();
             return;
         }
-        if let Err(e) = self.store.save_recents(&self.recents) {
-            self.status = format!("Could not save recent files: {e}");
+        match self.store.change_recents(change) {
+            Ok(recents) => self.recents = recents,
+            Err(notice) => self.status = notice,
         }
     }
 
-    pub fn save_settings(&mut self) {
+    /// Change the settings file. Shaped exactly like `change_recents`.
+    pub fn change_settings(&mut self, change: impl FnOnce(&mut Settings)) {
         if self.settings_broken {
             self.status = "settings.toml could not be parsed earlier; it will not be overwritten."
                 .to_string();
             return;
         }
-        if let Err(e) = self.store.save_settings(&self.settings) {
-            self.status = format!("Could not save settings: {e}");
+        match self.store.change_settings(change) {
+            Ok(settings) => self.settings = settings,
+            Err(notice) => self.status = notice,
         }
     }
 
@@ -1796,20 +1830,20 @@ impl Indium {
                 if del {
                     if let Some(r) = self.recents.sorted().get(self.cursor).cloned() {
                         let path = r.path.clone();
-                        self.recents.remove(&path);
                         // The success line first, the write last: a save that failed has
                         // something to say, and it must not be overwritten by a sentence
                         // announcing a change that never reached the disk.
                         self.status = format!("Removed {path} from recent files.");
-                        self.save_recents();
+                        self.change_recents(|r| r.remove(&path));
                     }
                 }
             }
             Section::Bookmarks => {
                 if del && self.cursor < self.settings.bookmarks.len() {
-                    let b = self.settings.bookmarks.remove(self.cursor);
-                    self.save_settings();
-                    self.status = format!("Removed bookmark {}.", b.name);
+                    let gone = self.settings.bookmarks[self.cursor].clone();
+                    let name = gone.name.clone();
+                    self.change_settings(move |s| s.bookmarks.retain(|b| *b != gone));
+                    self.status = format!("Removed bookmark {name}.");
                 }
             }
         }

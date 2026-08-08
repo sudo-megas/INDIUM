@@ -448,11 +448,10 @@ fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
         app.status = format!("{p} is no longer there.");
     }
     if let Some(p) = forget {
-        app.recents.remove(&p);
         // Status first, save last: a write that failed owns the line, rather than losing
         // it to a sentence about a removal the file on disk never heard of.
         app.status = format!("Removed {p} from recent files.");
-        app.save_recents();
+        app.change_recents(|r| r.remove(&p));
     }
 }
 
@@ -525,10 +524,10 @@ fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
     if let Some(i) = focus {
         app.cursor = i;
     }
-    if let Some(i) = remove {
-        let b = app.settings.bookmarks.remove(i);
-        app.save_settings();
-        app.status = format!("Removed bookmark {}.", b.name);
+    if let Some(gone) = remove.and_then(|i| app.settings.bookmarks.get(i).cloned()) {
+        let name = gone.name.clone();
+        app.change_settings(move |s| s.bookmarks.retain(|b| *b != gone));
+        app.status = format!("Removed bookmark {name}.");
     }
 }
 

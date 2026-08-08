@@ -3,8 +3,9 @@
 //! Copyright © sudo-megas. GPL-3.0-only.
 //!
 //! CORE §1: "One archive per window. Opening a second archive opens a second window.
-//! There are no tabs." So this binary opens exactly one archive: the one named on the
-//! command line, if any.
+//! There are no tabs." So this binary opens exactly one archive — the first one named on
+//! the command line — and every further archive gets a window of its own, which since
+//! P8 this program opens rather than asks the user to open.
 
 // The window is the product; a console window is not wanted alongside it. On Linux
 // this attribute is a no-op, but it documents the intent and costs nothing.
@@ -12,14 +13,16 @@
 
 use std::path::PathBuf;
 
+use indium::platform::window;
 use indium::ui::Indium;
 
 const USAGE: &str = "\
 INDIUM — an archive manager for Linux on Wayland.
 
-    indium [ARCHIVE]
+    indium [ARCHIVE]...
 
-    ARCHIVE    an archive to open on launch
+    ARCHIVE    an archive to open on launch; each one after the first
+               opens in a window of its own
 
     -h, --help       this text
     -V, --version    the version
@@ -31,6 +34,7 @@ fn main() -> eframe::Result<()> {
     // CORE §2: "argument handling is `std::env::args`". `clap` arrives only if V1.3's
     // headless subcommands justify its sentence.
     let mut open: Option<PathBuf> = None;
+    let mut also: Vec<PathBuf> = Vec::new();
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
             "-h" | "--help" => {
@@ -50,12 +54,11 @@ fn main() -> eframe::Result<()> {
                 if open.is_none() {
                     open = Some(PathBuf::from(arg));
                 } else {
-                    // One archive per window is the rule, so a second path is a
-                    // mistake worth naming rather than silently ignoring.
-                    eprintln!(
-                        "indium: one archive per window — ignoring {arg}\n\
-                         indium: open a second window for it instead"
-                    );
+                    // One archive per window is the rule, and until P8 the whole of
+                    // INDIUM's answer to a second path was a sentence telling the user
+                    // to go and open a window for it by hand. It is the same sentence
+                    // this program can now act on, so it does.
+                    also.push(PathBuf::from(arg));
                 }
             }
         }
@@ -65,6 +68,16 @@ fn main() -> eframe::Result<()> {
         if !path.exists() {
             eprintln!("indium: {} does not exist", path.display());
             std::process::exit(1);
+        }
+    }
+
+    // Before the window, so a launch that names five archives puts five windows on
+    // screen at once rather than one at a time behind the first one's listing. A child
+    // that cannot start is named and does not stop the others — each window reports its
+    // own archive, including a missing one, on the terminal they share.
+    for path in &also {
+        if let Err(e) = window::open_new(path) {
+            eprintln!("indium: {e}");
         }
     }
 
