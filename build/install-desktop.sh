@@ -1,24 +1,11 @@
 #!/bin/sh
 # P3 §4: dev-machine registration, user scope. Run from the repository root.
-# Packages redo this system-wide in P6. Without --set-default the script installs
-# and touches nothing about the user's existing choices.
+# The payload — the desktop entry and the icons — lives in build/install-payload.sh, which
+# the packages call with their own roots; the two installs differ only in that root. What
+# is left here is what only a dev machine needs: the caches, and the MIME types. Without
+# --set-default the script installs and touches nothing about the user's existing choices.
 set -e
-install -Dm644 assets/org.indium.desktop \
-  "$HOME/.local/share/applications/org.indium.desktop"
-
-# P5: the maker's icons live in build/icons/ as `indium-<size>.png`. They are masters
-# rather than shipped assets — the set runs to 4096 — so only the sizes a desktop
-# actually looks in are installed, and the rest stay put as sources.
-#
-# Every one is installed as `apps/indium.png`, matching `Icon=indium` in the desktop
-# entry. The loop still tolerates a missing file, so a partial set installs what exists
-# rather than failing: P3 §4 made that deliberate and it is still true.
-for size in 16 22 24 32 48 64 96 128 256 512; do
-  png="build/icons/indium-${size}.png"
-  [ -e "$png" ] || continue
-  install -Dm644 "$png" \
-    "$HOME/.local/share/icons/hicolor/${size}x${size}/apps/indium.png"
-done
+./build/install-payload.sh "$HOME/.local"
 
 command -v update-desktop-database >/dev/null &&
   update-desktop-database "$HOME/.local/share/applications" || true
