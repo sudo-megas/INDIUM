@@ -1,0 +1,36 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: INDIUM
+Source: https://github.com/sudo-megas/INDIUM
+
+Files: *
+Copyright: sudo-megas
+License: GPL-3.0-only
+
+Files: assets/fonts/*
+Copyright: 2020 The JetBrains Mono Project Authors
+License: OFL-1.1
+Comment: JetBrains Mono NL Nerd Font, regular and bold, embedded in the binary.
+ CORE §2 records them as bundled assets rather than dependencies. `NL` is the
+ no-ligature cut, because a filename holding `->` must render as the two
+ characters the archive stores.
+
+License: GPL-3.0-only
+ INDIUM is free software: you can redistribute it and/or modify it under the
+ terms of the GNU General Public License, version 3, as published by the Free
+ Software Foundation. Version 3 and no other — the "or any later version"
+ clause is not offered.
+ .
+ INDIUM is distributed in the hope that it will be useful, but WITHOUT ANY
+ WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+ A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+ .
+ You should have received a copy of the GNU General Public License along with
+ this program. If not, see <https://www.gnu.org/licenses/>.
+ .
+ On Debian systems the complete text of the GNU General Public License version
+ 3 is in `/usr/share/common-licenses/GPL-3'. Policy 12.5 asks packages to point
+ at that file rather than carry a thirty-five-kilobyte copy each, and this one
+ does. The same text is in the source tree as `LICENSE', and INDIUM reads it
+ out to you in full from its About panel.
+
+License: OFL-1.1

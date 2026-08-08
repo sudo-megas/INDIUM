@@ -1,0 +1,97 @@
+# INDIUM — the .deb release build. CORE §8: "Packages: `.pkg.tar.zst` (Arch) and `.deb`
+# (Debian/Ubuntu), from P6 onward. Nothing else." The Arch package is built by hand on the
+# maker's own machine, which is an Arch machine; the .deb is built here, because the .deb
+# is the one that has to run somewhere the maker does not live.
+name: release
+
+on:
+  # The manual trigger is not a convenience, and it comes first for that reason. Without
+  # it this workflow's first-ever run would be on the v1.0 tag — a tag that gets pushed
+  # exactly once — and a typo in the rustup line or in an apt package name would burn it
+  # on a red run. It is dispatched by hand on master, watched green, and only then does
+  # the tag exist.
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+# Explicit and minimal. This workflow does not create a release, edit a release, or write
+# anything back to the repository: it uploads the .deb as a run artifact and stops. The
+# outward-facing act stays a separate human step, taken from the sudo-megas account and no
+# other, as CORE §8 requires.
+permissions:
+  contents: read
+
+jobs:
+  deb:
+    runs-on: ubuntu-latest
+
+    # THIS LINE IS THE WHOLE POINT OF THE WORKFLOW. The .deb has to declare the oldest
+    # glibc that can run its binary, and `make-deb.sh` reads that floor out of the binary
+    # itself rather than trusting anybody's memory. Built on the maker's Arch machine the
+    # same binary imports GLIBC_2.43; bookworm ships 2.36, so an Arch-built .deb would
+    # honestly declare a dependency that no Debian stable can satisfy. Building inside
+    # bookworm makes the floor 2.36 by construction rather than by promise — there is
+    # nothing left to remember, and nothing left to get wrong.
+    container: debian:bookworm
+
+    steps:
+      # binutils for readelf (the floor) and for `ar t` (the read-back); xz-utils for the
+      # two tar members; libarchive-dev for CORE §2's one hard system library.
+      #
+      # libarchive-tools is separate from libarchive-dev and easy to miss. On the maker's
+      # Arch machine `bsdtar` ships inside the `libarchive` package itself, so it is simply
+      # there once the library is; Debian splits the command-line tools out, and without
+      # this line make-deb.sh reaches its first tar and stops.
+      #
+      # desktop-file-utils and file are here for verify.sh rather than for the build. Its
+      # `need` helper counts a missing tool as a failed check and not as a skipped one —
+      # deliberately, since a verifier that quietly stops verifying is worse than no
+      # verifier — so anything it reaches for has to exist in this container or the step
+      # goes red on a package that is perfectly sound.
+      #
+      # git is in this list because actions/checkout runs *inside* this container and uses
+      # the container's git, not the runner's. Without it the checkout step falls back to
+      # the REST tarball, which arrives without a .git directory — and make-deb.sh reads
+      # the commit date out of git for its reproducible timestamps.
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            curl ca-certificates git build-essential pkg-config \
+            libarchive-dev libarchive-tools xz-utils binutils \
+            desktop-file-utils file
+
+      # bookworm packages rustc 1.63, which cannot build eframe 0.36. rustup fetches a
+      # current stable toolchain without adding an apt source to the image.
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Test
+        run: cargo test
+
+      # CORE §2: "No GTK. No Qt. No KF6. No portal." — check-deps.sh is the enforcement,
+      # and CORE §7 schedules it into CI at V1.4. It runs here from v1.0 because the
+      # release build is precisely the build that must not have drifted.
+      - name: Toolkit check
+        run: ./build/check-deps.sh
+
+      - name: Build .deb
+        run: ./build/package/make-deb.sh target/release/indium
+
+      - name: Verify .deb
+        run: ./build/package/verify.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: indium-deb
+          path: build/package/out/*.deb
+          if-no-files-found: error

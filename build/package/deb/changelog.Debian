@@ -1,0 +1,22 @@
+indium (1.0.0-1) unstable; urgency=medium
+
+  * First release. INDIUM is an archive manager for Linux on Wayland, shaped
+    around one idea: the metadata is the main event. A permanent Inspector pane
+    shows sizes, packed sizes, ratio, method, checksums, four timestamps,
+    ownership, mode, link targets and encryption state, instead of hiding all of
+    it behind a Properties dialog.
+  * All format work happens inside the process. INDIUM never runs 7z, tar,
+    unzip, zstd or any other external compressor — every supported format is
+    supported by code linked into this binary, on every machine, whether or not
+    an archive tool is installed.
+  * Reads every container and filter system libarchive reads; writes tar with
+    gz, bz2, xz, zst or lz4, zip with Deflate, and 7z with LZMA2. Encryption is
+    7z AES-256 and nothing else.
+  * RAR is deliberately absent — not read, not written. Opening one produces a
+    plain sentence and no half-support.
+  * Wayland only, and toolkit-free: no GTK, no Qt, no KF6, no portal, no X11.
+    No network of any kind — no update check, no telemetry, no crash reporting.
+  * Packaged without dpkg-deb. The build machine is Arch and has none; a .deb is
+    an ar archive of three members, so build/package/make-deb.sh writes it out.
+
+ -- sudo-megas <sudo-megas@users.noreply.github.com>  Sat, 08 Aug 2026 17:41:31 +0300
