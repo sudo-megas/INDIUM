@@ -618,6 +618,19 @@ pub fn row(
             .corner_radius(R_CTRL)
             .inner_margin(pad)
             .show(ui, |ui| {
+                // **Without this the row is dead, and silently so.**
+                //
+                // `Interaction::selectable_labels` defaults to `true`, which makes every
+                // plain `ui.label` allocate with `Sense::click_and_drag()` so its text can be
+                // dragged out. A container registers its own sense *below* its content, and
+                // the hit test takes the topmost click-sensing widget — so a row whose only
+                // content is a label never hovers, never clicks, and gives no clue why.
+                //
+                // It lives here rather than at each call site because the first two rows
+                // converted without it looked finished and did nothing. A row's whole purpose
+                // is to be clicked; whatever is inside it is not competing for that.
+                // Clone-on-write, so it dies with the row.
+                ui.style_mut().interaction.selectable_labels = false;
                 ui.set_width(ui.available_width());
                 add(ui);
             });
