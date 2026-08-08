@@ -263,24 +263,46 @@ echo "-- 4. the glibc floor"
 # and resolves it to NULL where the symbol is absent, falling back to fork/exec at
 # runtime; counting a symbol the binary is built to live without would overstate the
 # floor by three glibc releases and refuse a .deb that would have run.
-if [ "$have_bin" = 0 ]; then
-  nope "no $BIN — the glibc floor cannot be computed"
+# Which binary to measure, and it matters more than it looks. The gate exists to judge the
+# binary that SHIPS, and that is the one inside the .deb. In CI the two are the same file —
+# the container builds `target/release/indium` and packages it in the same job, which is why
+# this gate is sound at the only moment it decides anything. But verifying a .deb built
+# elsewhere, on a machine whose own binary has a different floor, would otherwise measure
+# the local build and report a number belonging to no shipped artefact at all. So: if there
+# is a .deb, its own `usr/bin/indium` is the subject, and the tree's binary is the fallback.
+gate_bin=$BIN
+gate_what="the release binary"
+# `[ -f "$DEB" ]` rather than the have_deb flag: that flag is set by locate() in check 6,
+# which has not run yet, so testing it here would silently never fire.
+if [ -f "$DEB" ] && command -v ar >/dev/null 2>&1 && command -v bsdtar >/dev/null 2>&1; then
+  if ar p "$DEB" data.tar.xz 2>/dev/null |
+     bsdtar xOf - ./usr/bin/indium > "$tmp/gate-bin" 2>/dev/null && [ -s "$tmp/gate-bin" ]; then
+    gate_bin=$tmp/gate-bin
+    gate_what="the binary inside the .deb"
+  fi
+fi
+echo "      measuring: $gate_what"
+
+if [ "$gate_bin" = "$BIN" ] && [ "$have_bin" = 0 ]; then
+  nope "no $BIN and no .deb — the glibc floor cannot be computed"
 elif need readelf "the glibc floor"; then
-  floor=$(readelf -W --dyn-syms "$BIN" 2>/dev/null |
+  # $gate_bin throughout, never $BIN: reassigning $BIN here would leak into the hint text
+  # of later checks and name a temporary file as the thing to rebuild.
+  floor=$(readelf -W --dyn-syms "$gate_bin" 2>/dev/null |
     awk '$5=="GLOBAL" && $7=="UND" && $8 ~ /GLIBC_/ {print $8}' |
     sed 's/.*@GLIBC_//' | sort -uV | tail -1)
   if [ -z "$floor" ]; then
     # An empty floor would sail through the comparison below and prove nothing, so it is
     # a failure in its own right: either the wrong file was read or readelf's column
     # layout moved under the awk.
-    bad "no GLIBC_ versions found in $BIN — wrong file, or readelf output has changed shape"
+    bad "no GLIBC_ versions found in $gate_what — wrong file, or readelf output has changed shape"
   elif ver_le "$floor" "$TARGET_GLIBC"; then
     ok "glibc floor $floor <= target $TARGET_GLIBC"
-    sym=$(readelf -W --dyn-syms "$BIN" 2>/dev/null |
+    sym=$(readelf -W --dyn-syms "$gate_bin" 2>/dev/null |
       awk -v f="GLIBC_$floor" '$5=="GLOBAL" && $7=="UND" && $8 ~ f {print $8}' | tr '\n' ' ')
     [ -n "$sym" ] && echo "      floor set by: $sym"
   else
-    sym=$(readelf -W --dyn-syms "$BIN" 2>/dev/null |
+    sym=$(readelf -W --dyn-syms "$gate_bin" 2>/dev/null |
       awk -v f="GLIBC_$floor" '$5=="GLOBAL" && $7=="UND" && $8 ~ f {print $8}' | tr '\n' ' ')
     bad "glibc floor $floor exceeds target $TARGET_GLIBC — a .deb from this binary would install and then fail at exec"
     echo "      floor set by: $sym"
