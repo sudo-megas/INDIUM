@@ -37,9 +37,13 @@ makedepends=('git' 'rust')
 #
 # !debug — `debug` splits an indium-debug package out of the debug symbols. Cargo.toml's
 #   [profile.release] sets `strip = true`, so rustc strips at link time and there are no
-#   symbols left to split; the package would ship empty. Its only other effect on a Rust
-#   build is a source path remap (/usr/share/makepkg/buildenv/rust.sh:33-36, mirroring
-#   debugflags.sh for C), which is meaningless without the debuginfo it would remap.
+#   symbols left to split; the package would ship empty.
+#
+#   Turning it off has a second effect that is easy to miss and was missed here until
+#   makepkg said so: rust.sh adds `--remap-path-prefix` *only* when `debug` is on, and
+#   those paths are panic locations rather than debug information, so `strip` never
+#   touches them. build() therefore does the remap itself. Do not delete that line while
+#   this option is set.
 #
 # !lto — Cargo.toml already sets `lto = true`, and makepkg's option cannot reach it:
 #   /usr/share/makepkg/buildenv/lto.sh:35-37 appends LTOFLAGS to CFLAGS, CXXFLAGS and
@@ -67,6 +71,20 @@ prepare() {
 
 build() {
   cd "$pkgname"
+
+  # Remap the build paths by hand, because `!debug` above is what turns off the hook that
+  # would otherwise do it: /usr/share/makepkg/buildenv/rust.sh appends
+  # `--remap-path-prefix=$srcdir=...` to RUSTFLAGS, and only when the `debug` option is on.
+  # Without this the shipped binary carries the builder's own home directory — makepkg's
+  # own check catches one half of it ("Package contains reference to $srcdir", from a
+  # generated glutin_egl_sys binding), and 427 references to the cargo registry are the
+  # other half, which nothing warns about. Neither is debug information: they are panic
+  # locations, so `strip = true` does not remove them and there is nothing to be gained by
+  # shipping them. Exported rather than passed, so check()'s `cargo test` sees the same
+  # flags and does not rebuild the world to run the tests.
+  export RUSTFLAGS="$RUSTFLAGS --remap-path-prefix=$srcdir=/usr/src/debug/$pkgname"
+  export RUSTFLAGS="$RUSTFLAGS --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}/registry=/usr/src/debug/$pkgname/registry"
+
   # --frozen is --locked --offline: after prepare(), nothing further is downloaded, and a
   # Cargo.lock that disagrees with Cargo.toml is an error rather than a silent update.
   cargo build --release --frozen
