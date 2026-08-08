@@ -7,3 +7,15 @@
 # lines to track them.
 /build/icons/indium-2048.png
 /build/icons/indium-4096.png
+
+# Release artefacts. `indium-0.4-x86_64.tar.gz` was committed at the head of P5 and
+# `indium-0.5-x86_64.tar.gz` was one `git add -A` from joining it. A release tarball
+# belongs on the release page, not in history where it sits forever. P6 §9.
+/indium-*-x86_64.tar.gz
+
+# makepkg writes its working directories and the finished package beside the PKGBUILD,
+# which is why the PKGBUILD has a directory of its own. Nothing here is a source.
+/build/package/src/
+/build/package/pkg/
+/build/package/out/
+/build/package/*.pkg.tar.zst
