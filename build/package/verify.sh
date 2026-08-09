@@ -326,7 +326,7 @@ if locate "$PKG" "$INDIUM_PKG" 'build/package/*.pkg.tar.zst' '(cd build/package 
   if bsdtar tf "$PKG" 2>/dev/null | sed 's|^\./||' | sort > "$tmp/pkg.list" &&
      bsdtar xOf "$PKG" .PKGINFO > "$tmp/PKGINFO" 2>/dev/null; then
 
-    for field in "pkgname = indium" "pkgver = ${ver}-1" "arch = x86_64"; do
+    for field in "pkgname = indium" "pkgver = ${ver}-${rel}" "arch = x86_64"; do
       if grep -qx "$field" "$tmp/PKGINFO"; then
         ok ".PKGINFO $field"
       else
