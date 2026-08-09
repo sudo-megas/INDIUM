@@ -1535,6 +1535,48 @@ pub fn archive_stem(path: &std::path::Path) -> String {
     }
 }
 
+/// Did this frame carry `Ctrl+C`, and did it carry `Ctrl+V`?
+///
+/// Asked of the event list rather than of `key_pressed`, because a clipboard chord is
+/// not a key by the time it arrives. `egui-winit-0.36.1/src/lib.rs` matches the three
+/// clipboard chords before it emits anything, pushes `Event::Copy` / `Event::Cut` /
+/// `Event::Paste` instead, and **returns** — the `Key` event is never produced at all.
+/// Code that watches `Key::C` therefore sees nothing, for every `Ctrl+C` ever pressed.
+///
+/// That is not a missing shortcut. `Ctrl+C` is the *only* entry point copy-out has, so
+/// from P3 until here CORE §4's copy-out and paste-to-stage were unreachable in a
+/// shipped binary — the drop half of paste, which comes in on a different path
+/// entirely, was the only part of either that ever ran.
+///
+/// Both spellings are accepted. A future egui that stops swallowing the chord would
+/// otherwise kill the feature a second time in exactly the same way, and since these
+/// are `bool`s, an egui that emits *both* forms still acts once.
+///
+/// `Event::Cut` is deliberately not answered: CORE §4's table has no `Ctrl+X`, and an
+/// archive manager that cuts is one that deletes on a paste that may never come.
+fn clipboard_chords(events: &[egui::Event]) -> (bool, bool) {
+    let mut copy = false;
+    let mut paste = false;
+    for ev in events {
+        match ev {
+            egui::Event::Copy => copy = true,
+            egui::Event::Paste(_) => paste = true,
+            egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } if modifiers.ctrl || modifiers.command => match key {
+                egui::Key::C => copy = true,
+                egui::Key::V => paste = true,
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    (copy, paste)
+}
+
 // ---------------------------------------------------------------------------
 // The eframe App
 // ---------------------------------------------------------------------------
@@ -1644,13 +1686,17 @@ impl Indium {
         // `Ctrl+F` and `Ctrl+O` work even while typing — a `TextEdit` claims neither, so
         // opening the filter bar or the path field from inside another field is no
         // ambiguity at all.
+        //
+        // The last two do **not** come from `key_pressed`, and P10 §1 is the whole
+        // explanation: by the time a clipboard chord reaches us it is no longer a key.
         let (ctrl_f, ctrl_a, ctrl_o, ctrl_c, ctrl_v) = ctx.input(|i| {
+            let (copy, paste) = clipboard_chords(&i.events);
             (
                 i.modifiers.ctrl && i.key_pressed(egui::Key::F),
                 i.modifiers.ctrl && i.key_pressed(egui::Key::A),
                 i.modifiers.ctrl && i.key_pressed(egui::Key::O),
-                i.modifiers.ctrl && i.key_pressed(egui::Key::C),
-                i.modifiers.ctrl && i.key_pressed(egui::Key::V),
+                copy,
+                paste,
             )
         });
 
@@ -2237,5 +2283,67 @@ mod tests {
             archive_stem(std::path::Path::new("/x/.hidden.zip")),
             ".hidden.zip"
         );
+    }
+
+    fn ctrl(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL,
+        }
+    }
+
+    /// The bug that shipped in `v1.0`, as a test.
+    ///
+    /// This is the exact event list egui-winit produces for `Ctrl+C`: the `Copy` and no
+    /// `Key` beside it. `v1.0` asked `key_pressed(Key::C)` of this and got `false`,
+    /// which is why copy-out had no reachable entry point at all.
+    #[test]
+    fn the_copy_chord_is_answered_when_it_arrives_without_its_key() {
+        assert_eq!(clipboard_chords(&[egui::Event::Copy]), (true, false));
+    }
+
+    /// The other half, and the reason `Event::Paste` carries a payload we ignore:
+    /// `request_paste` does its own `text/uri-list` read, so all this has to notice is
+    /// that the chord happened.
+    #[test]
+    fn the_paste_chord_is_answered_when_it_arrives_without_its_key() {
+        assert_eq!(
+            clipboard_chords(&[egui::Event::Paste("/tmp/whatever".to_string())]),
+            (false, true)
+        );
+    }
+
+    /// An egui that stopped swallowing the chord must not kill the feature a second
+    /// time — and one that emits both spellings at once must not act twice.
+    #[test]
+    fn either_spelling_of_the_chord_is_answered_exactly_once() {
+        assert_eq!(clipboard_chords(&[ctrl(egui::Key::C)]), (true, false));
+        assert_eq!(clipboard_chords(&[ctrl(egui::Key::V)]), (false, true));
+        assert_eq!(
+            clipboard_chords(&[egui::Event::Copy, ctrl(egui::Key::C)]),
+            (true, false)
+        );
+    }
+
+    /// `Ctrl+X` is not in CORE §4's table, and a bare `C` is a shortcut for nothing.
+    /// Neither may reach the clipboard path by accident.
+    #[test]
+    fn nothing_else_is_mistaken_for_a_clipboard_chord() {
+        assert_eq!(clipboard_chords(&[egui::Event::Cut]), (false, false));
+        assert_eq!(clipboard_chords(&[ctrl(egui::Key::X)]), (false, false));
+        assert_eq!(
+            clipboard_chords(&[egui::Event::Key {
+                key: egui::Key::C,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]),
+            (false, false)
+        );
+        assert_eq!(clipboard_chords(&[]), (false, false));
     }
 }
