@@ -10,8 +10,8 @@
 #
 # Three jobs, and the third is the one that matters:
 #
-#   deb      debian:bookworm      → indium_<ver>-1_amd64.deb, and the tarball
-#   arch     archlinux:base-devel → indium-<ver>-1-x86_64.pkg.tar.zst
+#   deb      debian:bookworm      → indium_<ver>-<rel>_amd64.deb, and the tarball
+#   arch     archlinux:base-devel → indium-<ver>-<rel>-x86_64.pkg.tar.zst
 #   verify   ubuntu-latest        → both packages, in one place, judged together
 #
 # `verify.sh` has always had INDIUM_PKG and INDIUM_DEB overrides for artefacts built
@@ -113,18 +113,35 @@ jobs:
       - name: Trust the checkout
         run: git config --global --add safe.directory "$PWD"
 
-      # Cargo.toml is the one place the version is written. CORE §7's tags are two-numeral
-      # (`v1.0`) where Cargo's are three (`1.0.0`), so both forms are derived here rather
-      # than typed anywhere — and on a tag run the two are made to agree, which is what
-      # catches a `v1.1` pushed over a tree that still says 1.0.0.
+      # Cargo.toml is the one place the version is written, and the PKGBUILD's `pkgrel` the
+      # one place the revision is. CORE §7's tags are two-numeral (`v1.0`) where Cargo's are
+      # three (`1.0.0`), so every form is derived here rather than typed anywhere — and on a
+      # tag run the tag is made to agree, which is what catches a `v1.1` pushed over a tree
+      # that still says 1.0.0.
+      #
+      # P10 found that this gate, as first written, made a second release structurally
+      # impossible: it demanded `v${VER%.*}` and nothing else, so with the version unchanged
+      # the only acceptable tag was one that had already been pushed. A fix that cannot be
+      # released is not a fix. The rule now follows the revision:
+      #
+      #   pkgrel 1  → the tag is CORE §7's two-numeral form, `v1.0`
+      #   pkgrel >1 → the tag carries the revision, `v1.0.0-2`
+      #
+      # which is stricter than what it replaced rather than looser — a revised tree tagged
+      # `v1.0` is now refused, where before it would have built and shipped a second,
+      # different set of artefacts under the first tag's name.
       - name: Version
         run: |
           VER=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
           [ -n "$VER" ] || { echo "no version in Cargo.toml" >&2; exit 1; }
-          echo "VER=$VER"       >> "$GITHUB_ENV"
-          echo "SHORT=${VER%.*}" >> "$GITHUB_ENV"
-          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v${VER%.*}" ]; then
-            echo "tag $GITHUB_REF_NAME does not match Cargo.toml's $VER" >&2
+          REL=$(sed -n 's/^pkgrel=\([0-9][0-9]*\)$/\1/p' build/package/PKGBUILD | head -1)
+          [ -n "$REL" ] || { echo "no pkgrel in build/package/PKGBUILD" >&2; exit 1; }
+          if [ "$REL" = 1 ]; then EXPECT="v${VER%.*}"; else EXPECT="v${VER}-${REL}"; fi
+          echo "VER=$VER"        >> "$GITHUB_ENV"
+          echo "REL=$REL"        >> "$GITHUB_ENV"
+          echo "TARBALL=indium-${VER}-${REL}-x86_64.tar.gz" >> "$GITHUB_ENV"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "$EXPECT" ]; then
+            echo "tag $GITHUB_REF_NAME is not $EXPECT (Cargo.toml $VER, pkgrel $REL)" >&2
             exit 1
           fi
 
@@ -171,8 +188,15 @@ jobs:
       # CORE §8 ships two packages; the tarball is not a third package but the same binary
       # with no packaging at all, for the machines neither package fits. `-C target/release`
       # so the archive holds `indium` and not a path.
+      #
+      # The name carries the revision as of P10. It was `indium-1.0-x86_64.tar.gz`, built
+      # from the two-numeral short version, which cannot express a revision at all — so a
+      # `1.0.0-2` build would have produced a tarball with byte-different contents under
+      # exactly the filename `v1.0` already ships. Two different binaries answering to one
+      # name is the precise failure this project spent a milestone arguing against, and it
+      # would have been ours.
       - name: Tarball
-        run: tar czf "indium-${SHORT}-x86_64.tar.gz" -C target/release indium
+        run: tar czf "$TARBALL" -C target/release indium
 
       - uses: actions/upload-artifact@v4
         with:
@@ -208,14 +232,20 @@ jobs:
       - name: Trust the checkout
         run: git config --global --add safe.directory "$PWD"
 
+      # The same gate as the deb job's, deliberately duplicated rather than shared: the two
+      # jobs run in different containers and a shared step would have to be an action. If
+      # one is ever edited the other must be edited with it.
       - name: Version
         run: |
           VER=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
           [ -n "$VER" ] || { echo "no version in Cargo.toml" >&2; exit 1; }
+          REL=$(sed -n 's/^pkgrel=\([0-9][0-9]*\)$/\1/p' build/package/PKGBUILD | head -1)
+          [ -n "$REL" ] || { echo "no pkgrel in build/package/PKGBUILD" >&2; exit 1; }
+          if [ "$REL" = 1 ]; then EXPECT="v${VER%.*}"; else EXPECT="v${VER}-${REL}"; fi
           echo "VER=$VER"        >> "$GITHUB_ENV"
-          echo "SHORT=${VER%.*}" >> "$GITHUB_ENV"
-          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v${VER%.*}" ]; then
-            echo "tag $GITHUB_REF_NAME does not match Cargo.toml's $VER" >&2
+          echo "REL=$REL"        >> "$GITHUB_ENV"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "$EXPECT" ]; then
+            echo "tag $GITHUB_REF_NAME is not $EXPECT (Cargo.toml $VER, pkgrel $REL)" >&2
             exit 1
           fi
 
@@ -287,8 +317,10 @@ jobs:
       - name: Version
         run: |
           VER=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          REL=$(sed -n 's/^pkgrel=\([0-9][0-9]*\)$/\1/p' build/package/PKGBUILD | head -1)
           echo "VER=$VER"        >> "$GITHUB_ENV"
-          echo "SHORT=${VER%.*}" >> "$GITHUB_ENV"
+          echo "REL=$REL"        >> "$GITHUB_ENV"
+          echo "TARBALL=indium-${VER}-${REL}-x86_64.tar.gz" >> "$GITHUB_ENV"
 
       # The tarball holds the same binary the .deb wraps, so unpacking it into the place
       # the tree would have built one lets verify.sh run its ELF checks and CORE §2's
@@ -297,7 +329,7 @@ jobs:
       - name: Put the shipped binary where the checks look
         run: |
           mkdir -p target/release
-          tar xzf "artefacts/indium-tar/indium-${SHORT}-x86_64.tar.gz" -C target/release
+          tar xzf "artefacts/indium-tar/$TARBALL" -C target/release
           chmod +x target/release/indium
           ls -l target/release/indium
 
