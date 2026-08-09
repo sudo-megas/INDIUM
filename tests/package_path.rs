@@ -104,9 +104,9 @@ fn pkgrel() -> String {
 /// The version comes from `CARGO_PKG_VERSION` so a version bump carries these tests with
 /// it and there is no second copy of the number to forget — `pkgver` in the PKGBUILD is
 /// the same number. Cargo's version is three-numeral (`1.0.0`) where CORE §7's tags are
-/// two (`v1.0`); if the packaged version string ever parts company with Cargo's,
-/// `INDIUM_PKG` is the answer, not a hand-written constant that would then be wrong in
-/// two places.
+/// two (`v1.0`), or carry the package revision when only the build changed (`v1.0.0-2`);
+/// if the packaged version string ever parts company with Cargo's, `INDIUM_PKG` is the
+/// answer, not a hand-written constant that would then be wrong in two places.
 fn pkg_path() -> PathBuf {
     artefact(
         "INDIUM_PKG",

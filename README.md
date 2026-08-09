@@ -149,7 +149,7 @@ never closes another.
 | `Ctrl+F` | Filter bar |
 | `Ctrl+A` | Select all |
 | `Ctrl+C` | Copy out (extract to runtime dir, URIs to clipboard) |
-| `Ctrl+V` / drop files | Stage an add |
+| `Ctrl+V` / drop files | Stage an add. A drop needs X11 — winit has no Wayland drag-and-drop; `Ctrl+V` and *Add files…* are the routes that always work. |
 | `Del` / `F2` | Stage a remove / a rename |
 | `Ctrl+O` | Open (path field) |
 | `Esc` | Close the topmost popup |

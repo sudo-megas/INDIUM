@@ -154,8 +154,8 @@ fn find<'a>(entries: &'a [Entry], path: &str) -> &'a Entry {
 // Round trips
 // ---------------------------------------------------------------------------
 
-/// CORE §5's write list: "`tar` with the filters `gz`, `bz2`, `xz`, `zst`, `lz4`; `zip`
-/// (Deflate)". Every one of them must survive a write and a read.
+/// CORE §5's write list: "`tar`, plain or with the filters `gz`, `bz2`, `xz`, `zst`,
+/// `lz4`; `zip` (Deflate)". Every one of them must survive a write and a read.
 #[test]
 fn every_writable_format_round_trips_its_payload() {
     let dir = TempDir::new("formats");

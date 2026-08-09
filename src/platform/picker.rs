@@ -1,9 +1,10 @@
 //! The system file picker, through `xdg-desktop-portal` — P11 §4.
 //!
-//! CORE §4 gives INDIUM one way to name a file it does not already hold: `Ctrl+O` and a
-//! path field with tab completion. That is a good way and it stays. It is not the *only*
-//! way anyone expects, and the testing round said so plainly — the first note back was
-//! "we need an open file option, and it must use the xdg-portal file picker".
+//! CORE §4 gives INDIUM two ways to name a file it does not already hold: `Ctrl+O` and a
+//! path field with tab completion, or a Browse… button that raises this picker. The path
+//! field was not the only way anyone expected, and the testing round said so plainly — the
+//! first note back was "we need an open file option, and it must use the xdg-portal file
+//! picker". CORE §4 now names both.
 //!
 //! It matters more than a convenience. Until P11, adding a file to an archive had exactly
 //! two routes: `Ctrl+V`, which had never worked (see `ui::clipboard_chords`), and a drop

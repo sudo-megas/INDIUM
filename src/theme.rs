@@ -101,7 +101,7 @@ pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(0xBD, 0xBD, 0xBB);
 pub const TEXT_MUTED: Color32 = Color32::from_rgb(0x99, 0x99, 0x97);
 
 // --- Warning ------------------------------------------------------------------
-/// CORE §6's fourth colour, and the narrowest: a wrong password, two passwords that
+/// CORE §6's fifth colour, and the narrowest: a wrong password, two passwords that
 /// differ, a settings file that would not parse. Nothing else.
 ///
 /// It exists because those three messages used to be painted orange, which falsified §6's
@@ -227,12 +227,13 @@ pub fn mark(size: f32) -> egui::Image<'static> {
 
 /// "This mode is active", in Aubergine, for every `selectable_label` in this `Ui`.
 ///
-/// CORE §6 gives Aubergine "selection context, active sidebar item", and reserves orange for
-/// the current selection, staged changes, and Apply/progress — orange means *something will
-/// happen*. A tab, a preset chip and a toggle say only *which mode is active*; nothing is about
-/// to happen because a tab is open. So they are Aubergine's work, and always were: the sidebar,
-/// the New Archive method rows and the focused Recents and Bookmarks rows have hand-painted
-/// Aubergine for this exact meaning since P1. P6 §6.6.
+/// CORE §6 gives Aubergine "selection context, the active item, and whatever the pointer is
+/// resting on", and reserves orange for the current selection, staged changes, and
+/// Apply/progress — orange means *something will happen*. A tab, a preset chip and a toggle say
+/// only *which mode is active*; nothing is about to happen because a tab is open. So they are
+/// Aubergine's work, and always were: the sidebar, the New Archive method rows and the focused
+/// Recents and Bookmarks rows have hand-painted Aubergine for this exact meaning since P1.
+/// P6 §6.6.
 ///
 /// **It is scoped rather than set in [`install_visuals`], and that is not a preference.** egui
 /// resolves a `selectable_label`'s selected fill from `Visuals::selection::bg_fill` — the same

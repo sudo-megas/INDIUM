@@ -41,7 +41,7 @@ pub enum Method {
     Deflate,
 }
 
-/// A container. CORE §5's write list is tar with five filters, zip, and 7z.
+/// A container. CORE §5's write list is tar — plain or with five filters — zip, and 7z.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Container {
     Tar,

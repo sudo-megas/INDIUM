@@ -1,9 +1,10 @@
 //! The Linux specifics.
 //!
 //! CORE §3 gives this module "clipboard, `.desktop` parsing for Open With,
-//! default-app registration, XDG paths". P1 and P2 need only the paths and the TOML
-//! store; the rest arrives with P3. P8 adds the second window, which is a Linux
-//! specific like the others: on this platform a window is a process.
+//! default-app registration, XDG paths, and the second window". P1 and P2 need only the
+//! paths and the TOML store; the rest arrives with P3. The window arrives with P8: on
+//! this platform a window is a process, which is what makes it a Linux specific like the
+//! others.
 
 pub mod apps;
 pub mod clipboard;
