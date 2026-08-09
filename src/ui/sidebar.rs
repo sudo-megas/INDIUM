@@ -72,8 +72,11 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     // beneath it. The header block is the only centred thing in the window.
                     ui.vertical_centered(|ui| {
                         ui.add_space(2.0);
-                        ui.add(theme::mark(84.0));
-                        ui.add_space(8.0);
+                        // 84 until P12, when the sidebar gained an *Open file* row and a
+                        // rule and stopped fitting: at 84 the last section scrolled out of
+                        // its own zone, which is a worse failure than a smaller mark.
+                        ui.add(theme::mark(58.0));
+                        ui.add_space(6.0);
                         ui.label(
                             egui::RichText::new("INDIUM")
                                 .size(23.0)
@@ -86,7 +89,7 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                                 .color(theme::TEXT_MUTED),
                         );
                     });
-                    ui.add_space(12.0);
+                    ui.add_space(8.0);
 
                     open_item(ui, app);
                     section_item(ui, app, Section::Archive, "Archive", "1", app.has_archive());
@@ -95,7 +98,7 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     // It is legible now — `theme::HAIRLINE` was 8% white and measured
                     // 1.2:1, which is the *other* half of the note this order came from:
                     // "The separator staying on the New button is so faded."
-                    ui.add_space(4.0);
+                    ui.add_space(2.0);
                     ui.separator();
                     ui.add_space(2.0);
                     section_item(ui, app, Section::Bookmarks, "Bookmarks", "2", true);
@@ -162,7 +165,7 @@ fn action_item(
 
 /// The padding of one sidebar line, shared by the live and the unavailable arm so the two
 /// cannot drift apart in height.
-const ROW_PAD: egui::Margin = egui::Margin::symmetric(8, 6);
+const ROW_PAD: egui::Margin = egui::Margin::symmetric(8, 5);
 
 /// The contents of one sidebar line — label on the left, bare-key hint on the right —
 /// shared by the live arm and the unavailable one so the two cannot drift apart.
