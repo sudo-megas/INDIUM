@@ -43,6 +43,7 @@ five dependencies, and honest at fifty.
 | `wl-clipboard-rs` | P3 | Puts `text/uri-list` on the Wayland clipboard so copy-out works into any file manager. |
 | `image` (via `egui_extras` `image` feature) | already linked; formats chosen at P5 | Decodes the image formats the Preview tab shows. It is not a new dependency — `eframe` pulls it through its clipboard path already, with PNG on — so P5 names the formats rather than adding the crate. |
 | `serde` + `toml` | P2 | Read and write the settings, bookmarks, and recent-files TOML files. |
+| `ashpd` (+ `zbus`, `futures-lite`) | P11 | The desktop's own file picker, over `xdg-desktop-portal`. The only alternative was drawing a file dialog, and §6 has no vocabulary for one. It brings a D-Bus stack with it — the largest dependency INDIUM has taken since libarchive, and taken deliberately: the picker a user has already chosen beats one INDIUM invents, and it is the only kind that survives a sandbox. |
 
 Everything not in this table is the standard library or hand-written: CRC32 is a
 twenty-line table, byte formatting is ten lines, argument handling is `std::env::args`.
@@ -52,7 +53,7 @@ twenty-line table, byte formatting is ten lines, argument handling is `std::env:
 
 | Library | Its sentence |
 | --- | --- |
-| `libarchive` | Reads and writes every supported container and filter in-process. It is a hard dependency of pacman itself, so it is present on every Arch machine that can install software; on Debian the package declares `libarchive13`. |
+| `libarchive` | Reads and writes every supported container and filter in-process. It is a hard dependency of pacman itself, so it is present on every Arch machine that can install software; on Debian the package declares `libarchive13t64 \| libarchive13`, naming both because the time64 transition renamed it in trixie and a package that spans both suites has to say so. |
 | `libwayland-client`, `libxkbcommon`, `libEGL`/GL | What the compositor session already provides; winit needs them to exist, and they do. |
 | `glibc`, `libgcc_s`, `libm` | The floor. |
 
@@ -77,7 +78,7 @@ One binary crate, `indium`, with modules. No workspace, no premature abstraction
 | `model` | Archive state: entries, selection, the open archive's identity. |
 | `tasks` | The staging engine. Every mutation — add, remove, rename, create — is a task in a queue. **Apply** builds the new archive in a temp file beside the target, verifies it by walking its entries, then atomically renames over the original. The original is never touched until the replacement is proven. |
 | `ui` | The window: sidebar, table, Inspector, tray, status bar, and every popup. |
-| `platform` | The Linux specifics: clipboard, `.desktop` parsing for Open With, default-app registration, XDG paths. |
+| `platform` | The Linux specifics: clipboard, `.desktop` parsing for Open With, default-app registration, XDG paths, and the second window — on this platform a window is a process, and opening one is a Linux specific like the rest. |
 | `theme` | The Aubergine palette, the fonts, and nothing configurable. |
 
 Threading: the UI thread and one worker. The worker opens, lists, extracts, and rebuilds;
@@ -91,15 +92,17 @@ ends. They are never written to settings, recents, or anywhere else.
 
 ## 4. THE WINDOW
 
-Five fixed zones and seven popups. Nothing else appears, ever.
+Five fixed zones and eight popups. Nothing else appears, ever.
 
 **Sidebar** (family style): the wordmark at top, then *Recent files* `1`, *Bookmarks* `2`,
 *Archive* `3`; at the bottom *New* `N`, *Settings* `,`, *About* `A`. Numbers and letters
 are bare keypresses, as in JADEITE.
 
 **Entry table**: virtualized; columns Name, Size, Packed, Method; a breadcrumb path above
-it. `Enter` descends into a directory, `Backspace` goes up. `Ctrl+F` opens a filter bar —
-there is deliberately no type-to-jump, because bare letters are shortcuts.
+it, with *Add files…* at the far end of that row — the picker adds into the directory the
+breadcrumb names, which is the one placement that needs no explanation. `Enter` descends
+into a directory, `Backspace` goes up. `Ctrl+F` opens a filter bar — there is deliberately
+no type-to-jump, because bare letters are shortcuts.
 
 **Inspector** (right, permanent): two tabs, *Details* and *Preview*, toggled with `Space`.
 Details shows everything the reader can know about the selection; multi-select shows
@@ -113,12 +116,19 @@ then the Inspector shows what the generic reader provides.
 status bar — count, a summary of the first tasks, *Discard*, **Apply**. The strip itself
 is a button.
 
-**Status bar**: entry count, real → packed with ratio, format badges, and the progress bar
-with its cancel during long work.
+**Status bar**: three rows, each of a fixed height, so the floor of the window never moves
+between idle and working. *What is open* — the archive's name, its format and filter, and its
+directory. *The numbers and the voice* — entry count, real → packed with ratio, the selection
+count, and whatever INDIUM is currently saying, drawn whether or not something is running.
+*Progress* — the phase, the count, the bar and its cancel during long work; a hairline when
+nothing is running, because an empty row must still say something. The bar carries no text of
+its own: `#EEEEEC` on Ubuntu Orange measures 2.4:1, so the phase and the count are read beside
+it and never on it.
 
 ### The popups
 
-1. **New Archive** (`N`). A subwindow, Clonezilla in content and Aubergine in dress. An
+1. **New Archive** (`N`). A subwindow, Clonezilla in content, and wearing the popup's own
+   three grounds rather than the window's. An
    instruction line at top ("Choose how INDIUM should compress. If unsure, keep the
    default."). Four preset chips — *Fastest*, *Balanced* (default), *Smallest*,
    *Encrypted* — each highlighting a row in the method list below, where **every method
@@ -136,6 +146,10 @@ with its cancel during long work.
    licence in full. Addresses are text you can select but not click — INDIUM opens no
    browser and follows no link, by design.
 7. **Password** (modal). Appears at the moment of use, per use, and nowhere survives it.
+8. **Open** (`Ctrl+O`). A path field with tab completion, a *Browse…* button beside it
+   raising the desktop's own picker through `xdg-desktop-portal`, and the only popup that
+   is not about the archive already open. Naming an archive this window does not hold
+   opens it in a window of its own, per §1.
 
 ### Keyboard
 
@@ -149,7 +163,7 @@ with its cancel during long work.
 | `Ctrl+F` | Filter bar |
 | `Ctrl+A` | Select all |
 | `Ctrl+C` | Copy out (extract to runtime dir, URIs to clipboard) |
-| `Ctrl+V` / drop files | Stage an add |
+| `Ctrl+V` / drop files | Stage an add. A drop needs X11: winit has no Wayland drag-and-drop, so on Wayland the compositor never delivers one. `Ctrl+V` and *Add files…* are the routes that always work. |
 | `Del` / `F2` | Stage a remove / a rename |
 | `Ctrl+O` | Open (path field) |
 | `Esc` | Close the topmost popup |
@@ -171,7 +185,7 @@ half of it. Opening one produces a plain sentence: *"RAR is not supported."* The
 capability sits unused inside libarchive; INDIUM checks the detected format after open and
 refuses. ACE is absent for the same family of reasons and its security history.
 
-**Write** — `tar` with the filters `gz`, `bz2`, `xz`, `zst`, `lz4`; `zip` (Deflate);
+**Write** — `tar`, plain or with the filters `gz`, `bz2`, `xz`, `zst`, `lz4`; `zip` (Deflate);
 `7z` (LZMA2, via `sevenz-rust2`). Encryption is **7z AES-256 and nothing else.**
 
 ### The method verdicts
@@ -194,23 +208,29 @@ live estimator that measures *your* data on *your* CPU is V2.0.
 
 ## 6. LOOK
 
-One theme: **Ubuntu Canonical Aubergine.** There is no second theme and no theme setting.
+One theme: **Ubuntu Canonical Aubergine.** There is no second theme and no theme setting. The
+window is aubergine throughout; popups are not, and that is the one deliberate exception —
+contrast where a surface has to be told apart from the surface it covers, not decoration.
 
 | Role | Value |
 | --- | --- |
-| Base | `#300A24` window · `#3D0D2E` raised panels · `#24071B` status bar |
-| Structure | Canonical Aubergine `#772953` — selection context, active sidebar item |
+| Base | Six grounds in aubergine, darkest first: `#180412` the gutter every zone floats in · `#24071B` the status bar · `#300A24` the wells — the entry table, text fields, the progress track · `#3D0D2E` the raised zones — sidebar, Inspector, tray · `#571342` the resting face of a control, so a button reads the same wherever it stands. Each about one and a half times the linear luminance of the one below it. A popup is not on this ladder at all — see the Popup row. |
+| Popup | Not aubergine, and deliberately: a popup covers every zone, and five milestones proved that a sixth shade of the window's own colour reads as the window slightly lit rather than as a different kind of surface. Three grounds, in steel blue at the luminance the aubergine popup used to have — `#02173F` the band across the top, naming it · `#132A3D` the body · `#00133A` the band across the foot, carrying what is about to happen, and the darkest of the three so Orange has the most to push against. Scaled from `#0F52BA` / `#4682B4` / `#0047AB` by a single constant on linear RGB, which preserves the hue exactly and spends only the lightness: as picked, the body measured 1.44:1 against muted text, and no ink — not even pure white, at 4.11:1 — could have been read on it. |
+| Structure | Canonical Aubergine `#772953` — selection context, the active item, and whatever the pointer is resting on; `#8F3164` the same colour with the light on, alive only for as long as a control is held down. One meaning at two intensities, never two meanings. |
 | Accent | Ubuntu Orange `#E95420` — reserved for exactly three meanings: the current selection, staged changes, and Apply/progress. Orange means *something will happen.* |
 | Text | `#EEEEEC` primary · `#BDBDBB` secondary · `#999997` muted |
 | Warning | `#FFD800` — and only where something has gone wrong: a wrong password, two passwords that differ, a settings file that would not parse. It is not an accent and never decorates. |
-| Lines | 1px hairlines at 8% white. Nothing thicker, anywhere. |
+| Lines | Two weights and no third. **Inside** a zone, a 1px hairline at 8% white — a rule beneath a heading, above a footer. **Around** a zone, a popup or a control, a 2px edge at 22% white, rising to 40% white under the pointer or while a control is held. Nothing thicker than 2px, anywhere. |
 
 **One typeface, monospace, everywhere** — chrome and values alike; sizes, checksums,
 paths, the whole Inspector. Monospace is what makes a verbose pane scannable instead of
 noisy, and the pane is the program, so the window wears it throughout. Chrome and values
 are told apart by weight and colour, never by family. There is no second face and no font
 setting.
-Motion is functional only: progress moves, panels appear; nothing decorates.
+Motion is functional only: progress moves, panels appear, and a control grows by one pixel
+under the pointer and contracts below its resting size while it is held. That last is
+function, not decoration: a control that does not answer the hand is a control that looks
+broken. Nothing else moves.
 
 The icon is photorealistic PNG, supplied by the maker, installed at the hicolor sizes
 provided. No SVG.
@@ -219,7 +239,11 @@ provided. No SVG.
 
 ## 7. VERSIONS
 
-Tags are two-numeral: `v0.1`, `v0.2`, … `v1.0`, `v1.1`.
+Tags are two-numeral: `v0.1`, `v0.2`, … `v1.0`, `v1.1`. A tag that fixes a released
+version without changing it carries the package revision instead of a third numeral —
+`v1.0.0-2` — because the thing being distinguished is the build and not the version.
+The release workflow derives which of the two forms it will accept from `pkgrel`, so
+the rule is enforced rather than remembered.
 
 ### The road to v1.0
 
@@ -230,7 +254,11 @@ Tags are two-numeral: `v0.1`, `v0.2`, … `v1.0`, `v1.1`.
 | P3 | Clipboard copy-out, Open With picker, default-app registration | `v0.3` |
 | P4 | Staging engine, `W` popup, Apply rebuild, New Archive popup, 7z AES-256 | `v0.4` |
 | P5 | Preview tab (text, images), icon integration, look-and-feel pass | `v0.5` |
-| P6 | `.pkg.tar.zst` and `.deb`, README, hardening | **`v1.0`** |
+| P6 | `.pkg.tar.zst` and `.deb`, README, hardening | — *(the tag was held)* |
+| P7 | The visual hierarchy: six grounds, two line weights, four control states, three-row status bar | — *(the tag was held again)* |
+| P8 | The second window CORE §1 always described, and the two files it was overwriting | **`v1.0`** |
+| P9 | The popup's own three grounds, and the popup that stopped outgrowing its window | **`v1.0`** |
+| P10 | `Ctrl+C` and `Ctrl+V`, which had never once worked, and the gate that would not have let them ship | **`v1.0.0-2`** |
 
 The P-table is a plan, not scripture; P-documents may split or merge steps, but scope
 only moves *out* of v1.0 by the maker's decision recorded here.
