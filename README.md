@@ -121,9 +121,10 @@ never closes another.
 
 | Section | What it is for |
 |---|---|
-| **Recent files** `1` | The archives you have opened before, newest first, so returning to one is a keypress rather than a hunt through folders. `Enter` opens the highlighted entry and `Del` forgets it. |
+| **Open file** `O` | Raises your desktop's own file dialog, through `xdg-desktop-portal` — the picker you already know rather than one INDIUM draws. `Ctrl+O` still opens a path field with tab completion, for when you know where you are going. |
+| **Archive** `1` | The archive itself: one row per entry, with Name, Size, Packed and Method, and a breadcrumb path above. It handles a hundred thousand entries as smoothly as a hundred. `Enter` goes into a folder, `Backspace` comes back out, `Ctrl+F` filters. |
 | **Bookmarks** `2` | Folders you name once and reach thereafter by their name — mostly the places you extract to. They appear again inside the Extract popup, which is the point of them. |
-| **Archive** `3` | The archive itself: one row per entry, with Name, Size, Packed and Method, and a breadcrumb path above. It handles a hundred thousand entries as smoothly as a hundred. `Enter` goes into a folder, `Backspace` comes back out, `Ctrl+F` filters. |
+| **Recent files** `3` | The archives you have opened before, newest first, so returning to one is a keypress rather than a hunt through folders. `Enter` opens the highlighted entry and `Del` forgets it. |
 | **The Inspector** | The permanent pane on the right, and the reason the program exists. **Details** tells you everything knowable about what you have selected — select nothing and it describes the whole archive, select several and it adds them up. **Preview** shows text and images, judged by their bytes rather than their file extension. `Space` swaps the two. |
 | **New Archive** `N` | Builds a new archive. Pick one of four presets — *Fastest*, *Balanced*, *Smallest*, *Encrypted* — or choose a method from the list, where **every method carries one honest sentence** about what it costs you and what it saves. A line at the foot states exactly what is about to be built before anything is. |
 | **Pending tasks** `W` | Everything you have changed but not yet committed. A strip appears above the status bar the moment you stage your first change; this is the full list behind it, one row per operation, each removable on its own, with *Discard all* and **Apply**. |
@@ -142,7 +143,9 @@ never closes another.
 | Key | Does |
 | --- | --- |
 | `1` `2` `3` | Sidebar sections |
+| `O` / `I` | Open file · Add files — both raise the desktop's own picker |
 | `N` `W` `E` `A` `,` | New Archive · Pending tasks · Extract · About · Settings |
+| `F1` | Keys — this table, in the window |
 | Arrows, `PgUp/PgDn`, `Home/End` | Move in the table |
 | `Enter` / `Backspace` | Descend / go up |
 | `Space` | Details ⇄ Preview |
@@ -182,7 +185,7 @@ licence so that whoever receives it has the freedoms you had. It comes with **no
 
 That is a summary and nothing more — the text that actually governs is the full
 [`LICENSE`](LICENSE) file in this repository, and the same full text is readable inside the
-application from the **About** page. The bundled JetBrains Mono NL Nerd Font is under the
+application from the **About** page. The bundled Fira Mono Nerd Font is under the
 SIL Open Font Licence 1.1, in [`LICENSES/`](LICENSES).
 
 ![The About popup: the mark, the version and date, the maker, the source address, and the GPL in full.](build/screenshot-about.png)
