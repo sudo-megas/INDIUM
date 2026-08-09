@@ -3,7 +3,7 @@
 <h1>INDIUM</h1>
 
 <p>
-  <img alt="Version"      src="https://img.shields.io/badge/version-1.0.0-E95420?style=for-the-badge">
+  <img alt="Version"      src="https://img.shields.io/badge/version-1.0.0--2-E95420?style=for-the-badge">
   <img alt="Release date" src="https://img.shields.io/badge/released-2026--08--09-E95420?style=for-the-badge">
   <img alt="Licence"      src="https://img.shields.io/badge/licence-GPL--3.0--only-772953?style=for-the-badge">
 </p>
@@ -58,18 +58,18 @@ nothing more: *"RAR is not supported."*
 
 ### 3.A Arch Linux
 
-Download `indium-1.0.0-1-x86_64.pkg.tar.zst` from the Releases page:
+Download `indium-1.0.0-2-x86_64.pkg.tar.zst` from the Releases page:
 
 ```sh
-sudo pacman -U indium-1.0.0-1-x86_64.pkg.tar.zst
+sudo pacman -U indium-1.0.0-2-x86_64.pkg.tar.zst
 ```
 
 ### 3.B Debian / Ubuntu
 
-Download `indium_1.0.0-1_amd64.deb` from the Releases page:
+Download `indium_1.0.0-2_amd64.deb` from the Releases page:
 
 ```sh
-sudo apt install ./indium_1.0.0-1_amd64.deb
+sudo apt install ./indium_1.0.0-2_amd64.deb
 ```
 
 **The two packages do not have the same floor, and it matters more than the file extension
@@ -80,7 +80,7 @@ right for the distribution it is for and wrong everywhere else.
 
 ### 3.C Anything else
 
-`indium-1.0-x86_64.tar.gz` is the `.deb`'s binary with no packaging around it, so it carries
+`indium-1.0.0-2-x86_64.tar.gz` is the `.deb`'s binary with no packaging around it, so it carries
 the lower of the two floors — glibc 2.35. Unpack it, put `indium` wherever you keep such
 things, and satisfy `libarchive.so.13`, `libwayland-client`, `libxkbcommon` and `libEGL`
 yourself. It installs no icon and no menu entry; `./build/install-desktop.sh` from a source
