@@ -9,6 +9,7 @@ use egui_extras::{Column, TableBuilder};
 
 use super::{filter, Indium, Section};
 use crate::model::Row;
+use crate::platform::picker::PickerFor;
 use crate::theme;
 use crate::util;
 
@@ -279,6 +280,9 @@ const CRUMB_PAD: egui::Margin = egui::Margin::symmetric(4, 1);
 fn breadcrumb_bar(app: &mut Indium, ui: &mut egui::Ui) {
     let crumbs = crate::model::breadcrumb(&app.cwd);
     let mut go: Option<String> = None;
+    // Set inside the closure, acted on after it: `request_picker` needs `&mut app`, which
+    // the layout closure is already holding immutably.
+    let mut pick = false;
 
     // The crumb font, resolved rather than written down: `RichText::family` keeps the
     // current text style's size and swaps only the family, and this is that by hand,
@@ -327,9 +331,38 @@ fn breadcrumb_bar(app: &mut Indium, ui: &mut egui::Ui) {
                         go = Some(path.clone());
                     }
                 }
+
+                // **Add files…**, on the breadcrumb row and nowhere else.
+                //
+                // Until P11 there were two ways to put a file into an archive and both
+                // were dead: `Ctrl+V`, which had never once fired, and a drop, which
+                // `winit-0.30.13` cannot deliver on Wayland at all. `Ctrl+V` works now,
+                // but a chord nobody is told about is not an affordance, and the testing
+                // round's flattest sentence was "cannot add files to archive".
+                //
+                // Here rather than in the tray, which CORE §4 keeps hidden until something
+                // is already staged — a control for making the first change cannot live in
+                // a zone that only exists after it. And here rather than in the sidebar,
+                // because this row already names the directory an add lands in: the button
+                // adds *to where the breadcrumb says you are*, which is the one placement
+                // that needs no explanation.
+                //
+                // CORE §4 does not list it. `build/docs/P11.md` orders the edit; the maker
+                // lands CORE changes in his own hand, as with every zone since P6.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if theme::small_button(ui, egui::RichText::new("Add files…"), true)
+                        .on_hover_text("Choose files to stage into this directory")
+                        .clicked()
+                    {
+                        pick = true;
+                    }
+                });
             });
         });
 
+    if pick {
+        app.request_picker(ui.ctx(), PickerFor::Add);
+    }
     if let Some(path) = go {
         app.cwd = path;
         app.cursor = 0;

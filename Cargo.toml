@@ -6,8 +6,10 @@ license = "GPL-3.0-only"
 description = "An archive manager for Linux on Wayland where the metadata is the main event."
 
 [dependencies]
+ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "file_chooser"] }
 eframe = { version = "0.36.1", default-features = false, features = ["glow", "wayland"] }
 egui_extras = { version = "0.36.1", features = ["image"] }
+futures-lite = "2.6.1"
 # `egui_extras/image` on its own decodes nothing — it enables the crate with
 # `default-features = false`, and the crate's own docs say twice that the formats must be
 # opted into separately. `image` is not a new dependency: eframe already links it through

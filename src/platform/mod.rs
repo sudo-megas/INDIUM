@@ -7,6 +7,7 @@
 
 pub mod apps;
 pub mod clipboard;
+pub mod picker;
 pub mod scratch;
 pub mod store;
 pub mod window;

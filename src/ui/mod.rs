@@ -30,6 +30,7 @@ use crate::arch::{self, ArchiveError, ArchiveInfo, Entry, ExtractMsg, ListMsg};
 use crate::model::{self, Row};
 use crate::platform::apps::{self, Candidate};
 use crate::platform::clipboard;
+use crate::platform::picker::{self, PickerFor};
 use crate::platform::scratch::{self, Scratch};
 use crate::platform::store::{self, ExtractDefault, Recents, Settings, Store};
 use crate::platform::window::{self, Destination};
@@ -73,6 +74,12 @@ pub enum Popup {
     Password,
     OpenWith,
 }
+
+/// What the file picker came back with, and what it had been opened for.
+///
+/// The two travel together because the answer arrives on a channel a long time after the
+/// button was clicked, and by then nothing else remembers which button it was.
+type PickedFiles = (PickerFor, Result<Vec<PathBuf>, String>);
 
 /// What a password, once typed, is for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -202,6 +209,8 @@ pub struct Indium {
     /// Paths read off the clipboard by a worker. Reading blocks until the program that
     /// owns the selection finishes writing, so it never happens on the UI thread.
     paste_rx: Option<Receiver<Result<Vec<PathBuf>, String>>>,
+    /// The portal file picker's answer, and what it was asked for.
+    picker_rx: Option<Receiver<PickedFiles>>,
 
     // --- Preview (P5) -----------------------------------------------------
     pub preview: Option<PreviewData>,
@@ -313,6 +322,7 @@ impl Indium {
             new_encrypt: false,
             apply_rx: None,
             paste_rx: None,
+            picker_rx: None,
             preview: None,
             preview_loading: None,
             preview_rx: None,
@@ -460,6 +470,10 @@ impl Indium {
             Some(rx) => rx.try_iter().collect(),
             None => Vec::new(),
         };
+        let picker_msgs: Vec<PickedFiles> = match &self.picker_rx {
+            Some(rx) => rx.try_iter().collect(),
+            None => Vec::new(),
+        };
         let preview_msgs: Vec<PreviewRead> = match &self.preview_rx {
             Some(rx) => rx.try_iter().collect(),
             None => Vec::new(),
@@ -593,6 +607,28 @@ impl Indium {
                 }
                 Ok(paths) => self.stage_adds(paths),
                 Err(e) => self.status = e,
+            }
+        }
+
+        for (what, msg) in picker_msgs {
+            self.picker_rx = None;
+            let paths = match msg {
+                // A cancelled dialog. The user changed their mind, which is not news.
+                Ok(paths) if paths.is_empty() => continue,
+                Ok(paths) => paths,
+                Err(e) => {
+                    self.status = e;
+                    continue;
+                }
+            };
+            match what {
+                // CORE §1: one archive per window, so a named archive opens a new one.
+                PickerFor::Open => {
+                    if let Some(first) = paths.into_iter().next() {
+                        self.open_archive(ctx, first, None);
+                    }
+                }
+                PickerFor::Add => self.stage_adds(paths),
             }
         }
 
@@ -1141,6 +1177,29 @@ impl Indium {
             };
             self.stage(Task::Add { source: path, dest });
         }
+    }
+
+    /// Raise the desktop's file picker on a worker, and act on what it names.
+    ///
+    /// Off the UI thread for a blunter reason than the clipboard's: the dialog is on
+    /// screen for as long as the user is *choosing*, which may be a minute. A blocking
+    /// call here would freeze the window that raised it, behind the dialog, for the whole
+    /// of that.
+    pub fn request_picker(&mut self, ctx: &egui::Context, what: PickerFor) {
+        if self.picker_rx.is_some() {
+            return;
+        }
+        let (tx, rx) = channel();
+        self.picker_rx = Some(rx);
+        let ctx = ctx.clone();
+        let (title, multiple) = match what {
+            PickerFor::Open => ("Open archive", false),
+            PickerFor::Add => ("Add to archive", true),
+        };
+        std::thread::spawn(move || {
+            let _ = tx.send((what, picker::open_files(title, multiple)));
+            ctx.request_repaint();
+        });
     }
 
     /// `Ctrl+V` — read the clipboard on a worker and stage what comes back.
@@ -2399,6 +2458,16 @@ fn open_path_popup(app: &mut Indium, ctx: &egui::Context) {
                     } else {
                         app.status = format!("{} is not a file.", path.display());
                     }
+                }
+
+                // The desktop's own picker, beside the field rather than instead of it.
+                // `Ctrl+O` still opens what CORE §4's keyboard table says it opens — a
+                // path field with tab completion — and rebinding the chord to raise a
+                // dialog would have changed documented behaviour to add a button's worth
+                // of convenience. Two ways in, one of them typed, neither hidden.
+                if ui.button("Browse…").clicked() {
+                    app.popup = None;
+                    app.request_picker(ctx, PickerFor::Open);
                 }
             });
         });
