@@ -133,10 +133,15 @@ extern "C" {
 // `ensure_ctype_locale`.
 unsafe extern "C" {
     fn setlocale(category: c_int, locale: *const c_char) -> *mut c_char;
+    fn nl_langinfo(item: c_int) -> *mut c_char;
 }
 /// glibc's `__LC_CTYPE`, checked against `/usr/include/bits/locale.h` by hand, as every
 /// other constant in this file was.
 const LC_CTYPE: c_int = 0;
+/// glibc's `CODESET` (`_NL_CTYPE_CODESET_NAME`), checked against `/usr/include/langinfo.h`
+/// the same way — and against a two-line C program that printed it, because an enum's
+/// position is not something to count by eye.
+const CODESET: c_int = 14;
 
 // The write half, added by P4 §3. Same rule as above: every declaration is one INDIUM
 // uses, checked by hand against the installed headers. Four of these are easy to get
@@ -243,15 +248,62 @@ fn cstr_to_string(p: *const c_char) -> Option<String> {
 ///
 /// It lives here rather than in `main` because the library is driven directly by the tests
 /// in `tests/`, and a fix a caller has to remember is a fix that goes missing.
+///
+/// **`setlocale(LC_CTYPE, "")` on its own is not enough**, and the release rehearsal proved
+/// it: the `debian:bookworm` container the `.deb` is built in has no UTF-8 locale configured
+/// at all, so the user's-locale call lands back on `C` and every name is empty again. The
+/// three `utf8.zip` tests failed there while passing on Arch — which is precisely why they
+/// exist. The same hole is open on any machine run under `LC_ALL=C`, which is to say most
+/// of them once INDIUM is started by something other than a desktop session.
+///
+/// So the user's locale is tried first, because it is theirs, and kept only if it can
+/// actually carry the names. Otherwise a UTF-8 locale is forced. That is not overriding a
+/// preference: an `Entry::raw_path` is a Rust `String` and therefore UTF-8 whatever the
+/// locale says, so a non-UTF-8 `LC_CTYPE` cannot round-trip a name through this program
+/// even when it converts one — `cstr_to_string` would take latin1 bytes and lossily decode
+/// them. UTF-8 is the only setting under which INDIUM is correct.
+///
+/// `C.UTF-8` is built into glibc from 2.35 and needs no locale generation, which is what
+/// makes it usable in a container that has none.
 fn ensure_ctype_locale() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        // SAFETY: a valid NUL-terminated empty string, and `Once` guarantees this runs
-        // exactly once — `setlocale` is not safe to race against itself.
+        // SAFETY: every argument is a NUL-terminated literal, and `Once` guarantees this
+        // block runs exactly once — `setlocale` is not safe to race against itself.
         unsafe {
+            // The user's own first.
             setlocale(LC_CTYPE, c"".as_ptr());
+            if ctype_is_utf8() {
+                return;
+            }
+            // It cannot carry a filename. Take the first UTF-8 locale this system has.
+            for name in [c"C.UTF-8", c"en_US.UTF-8", c"C.utf8"] {
+                if !setlocale(LC_CTYPE, name.as_ptr()).is_null() && ctype_is_utf8() {
+                    return;
+                }
+            }
+            // Nothing UTF-8 anywhere. Names outside ASCII will arrive empty, and `extract`
+            // refuses outright rather than losing them quietly — which is the whole reason
+            // that guard is a refusal and not a `continue`.
         }
     });
+}
+
+/// Is the character set `LC_CTYPE` currently names one that can carry a filename?
+///
+/// # Safety
+/// Must be called with the locale settled — i.e. from inside `ensure_ctype_locale`'s `Once`.
+unsafe fn ctype_is_utf8() -> bool {
+    // SAFETY: `nl_langinfo` returns a pointer into locale-owned static storage, valid until
+    // the next `setlocale`; it is read and compared before anything else touches the locale.
+    let codeset = unsafe { cstr_to_string(nl_langinfo(CODESET)) }.unwrap_or_default();
+    // `UTF-8`, `utf8`, `UTF8` — glibc says `UTF-8`, musl says `UTF-8`, and the spelling is
+    // not worth trusting.
+    let flat: String = codeset
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    flat.eq_ignore_ascii_case("utf8")
 }
 
 /// One name off a libarchive entry, asked for as UTF-8 first.
