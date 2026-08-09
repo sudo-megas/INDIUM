@@ -4,8 +4,16 @@
 # the packages call with their own roots; the two installs differ only in that root. What
 # is left here is what only a dev machine needs: the caches, and the MIME types. Without
 # --set-default the script installs and touches nothing about the user's existing choices.
+#
+# Runs from anywhere. It used to say "run from the repository root" and mean it: the line
+# below was `./build/install-payload.sh`, relative to whatever directory the caller
+# happened to be standing in, so the one invocation a user is most likely to type —
+# `~/INDIUM/build/install-desktop.sh --set-default`, from `$HOME` — died on
+# "No such file or directory". A script that only works from one directory should resolve
+# its own, and this one now does.
 set -e
-./build/install-payload.sh "$HOME/.local"
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+"$here/install-payload.sh" "$HOME/.local"
 
 command -v update-desktop-database >/dev/null &&
   update-desktop-database "$HOME/.local/share/applications" || true

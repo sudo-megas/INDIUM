@@ -494,9 +494,28 @@ fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
                     // See `sidebar::row_body`: a selectable label would out-rank the row
                     // beneath it and eat the click that lands on a bookmark's name.
                     ui.style_mut().interaction.selectable_labels = false;
+                    // A bookmark names a directory that may since have been deleted,
+                    // renamed or unmounted. Recents have said so since P2; bookmarks said
+                    // nothing at all, so a `settings.toml` naming a path that was never
+                    // there read exactly like one that was. Same word, same dimming, same
+                    // rule — the row stays until the user's own hand removes it.
+                    let exists = std::path::Path::new(&b.path).is_dir();
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
-                            ui.label(egui::RichText::new(&b.name).color(theme::TEXT));
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(&b.name).color(if exists {
+                                    theme::TEXT
+                                } else {
+                                    theme::TEXT_MUTED
+                                }));
+                                if !exists {
+                                    ui.label(
+                                        egui::RichText::new("missing")
+                                            .size(12.0)
+                                            .color(theme::TEXT_MUTED),
+                                    );
+                                }
+                            });
                             ui.label(
                                 egui::RichText::new(&b.path)
                                     .family(theme::MONO)

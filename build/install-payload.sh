@@ -19,8 +19,13 @@
 #   BINARY  installed to ROOT/bin/indium, and only when given: a package owns /usr/bin,
 #           cargo owns target/release, and the dev-machine install passes no binary.
 #
-# Run from the repository root.
+# Runs from anywhere: the sources it copies are found relative to this script, not to the
+# caller's working directory. The packages happen to call it from the repository root and
+# are unaffected — `$0` resolves to the same tree either way — but a dev machine running
+# `~/INDIUM/build/install-desktop.sh` from `$HOME` is not, and used to fail here.
 set -e
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo=$(dirname -- "$here")
 [ -n "$1" ] || { echo "usage: install-payload.sh ROOT [BINARY]" >&2; exit 2; }
 root=$1
 
@@ -28,7 +33,7 @@ if [ -n "$2" ]; then
   install -Dm755 "$2" "$root/bin/indium"
 fi
 
-install -Dm644 assets/org.indium.desktop \
+install -Dm644 "$repo/assets/org.indium.desktop" \
   "$root/share/applications/org.indium.desktop"
 
 # P5: the maker's icons live in build/icons/ as `indium-<size>.png`. They are masters
@@ -36,7 +41,7 @@ install -Dm644 assets/org.indium.desktop \
 # actually looks in are installed, and the rest stay put as sources. Every one is
 # installed as `apps/indium.png`, matching `Icon=indium` in the desktop entry.
 for size in 16 22 24 32 48 64 96 128 256 512; do
-  png="build/icons/indium-${size}.png"
+  png="$repo/build/icons/indium-${size}.png"
   [ -e "$png" ] || continue
   install -Dm644 "$png" \
     "$root/share/icons/hicolor/${size}x${size}/apps/indium.png"

@@ -1223,7 +1223,13 @@ pub fn apply(
         now.sort_unstable();
         then.sort_unstable();
         if now != then {
-            return Err("The archive changed on disk. Nothing was written.".to_string());
+            // Says what happened, what was done about it, and what to do next. The old
+            // wording stopped after the first of those, which reads as a failure rather
+            // than as the refusal it is — the staged changes are still here, and the only
+            // thing lost is the assumption they were built on.
+            return Err("Another window changed this archive after these changes were \
+                        staged, so nothing was written. Re-open it and stage them again."
+                .to_string());
         }
     }
 

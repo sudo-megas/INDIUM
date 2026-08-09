@@ -91,7 +91,12 @@ fn main() -> eframe::Result<()> {
             .with_app_id("org.indium")
             .with_icon(window_icon())
             .with_inner_size([1180.0, 720.0])
-            .with_min_inner_size([840.0, 480.0]),
+            // 480 was below the sidebar's own natural height, so the compositor would
+            // happily hand INDIUM a window its first zone could not fit inside. P11 made
+            // that survivable — the sidebar reserves its foot and scrolls the rest — but a
+            // floor the program can actually be used at is the better half of the answer,
+            // and a scrollbar over a wordmark is not a layout anyone chose.
+            .with_min_inner_size([840.0, 600.0]),
         ..Default::default()
     };
 

@@ -30,42 +30,57 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
         // 2px edge — two lines a pixel apart, which is worse than either alone.
         .show_separator_line(false)
         .show(root, |ui| {
-            ui.vertical(|ui| {
-                // CORE §4 draws this zone "(family style)", and the family puts the mark
-                // above the wordmark, centred, with the sections left-aligned beneath it.
-                // The header block is the only centred thing in the window.
-                ui.vertical_centered(|ui| {
-                    ui.add_space(2.0);
-                    ui.add(theme::mark(84.0));
-                    ui.add_space(8.0);
-                    ui.label(
-                        egui::RichText::new("INDIUM")
-                            .size(23.0)
-                            .color(theme::TEXT)
-                            .family(theme::bold()),
-                    );
-                    ui.label(
-                        egui::RichText::new("archive manager")
-                            .size(13.0)
-                            .color(theme::TEXT_MUTED),
-                    );
+            // The bottom group sits at the foot of the panel, as CORE draws it — and it
+            // **reserves its space before the sections above are laid out**, which is the
+            // whole of P11's fix here.
+            //
+            // It used to be a `bottom_up` layout in the same `Ui` as the group above it.
+            // Two layouts sharing one rect, each measuring from a different edge, agree
+            // only while the rect is taller than both of them put together: shorten the
+            // window past that and they simply draw over one another, wordmark through
+            // buttons, with nothing to notice it. A panel cannot do that. What it takes is
+            // gone from `available_height` before the sections ask, and the `ScrollArea`
+            // below turns "does not fit" into a scrollbar rather than a collision.
+            egui::Panel::bottom("sidebar-actions")
+                .frame(egui::Frame::NONE)
+                .show_separator_line(false)
+                .show(ui, |ui| {
+                    ui.separator();
+                    ui.add_space(10.0);
+                    action_item(ui, app, "New", "N", Some(Popup::NewArchive), true);
+                    action_item(ui, app, "Settings", ",", Some(Popup::Settings), true);
+                    action_item(ui, app, "About", "A", Some(Popup::About), true);
+                    ui.add_space(4.0);
                 });
-                ui.add_space(18.0);
 
-                section_item(ui, app, Section::Recents, "Recent files", "1", true);
-                section_item(ui, app, Section::Bookmarks, "Bookmarks", "2", true);
-                section_item(ui, app, Section::Archive, "Archive", "3", app.has_archive());
-            });
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    // CORE §4 draws this zone "(family style)", and the family puts the
+                    // mark above the wordmark, centred, with the sections left-aligned
+                    // beneath it. The header block is the only centred thing in the window.
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(2.0);
+                        ui.add(theme::mark(84.0));
+                        ui.add_space(8.0);
+                        ui.label(
+                            egui::RichText::new("INDIUM")
+                                .size(23.0)
+                                .color(theme::TEXT)
+                                .family(theme::bold()),
+                        );
+                        ui.label(
+                            egui::RichText::new("archive manager")
+                                .size(13.0)
+                                .color(theme::TEXT_MUTED),
+                        );
+                    });
+                    ui.add_space(18.0);
 
-            // The bottom group sits at the foot of the panel, as CORE draws it.
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-                ui.add_space(4.0);
-                action_item(ui, app, "About", "A", Some(Popup::About), true);
-                action_item(ui, app, "Settings", ",", Some(Popup::Settings), true);
-                action_item(ui, app, "New", "N", Some(Popup::NewArchive), true);
-                ui.add_space(10.0);
-                ui.separator();
-            });
+                    section_item(ui, app, Section::Recents, "Recent files", "1", true);
+                    section_item(ui, app, Section::Bookmarks, "Bookmarks", "2", true);
+                    section_item(ui, app, Section::Archive, "Archive", "3", app.has_archive());
+                });
         });
 }
 
