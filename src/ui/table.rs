@@ -98,7 +98,13 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
         ui.visuals_mut().widgets.hovered.bg_fill = theme::ROW_HOVER;
         ui.style_mut().interaction.selectable_labels = false;
 
-        TableBuilder::new(ui)
+        // Where the cursor row landed, so its ring can be drawn after the table rather than
+        // inside it. `egui_extras` paints striped → selected → hovered → content and offers
+        // no cursor layer at all, so there is nowhere inside a cell to put this: a stroke
+        // drawn there would be painted over by the next cell's fill.
+        let mut cursor_rect: Option<egui::Rect> = None;
+
+        let mut table = TableBuilder::new(ui)
             .striped(false)
             .resizable(true)
             // `egui_extras` gates its hover fill on `self.sense.interactive()`, and the default
@@ -108,7 +114,16 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
             .column(Column::remainder().at_least(120.0).clip(true))
             .column(Column::exact(84.0))
             .column(Column::exact(84.0))
-            .column(Column::exact(72.0))
+            .column(Column::exact(72.0));
+
+        // Only when the keyboard moved it, and only for the one frame the flag is up.
+        // Asking every frame would fight the wheel: scroll away to read something and the
+        // view would snap back before the pointer stopped moving.
+        if std::mem::take(&mut app.scroll_to_cursor) && app.cursor < rows.len() {
+            table = table.scroll_to_row(app.cursor, Some(egui::Align::Center));
+        }
+
+        table
             .header(22.0, |mut header| {
                 for name in ["Name", "Size", "Packed", "Method"] {
                     header.col(|ui| {
@@ -244,6 +259,9 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                     // The double-click reaches this the same way, so descending into a
                     // directory now works from any column rather than from the name alone.
                     let line = tr.response();
+                    if focused {
+                        cursor_rect = Some(line.rect);
+                    }
                     if line.clicked() {
                         clicked = Some((i, ui_ctx.input(|inp| inp.modifiers.ctrl)));
                     }
@@ -252,6 +270,33 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                     }
                 });
             });
+
+        // CORE §6: the keyboard's position in a list is "a line, not a colour".
+        //
+        // It used to be the filename turning `ORANGE` and nothing else. But moving the
+        // cursor also sets the selection (`mod.rs`, the movement block), and the selection
+        // is `ORANGE.linear_multiply(0.35)` — so the cursor was orange ink on an orange
+        // wash at **2.06:1**, which the testing round reported not as faint but as absent:
+        // *"dont know what orange row cursor you talk about. i see none orange thing."*
+        // A line and a wash can be read at the same time; two washes cannot.
+        //
+        // The rect matches `egui_extras`' own `gapless_rect` — `expand2(0.5 * item_spacing)`
+        // — so the ring sits exactly on the selection fill rather than a few pixels inside
+        // it, and it is square for the same reason: that fill is `CornerRadius::ZERO`, and a
+        // rounded ring around a square wash reads as a mistake. `Inside` keeps the 2px
+        // within the row instead of bleeding onto its neighbours.
+        if let Some(r) = cursor_rect {
+            // The trait `round_ui` hangs off; `egui_extras` rounds its fill the same way, and
+            // half a pixel of disagreement between ring and wash is visible on a 20px row.
+            use egui::emath::GuiRounding as _;
+            let gapless = r.expand2(0.5 * ui.spacing().item_spacing).round_ui();
+            ui.painter().with_clip_rect(ui.clip_rect()).rect_stroke(
+                gapless,
+                theme::R_ZONE,
+                theme::edge_hot(),
+                egui::StrokeKind::Inside,
+            );
+        }
     });
 
     if commit_rename {

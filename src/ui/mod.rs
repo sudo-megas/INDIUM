@@ -177,6 +177,14 @@ pub struct Indium {
     pub recents_cursor: usize,
     /// The row cursor in *Bookmarks*. See [`Indium::cursor`].
     pub bookmarks_cursor: usize,
+    /// Set for one frame when the keyboard moved the archive cursor, so the table can
+    /// scroll the cursor back into view.
+    ///
+    /// CORE §6: the cursor "is also **kept on screen** — a row scrolled out of view is a
+    /// cursor nobody can see, by a different route." It is a one-shot flag rather than a
+    /// standing "always show the cursor", because the latter would yank the view back every
+    /// time somebody scrolled away from it with the wheel to read something else.
+    pub scroll_to_cursor: bool,
     /// Selected archive paths. Kept as paths, not row indices, so a selection
     /// survives descending, filtering and re-listing.
     pub selection: BTreeSet<String>,
@@ -301,6 +309,7 @@ impl Indium {
             cursor: 0,
             recents_cursor: 0,
             bookmarks_cursor: 0,
+            scroll_to_cursor: false,
             selection: BTreeSet::new(),
             inspector_tab: InspectorTab::Details,
             filter: None,
@@ -2040,6 +2049,7 @@ impl Indium {
             if moved && self.section == Section::Archive {
                 self.crc_of = None;
                 self.forget_preview(ctx);
+                self.scroll_to_cursor = true;
                 self.selection.clear();
                 if let Some(row) = rows.get(self.cursor) {
                     self.selection.insert(row.path.clone());
