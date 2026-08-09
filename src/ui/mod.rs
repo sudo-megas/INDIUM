@@ -79,6 +79,51 @@ pub enum Popup {
     Keys,
 }
 
+/// What INDIUM is currently saying, and whether it is bad news.
+///
+/// CORE §4: *"A failure is `#FFD800`. What INDIUM says is the only text in the window that
+/// reports both triumph and disaster in the same place, and until now it reported them in
+/// the same colour."* It did, for eleven milestones: `Removed bookmark photos.` and
+/// `Could not create /home/megas/x: permission denied` were the same string in the same
+/// grey, and a person watching the bar could not tell which had happened.
+///
+/// The severity rides **with** the sentence rather than beside it, in a separate flag,
+/// because a separate flag is a thing you can forget to clear — set it on a failure, write
+/// a success over the text a moment later, and the success is yellow. Carrying it in the
+/// value makes that unrepresentable: every plain assignment goes through `From`, which sets
+/// `bad: false`, so saying anything at all clears the last failure by construction.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Status {
+    pub text: String,
+    /// Drawn in [`theme::WARNING`] rather than the ordinary grey.
+    pub bad: bool,
+}
+
+impl Status {
+    /// Something went wrong. A refusal counts; a confirmation does not.
+    pub fn bad(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            bad: true,
+        }
+    }
+}
+
+impl From<String> for Status {
+    fn from(text: String) -> Self {
+        Self { text, bad: false }
+    }
+}
+
+impl From<&str> for Status {
+    fn from(text: &str) -> Self {
+        Self {
+            text: text.to_string(),
+            bad: false,
+        }
+    }
+}
+
 /// What the file picker came back with, and what it had been opened for.
 ///
 /// The two travel together because the answer arrives on a channel a long time after the
@@ -275,7 +320,8 @@ pub struct Indium {
     pub recents_broken: bool,
 
     // --- chrome -----------------------------------------------------------
-    pub status: String,
+    /// What INDIUM is saying, and whether it is a failure. See [`Status`].
+    pub status: Status,
     /// The computed CRC of the focused entry, cleared whenever focus moves.
     pub crc_of: Option<(String, u32)>,
     /// Held only for the duration of one operation, then dropped and wiped.
@@ -367,7 +413,7 @@ impl Indium {
             settings: settings.value,
             recents: recents.value,
 
-            status,
+            status: status.into(),
             crc_of: None,
             passphrase: None,
         };
@@ -426,7 +472,8 @@ impl Indium {
                         .to_string_lossy()
                 ),
                 Err(e) => e,
-            };
+            }
+            .into();
             return;
         }
         if self.work_running() {
@@ -447,7 +494,7 @@ impl Indium {
         self.set_window_title(ctx);
         self.section = Section::Archive;
         self.listing = true;
-        self.status = format!("Reading {}…", path.display());
+        self.status = format!("Reading {}…", path.display()).into();
 
         let (tx, rx) = channel();
         self.list_rx = Some(rx);
@@ -510,7 +557,8 @@ impl Indium {
                         .as_ref()
                         .and_then(|p| p.file_name())
                         .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "Ready.".to_string());
+                        .unwrap_or_else(|| "Ready.".to_string())
+                        .into();
                     self.remember_current_archive();
                 }
                 ListMsg::Failed(e) => {
@@ -538,7 +586,8 @@ impl Indium {
                     self.status = format!(
                         "Extracted {written} {}.",
                         if written == 1 { "entry" } else { "entries" }
-                    );
+                    )
+                    .into();
                     // The password's job is over. Neither post-step below needs it: one
                     // reads the scratch directory, the other reads `.desktop` files.
                     self.passphrase = None;
@@ -569,13 +618,14 @@ impl Indium {
                             "Cancelled after {written} {entries}; \
                              what came out is still in the destination."
                         )
-                    };
+                    }
+                    .into();
                 }
                 ExtractMsg::Failed(msg) => {
                     self.progress = None;
                     self.extract_rx = None;
                     self.post_extract = PostExtract::None;
-                    self.status = msg;
+                    self.status = msg.into();
                     self.passphrase = None;
                 }
             }
@@ -607,7 +657,7 @@ impl Indium {
                 }
                 Err(e) => {
                     self.preview = None;
-                    self.status = e;
+                    self.status = e.into();
                 }
             }
         }
@@ -616,10 +666,10 @@ impl Indium {
             self.paste_rx = None;
             match msg {
                 Ok(paths) if paths.is_empty() => {
-                    self.status = "The clipboard holds no files.".to_string();
+                    self.status = Status::bad("The clipboard holds no files.");
                 }
                 Ok(paths) => self.stage_adds(paths),
-                Err(e) => self.status = e,
+                Err(e) => self.status = Status::bad(e),
             }
         }
 
@@ -630,7 +680,7 @@ impl Indium {
                 Ok(paths) if paths.is_empty() => continue,
                 Ok(paths) => paths,
                 Err(e) => {
-                    self.status = e;
+                    self.status = Status::bad(e);
                     continue;
                 }
             };
@@ -660,7 +710,8 @@ impl Indium {
                     self.status = format!(
                         "Applied. The archive now holds {entries} entr{}.",
                         if entries == 1 { "y" } else { "ies" }
-                    );
+                    )
+                    .into();
                     // The queue has been spent, and what is on screen is now a listing of
                     // the archive that was replaced. Re-open it rather than leave stale
                     // rows behind — the Inspector is the point of this program, and it
@@ -680,14 +731,13 @@ impl Indium {
                     // The queue survives a cancel: nothing was written, so the changes
                     // the user staged are still exactly what they asked for.
                     self.status =
-                        "Cancelled. Nothing was written, and your changes are still staged."
-                            .to_string();
+                        "Cancelled. Nothing was written, and your changes are still staged.".into();
                 }
                 ApplyMsg::Failed(msg) => {
                     self.progress = None;
                     self.apply_rx = None;
                     self.passphrase = None;
-                    self.status = msg;
+                    self.status = Status::bad(msg);
                 }
             }
         }
@@ -716,14 +766,14 @@ impl Indium {
             | ArchiveError::NeedPassword
             | ArchiveError::WrongPassword => {
                 if let Some(p) = self.archive_path.clone() {
-                    self.status = e.to_string();
+                    self.status = Status::bad(e.to_string());
                     self.pending = Some(PendingAction::List(p));
                     self.popup = Some(Popup::Password);
                     self.password_input.clear();
                 }
             }
             other => {
-                self.status = other.to_string();
+                self.status = other.to_string().into();
                 self.archive_info = None;
             }
         }
@@ -752,13 +802,14 @@ impl Indium {
     /// change refuses again on its own.
     pub fn change_recents(&mut self, change: impl FnOnce(&mut Recents)) {
         if self.recents_broken {
-            self.status =
-                "recents.toml could not be parsed earlier; it will not be overwritten.".to_string();
+            self.status = Status::bad(
+                "recents.toml could not be parsed earlier; it will not be overwritten.",
+            );
             return;
         }
         match self.store.change_recents(change) {
             Ok(recents) => self.recents = recents,
-            Err(notice) => self.status = notice,
+            Err(notice) => self.status = Status::bad(notice),
         }
     }
 
@@ -766,12 +817,13 @@ impl Indium {
     pub fn change_settings(&mut self, change: impl FnOnce(&mut Settings)) {
         if self.settings_broken {
             self.status = "settings.toml could not be parsed earlier; it will not be overwritten."
-                .to_string();
+                .to_string()
+                .into();
             return;
         }
         match self.store.change_settings(change) {
             Ok(settings) => self.settings = settings,
-            Err(notice) => self.status = notice,
+            Err(notice) => self.status = Status::bad(notice),
         }
     }
 
@@ -980,13 +1032,13 @@ impl Indium {
     /// Push a task, or say why it cannot be pushed.
     fn stage(&mut self, task: Task) {
         if let Some(refusal) = self.staging_refusal() {
-            self.status = refusal;
+            self.status = refusal.into();
             return;
         }
         if self.staged_against.is_empty() {
             self.staged_against = self.entries.iter().map(|e| e.path.clone()).collect();
         }
-        self.status = task.summary();
+        self.status = task.summary().into();
         self.tasks.push(task);
     }
 
@@ -1011,7 +1063,7 @@ impl Indium {
             return;
         }
         if let Some(refusal) = self.staging_refusal() {
-            self.status = refusal;
+            self.status = refusal.into();
             return;
         }
         if let Some(row) = rows.get(self.cursor) {
@@ -1029,7 +1081,7 @@ impl Indium {
         let name = self.rename_input.trim().to_string();
         self.rename_input.clear();
         if name.is_empty() || name.contains('/') {
-            self.status = "A name cannot be empty or contain a slash.".to_string();
+            self.status = Status::bad("A name cannot be empty or contain a slash.");
             return;
         }
         let parent = crate::util::parent_dir(&from);
@@ -1086,7 +1138,8 @@ impl Indium {
         self.tasks.retain_foldable(&self.entries);
         let dropped = before - self.tasks.len();
         if dropped > 0 {
-            self.status = format!("Removed that change, and {dropped} that depended on it.",);
+            self.status =
+                format!("Removed that change, and {dropped} that depended on it.",).into();
         }
         if self.tasks.is_empty() {
             self.staged_against.clear();
@@ -1099,7 +1152,7 @@ impl Indium {
             return;
         }
         let Some(recipe) = self.current_recipe() else {
-            self.status = "This archive's format cannot be written.".to_string();
+            self.status = Status::bad("This archive's format cannot be written.");
             return;
         };
 
@@ -1125,7 +1178,7 @@ impl Indium {
         // on and nothing could stop, and the status bar's Cancel reached only the newer one.
         // The tray strip is a button and Apply is one keystroke, so twice is easy.
         if self.apply_rx.is_some() {
-            self.status = "A rebuild is already running. Cancel it, or let it finish.".to_string();
+            self.status = Status::bad("A rebuild is already running. Cancel it, or let it finish.");
             return;
         }
         // And an extraction counts, for a sharper reason: the `store` below would cancel a
@@ -1134,7 +1187,7 @@ impl Indium {
         // clipboard as if it were the whole of it. Both refusals come before that store.
         if self.extract_rx.is_some() {
             self.status =
-                "An extraction is already running. Cancel it, or let it finish.".to_string();
+                Status::bad("An extraction is already running. Cancel it, or let it finish.");
             return;
         }
         self.cancel.store(true, Ordering::Relaxed);
@@ -1242,7 +1295,8 @@ impl Indium {
             self.status = format!(
                 "Discarded {n} staged change{}.",
                 if n == 1 { "" } else { "s" }
-            );
+            )
+            .into();
         }
     }
 
@@ -1290,11 +1344,11 @@ impl Indium {
     fn work_running(&mut self) -> bool {
         if self.extract_rx.is_some() {
             self.status =
-                "An extraction is already running. Cancel it, or let it finish.".to_string();
+                Status::bad("An extraction is already running. Cancel it, or let it finish.");
             return true;
         }
         if self.apply_rx.is_some() {
-            self.status = "A rebuild is already running. Cancel it, or let it finish.".to_string();
+            self.status = Status::bad("A rebuild is already running. Cancel it, or let it finish.");
             return true;
         }
         false
@@ -1375,11 +1429,11 @@ impl Indium {
         };
 
         if let Err(e) = std::fs::create_dir_all(&dest) {
-            self.status = format!("Could not create {}: {e}", dest.display());
+            self.status = Status::bad(format!("Could not create {}: {e}", dest.display()));
             return;
         }
 
-        self.status = format!("Extracting to {}…", dest.display());
+        self.status = format!("Extracting to {}…", dest.display()).into();
         self.spawn_extract(ctx, archive, wanted, dest, PostExtract::None);
     }
 
@@ -1424,7 +1478,7 @@ impl Indium {
                 self.password_input.clear();
                 self.password_attempts = 0;
             }
-            Err(e) => self.status = e.to_string(),
+            Err(e) => self.status = Status::bad(e.to_string()),
         }
     }
 
@@ -1469,7 +1523,7 @@ impl Indium {
     pub fn copy_out(&mut self, ctx: &egui::Context, rows: &[Row]) {
         let paths = self.subject_paths(rows);
         if paths.is_empty() {
-            self.status = "Nothing selected.".to_string();
+            self.status = Status::bad("Nothing selected.");
             return;
         }
         let wanted: std::collections::HashSet<String> = paths.into_iter().collect();
@@ -1495,13 +1549,13 @@ impl Indium {
         let placement = match self.scratch.begin(scratch::Kind::CopyOut, total) {
             Ok(p) => p,
             Err(e) => {
-                self.status = format!("Could not make a scratch directory: {e}");
+                self.status = Status::bad(format!("Could not make a scratch directory: {e}"));
                 return;
             }
         };
         let on_disk = placement.on_disk;
 
-        self.status = "Copying out…".to_string();
+        self.status = "Copying out…".to_string().into();
         self.spawn_extract(
             ctx,
             archive,
@@ -1521,13 +1575,13 @@ impl Indium {
             .current(scratch::Kind::CopyOut)
             .map(|p| p.to_path_buf())
         else {
-            self.status = "The scratch directory is gone; nothing was offered.".to_string();
+            self.status = Status::bad("The scratch directory is gone; nothing was offered.");
             return;
         };
 
         let files = collect_files(&dir);
         if files.is_empty() {
-            self.status = "Nothing to copy.".to_string();
+            self.status = Status::bad("Nothing to copy.");
             return;
         }
 
@@ -1542,9 +1596,9 @@ impl Indium {
                     // P3 §1's one-line notice.
                     msg.push_str(" Over 1 GiB — staged on disk rather than in RAM.");
                 }
-                self.status = msg;
+                self.status = msg.into();
             }
-            Err(e) => self.status = e,
+            Err(e) => self.status = Status::bad(e),
         }
     }
 
@@ -1580,12 +1634,12 @@ impl Indium {
         let placement = match self.scratch.begin(scratch::Kind::OpenWith, entry.size) {
             Ok(p) => p,
             Err(e) => {
-                self.status = format!("Could not make a scratch directory: {e}");
+                self.status = Status::bad(format!("Could not make a scratch directory: {e}"));
                 return;
             }
         };
 
-        self.status = format!("Extracting {}…", crate::util::base_name(&entry.path));
+        self.status = format!("Extracting {}…", crate::util::base_name(&entry.path)).into();
         self.spawn_extract(
             ctx,
             archive,
@@ -1604,13 +1658,13 @@ impl Indium {
             .current(scratch::Kind::OpenWith)
             .map(|p| p.to_path_buf())
         else {
-            self.status = "The scratch directory is gone; there is nothing to open.".to_string();
+            self.status = Status::bad("The scratch directory is gone; there is nothing to open.");
             return;
         };
 
         let extracted = dir.join(&entry.raw_path);
         if !extracted.is_file() {
-            self.status = "The entry did not extract to a file.".to_string();
+            self.status = Status::bad("The entry did not extract to a file.");
             return;
         }
 
@@ -2118,7 +2172,7 @@ impl Indium {
                         if path.exists() {
                             self.open_archive(ctx, path, None);
                         } else {
-                            self.status = format!("{} is no longer there.", r.path);
+                            self.status = Status::bad(format!("{} is no longer there.", r.path));
                         }
                     }
                 }
@@ -2128,7 +2182,7 @@ impl Indium {
                         // The success line first, the write last: a save that failed has
                         // something to say, and it must not be overwritten by a sentence
                         // announcing a change that never reached the disk.
-                        self.status = format!("Removed {path} from recent files.");
+                        self.status = format!("Removed {path} from recent files.").into();
                         self.change_recents(|r| r.remove(&path));
                     }
                 }
@@ -2138,7 +2192,7 @@ impl Indium {
                     let gone = self.settings.bookmarks[self.bookmarks_cursor].clone();
                     let name = gone.name.clone();
                     self.change_settings(move |s| s.bookmarks.retain(|b| *b != gone));
-                    self.status = format!("Removed bookmark {name}.");
+                    self.status = format!("Removed bookmark {name}.").into();
                 }
             }
         }
@@ -2200,9 +2254,28 @@ fn status_bar(app: &mut Indium, ui: &mut egui::Ui) {
             // longer grow to absorb it.
             ui.spacing_mut().button_padding.y = 1.0;
 
+            // CORE §4: "A rule separates the rows. They are three statements, not one
+            // paragraph in three pieces."
+            //
+            // **Painted into the gap, never allocated into it.** `SB_HEIGHT` is asserted by
+            // `the_status_bar_is_as_tall_as_it_says`, and the lane is exactly
+            // `3 * SB_ROW + 2 * SB_GAP` — so a `ui.separator()` between the rows, which
+            // allocates 6pt of its own, would push row 3 out of a panel that is
+            // `exact_size` and cannot grow to absorb it. A line drawn down the middle of a
+            // gap that already exists costs nothing.
+            let lane = ui.available_rect_before_wrap();
             sb_what_is_open(app, ui);
+            let after_1 = ui.cursor().top();
             sb_the_numbers(app, ui);
+            let after_2 = ui.cursor().top();
             sb_progress(app, ui);
+            for y in [after_1, after_2] {
+                ui.painter().hline(
+                    lane.x_range(),
+                    (y - theme::SB_GAP / 2.0).round(),
+                    theme::hairline(),
+                );
+            }
         });
 }
 
@@ -2231,9 +2304,11 @@ fn sb_row(ui: &mut egui::Ui, layout: egui::Layout, add: impl FnOnce(&mut egui::U
 fn sb_what_is_open(app: &Indium, ui: &mut egui::Ui) {
     sb_row(ui, egui::Layout::left_to_right(egui::Align::Center), |ui| {
         match app.archive_path.as_ref().and_then(|p| p.file_name()) {
+            // The row's subject, so it is bold — CORE §4. It is also the answer to
+            // "which window is this", which on a desktop full of them is the question.
             Some(name) => ui.label(
                 egui::RichText::new(name.to_string_lossy())
-                    .family(theme::MONO)
+                    .family(theme::bold())
                     .size(13.0)
                     .color(theme::TEXT),
             ),
@@ -2301,11 +2376,13 @@ fn sb_the_numbers(app: &Indium, ui: &mut egui::Ui) {
     sb_row(ui, egui::Layout::left_to_right(egui::Align::Center), |ui| {
         if app.has_archive() {
             let agg = model::aggregate(app.entries.iter());
+            // CORE §4: "One thing per row is the subject, and it is bold." On this row
+            // that is the count — everything else here qualifies it.
             ui.label(
                 egui::RichText::new(format!("{} entries", agg.count))
-                    .family(theme::MONO)
+                    .family(theme::bold())
                     .size(13.0)
-                    .color(theme::TEXT_SECONDARY),
+                    .color(theme::TEXT),
             );
             ui.label(egui::RichText::new("·").color(theme::TEXT_MUTED));
 
@@ -2337,10 +2414,18 @@ fn sb_the_numbers(app: &Indium, ui: &mut egui::Ui) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add(
                 egui::Label::new(
-                    egui::RichText::new(&app.status)
+                    egui::RichText::new(&app.status.text)
                         .family(theme::MONO)
                         .size(13.0)
-                        .color(theme::TEXT_SECONDARY),
+                        // CORE §4: "A failure is `#FFD800`... A refusal is a failure; a
+                        // confirmation is not." For eleven milestones every sentence in
+                        // this bar was the same grey, so `Could not create …` and
+                        // `Removed bookmark photos.` were indistinguishable at a glance.
+                        .color(if app.status.bad {
+                            theme::WARNING
+                        } else {
+                            theme::TEXT_SECONDARY
+                        }),
                 )
                 .truncate(),
             );
@@ -2384,11 +2469,12 @@ fn sb_progress(app: &Indium, ui: &mut egui::Ui) {
                     .color(theme::TEXT),
             );
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                // Row 3's subject: what is happening. Bold, per CORE §4.
                 ui.label(
                     egui::RichText::new(label)
-                        .family(theme::MONO)
+                        .family(theme::bold())
                         .size(13.0)
-                        .color(theme::TEXT_SECONDARY),
+                        .color(theme::TEXT),
                 );
                 let frac = if total == 0 {
                     0.0
@@ -2495,7 +2581,7 @@ fn open_path_popup(app: &mut Indium, ctx: &egui::Context) {
                         app.popup = None;
                         app.open_archive(ctx, path, None);
                     } else {
-                        app.status = format!("{} is not a file.", path.display());
+                        app.status = Status::bad(format!("{} is not a file.", path.display()));
                     }
                 }
 

@@ -7,7 +7,7 @@
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 
-use super::{filter, Indium, Section};
+use super::{filter, Indium, Section, Status};
 use crate::model::Row;
 use crate::platform::picker::PickerFor;
 use crate::theme;
@@ -532,12 +532,12 @@ fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
     if let Some(p) = missing {
         // P2 §2 keeps the row: the list loses entries by the user's hand or the cap, not
         // because a drive happened to be unmounted this morning.
-        app.status = format!("{p} is no longer there.");
+        app.status = Status::bad(format!("{p} is no longer there."));
     }
     if let Some(p) = forget {
         // Status first, save last: a write that failed owns the line, rather than losing
         // it to a sentence about a removal the file on disk never heard of.
-        app.status = format!("Removed {p} from recent files.");
+        app.status = format!("Removed {p} from recent files.").into();
         app.change_recents(|r| r.remove(&p));
     }
 }
@@ -633,7 +633,7 @@ fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
     if let Some(gone) = remove.and_then(|i| app.settings.bookmarks.get(i).cloned()) {
         let name = gone.name.clone();
         app.change_settings(move |s| s.bookmarks.retain(|b| *b != gone));
-        app.status = format!("Removed bookmark {name}.");
+        app.status = format!("Removed bookmark {name}.").into();
     }
 }
 

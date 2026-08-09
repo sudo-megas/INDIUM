@@ -150,7 +150,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     // Status first, save last, so a refusal or a write error is what the
                     // status bar carries rather than a cheerful line about a file that is
                     // still full of what it always held.
-                    app.status = "Recent files cleared.".to_string();
+                    app.status = "Recent files cleared.".to_string().into();
                     app.change_recents(|r| r.items.clear());
                 }
             });

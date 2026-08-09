@@ -362,6 +362,6 @@ impl Indium {
         self.staged_against.clear();
         self.tasks.clear();
         self.tasks.push(Task::Create { recipe });
-        self.status = format!("Staged: create {name}. Add files, then Apply.");
+        self.status = format!("Staged: create {name}. Add files, then Apply.").into();
     }
 }

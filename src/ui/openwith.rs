@@ -8,7 +8,7 @@
 
 use eframe::egui;
 
-use super::{Indium, Popup};
+use super::{Indium, Popup, Status};
 use crate::platform::apps::{self, Candidate};
 use crate::theme;
 
@@ -184,11 +184,11 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             Some(path) => match apps::launch(&c.app, &path) {
                 Ok(()) => {
                     app.popup = None;
-                    app.status = format!("Opened in {}.", c.app.name);
+                    app.status = format!("Opened in {}.", c.app.name).into();
                 }
-                Err(e) => app.status = e,
+                Err(e) => app.status = Status::bad(e),
             },
-            None => app.status = "Nothing to open.".to_string(),
+            None => app.status = Status::bad("Nothing to open."),
         }
     }
 

@@ -123,7 +123,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                                     s.bookmarks.push(added);
                                 }
                             });
-                            app.status = "Bookmark pinned.".to_string();
+                            app.status = "Bookmark pinned.".to_string().into();
                         }
                     }
                 }

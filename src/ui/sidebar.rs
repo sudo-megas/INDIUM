@@ -10,7 +10,7 @@
 
 use eframe::egui;
 
-use super::{Indium, Popup, Section};
+use super::{Indium, Popup, Section, Status};
 use crate::platform::picker::PickerFor;
 use crate::theme;
 
@@ -155,7 +155,7 @@ fn action_item(
             // New Archive needs its fields seeded, which is what `N` does too.
             Some(Popup::NewArchive) => app.open_new_archive(),
             Some(p) => app.popup = Some(p.clone()),
-            None => app.status = format!("{label} is not available yet."),
+            None => app.status = Status::bad(format!("{label} is not available yet.")),
         }
     }
 }

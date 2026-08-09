@@ -8,7 +8,7 @@
 
 use eframe::egui;
 
-use super::{Indium, PendingAction, Popup};
+use super::{Indium, PendingAction, Popup, Status};
 use crate::arch;
 use crate::secret::Secret;
 use crate::theme;
@@ -143,7 +143,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
 
     if cancel {
         dismiss(app);
-        app.status = "Cancelled. Nothing was written.".to_string();
+        app.status = "Cancelled. Nothing was written.".to_string().into();
         return;
     }
     if submit && !app.password_input.is_empty() {
@@ -182,7 +182,8 @@ fn attempt(app: &mut Indium, ctx: &egui::Context) {
         app.password_attempts += 1;
         if app.password_attempts >= MAX_ATTEMPTS {
             dismiss(app);
-            app.status = "Wrong password three times. Cancelled — nothing was written.".to_string();
+            app.status =
+                Status::bad("Wrong password three times. Cancelled — nothing was written.");
         }
         return;
     }
