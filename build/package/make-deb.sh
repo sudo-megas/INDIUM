@@ -38,9 +38,16 @@ done
 VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
 [ -n "$VERSION" ] || { echo "make-deb: no version in Cargo.toml" >&2; exit 1; }
 
-# The Debian revision. It counts rebuilds of the same upstream version — bumped when the
-# packaging changes and the source does not, which so far has never happened.
-REVISION=1
+# The Debian revision, read out of the PKGBUILD's `pkgrel` and never written down a second
+# time — the same discipline as the version above, for the same reason. Debian and Arch
+# happen to spell this number identically, so one line can serve both and the .deb and the
+# .pkg.tar.zst cannot come out claiming to be different builds of one tree.
+#
+# It counts rebuilds of the same upstream version. Debian's convention reserves that for
+# packaging-only changes; P10 spends it on a source fix instead, at the maker's word, which
+# is why `1.0.0-2` is a different binary from `1.0.0-1` and not merely a different wrapper.
+REVISION=$(sed -n 's/^pkgrel=\([0-9][0-9]*\)$/\1/p' build/package/PKGBUILD | head -1)
+[ -n "$REVISION" ] || { echo "make-deb: no pkgrel in build/package/PKGBUILD" >&2; exit 1; }
 ARCH=amd64
 MAINTAINER='sudo-megas <sudo-megas@users.noreply.github.com>'
 HOMEPAGE=https://github.com/sudo-megas/INDIUM

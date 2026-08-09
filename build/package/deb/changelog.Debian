@@ -1,3 +1,17 @@
+indium (1.0.0-2) unstable; urgency=medium
+
+  * Ctrl+C and Ctrl+V work. In 1.0.0-1 neither did anything at all: the toolkit
+    turns a clipboard chord into a clipboard event and never emits the key, and
+    INDIUM was watching for the key. Ctrl+C is copy-out's only entry point, so
+    copying entries out of an archive and pasting files into one were both
+    unreachable rather than merely awkward. Dropping files onto the window came
+    in on a different path and was never affected.
+  * No other change to the program. The version is unchanged and the revision
+    is bumped instead, at the maker's word: 1.0.0-2 is a different binary from
+    1.0.0-1, which is not what a Debian revision usually means.
+
+ -- sudo-megas <sudo-megas@users.noreply.github.com>  Sun, 09 Aug 2026 08:48:44 +0300
+
 indium (1.0.0-1) unstable; urgency=medium
 
   * First release. INDIUM is an archive manager for Linux on Wayland, shaped

@@ -2,7 +2,12 @@
 
 pkgname=indium
 pkgver=1.0.0
-pkgrel=1
+# The one place the package revision is written. make-deb.sh reads its Debian revision
+# out of this line, verify.sh builds both default artefact paths from it, and the release
+# workflow derives the tag it will accept from it — so the two packages cannot disagree
+# about which build they are, and a tag cannot be pushed over a tree that means a
+# different one. `2` is P10: the source changed, and the version did not.
+pkgrel=2
 pkgdesc="An archive manager for Linux on Wayland where the metadata is the main event."
 arch=('x86_64')
 url="https://github.com/sudo-megas/INDIUM"

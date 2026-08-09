@@ -81,7 +81,24 @@ const PKG_HINT: &str = "run `cd build/package && makepkg -f`, or point INDIUM_PK
 const DEB_HINT: &str = "run `./build/package/make-deb.sh target/release/indium`, or point \
                         INDIUM_DEB at the .deb CI built";
 
-/// The Arch package: `build/package/indium-<ver>-1-x86_64.pkg.tar.zst`, where makepkg
+/// The package revision, read out of the PKGBUILD's `pkgrel` at run time.
+///
+/// The same rule as the version below, one line further down the same file: the number is
+/// written once and read everywhere. It was a literal `1` in these two paths until P10
+/// bumped the revision, at which point both defaults would have pointed at artefacts that
+/// do not exist — and `artefact` panics with a hint about building one, which is a
+/// confusing way to be told the path was simply out of date.
+fn pkgrel() -> String {
+    let pkgbuild = Path::new(env!("CARGO_MANIFEST_DIR")).join("build/package/PKGBUILD");
+    let text = std::fs::read_to_string(&pkgbuild)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", pkgbuild.display()));
+    text.lines()
+        .find_map(|l| l.strip_prefix("pkgrel="))
+        .map(|v| v.trim().to_string())
+        .unwrap_or_else(|| panic!("no pkgrel in {}", pkgbuild.display()))
+}
+
+/// The Arch package: `build/package/indium-<ver>-<rel>-x86_64.pkg.tar.zst`, where makepkg
 /// writes it — beside the PKGBUILD, not in a subdirectory.
 ///
 /// The version comes from `CARGO_PKG_VERSION` so a version bump carries these tests with
@@ -94,21 +111,23 @@ fn pkg_path() -> PathBuf {
     artefact(
         "INDIUM_PKG",
         &format!(
-            "build/package/indium-{}-1-x86_64.pkg.tar.zst",
-            env!("CARGO_PKG_VERSION")
+            "build/package/indium-{}-{}-x86_64.pkg.tar.zst",
+            env!("CARGO_PKG_VERSION"),
+            pkgrel()
         ),
         PKG_HINT,
     )
 }
 
-/// The Debian package: `build/package/out/indium_<ver>-1_amd64.deb`, where
+/// The Debian package: `build/package/out/indium_<ver>-<rel>_amd64.deb`, where
 /// `build/package/make-deb.sh` writes it by default.
 fn deb_path() -> PathBuf {
     artefact(
         "INDIUM_DEB",
         &format!(
-            "build/package/out/indium_{}-1_amd64.deb",
-            env!("CARGO_PKG_VERSION")
+            "build/package/out/indium_{}-{}_amd64.deb",
+            env!("CARGO_PKG_VERSION"),
+            pkgrel()
         ),
         DEB_HINT,
     )

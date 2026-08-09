@@ -51,15 +51,22 @@ trap 'rm -rf "$tmp"' EXIT INT HUP TERM
 ver=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
 [ -n "$ver" ] || { echo "FAIL: no version in Cargo.toml" >&2; exit 2; }
 
+# The package revision, from the one line that holds it. Hardcoding `-1` here meant that
+# the day a revision was bumped, both default paths pointed at artefacts that no longer
+# existed and every check that opens a package would have gone to SKIP — which reads as
+# "nothing wrong" and is the worst way for a check to fail.
+rel=$(sed -n 's/^pkgrel=\([0-9][0-9]*\)$/\1/p' build/package/PKGBUILD | head -1)
+[ -n "$rel" ] || { echo "FAIL: no pkgrel in build/package/PKGBUILD" >&2; exit 2; }
+
 BIN=target/release/indium
-PKG=${INDIUM_PKG:-build/package/indium-${ver}-1-x86_64.pkg.tar.zst}
-DEB=${INDIUM_DEB:-build/package/out/indium_${ver}-1_amd64.deb}
+PKG=${INDIUM_PKG:-build/package/indium-${ver}-${rel}-x86_64.pkg.tar.zst}
+DEB=${INDIUM_DEB:-build/package/out/indium_${ver}-${rel}_amd64.deb}
 
 # Debian 12 bookworm ships glibc 2.36, and it is the oldest release the .deb targets.
 # Overridable, because the floor moves when the target does — and only then.
 TARGET_GLIBC=${DEB_TARGET_GLIBC:-2.36}
 
-echo "INDIUM package verification — version $ver"
+echo "INDIUM package verification — version $ver-$rel"
 echo "  pkg: $PKG"
 echo "  deb: $DEB"
 
@@ -437,7 +444,7 @@ elif [ -z "$ctrl" ]; then
 else
   field() { sed -n "s/^$1: //p" "$ctrl" | head -1; }
 
-  for f in "Package:indium" "Version:${ver}-1" "Architecture:amd64" \
+  for f in "Package:indium" "Version:${ver}-${rel}" "Architecture:amd64" \
            "Section:utils" "Priority:optional"; do
     name=${f%%:*} want=${f#*:} got=$(field "${f%%:*}")
     if [ "$got" = "$want" ]; then
@@ -574,7 +581,7 @@ else
   elif ! first=$(gzip -dc "$cl" 2>/dev/null | head -1); then
     bad "changelog.Debian.gz does not decompress"
   else
-    want="indium (${ver}-1) unstable; urgency=medium"
+    want="indium (${ver}-${rel}) unstable; urgency=medium"
     if [ "$first" = "$want" ]; then
       ok "changelog first line: $first"
     else
