@@ -10,6 +10,7 @@ pub mod about;
 pub mod extract;
 pub mod filter;
 pub mod inspector;
+pub mod keys;
 pub mod newarchive;
 pub mod openwith;
 pub mod password;
@@ -75,6 +76,7 @@ pub enum Popup {
     OpenPath,
     Password,
     OpenWith,
+    Keys,
 }
 
 /// What the file picker came back with, and what it had been opened for.
@@ -1829,6 +1831,7 @@ impl eframe::App for Indium {
         extract::show(self, &ctx);
         settings::show(self, &ctx);
         about::show(self, &ctx);
+        keys::show(self, &ctx);
         open_path_popup(self, &ctx);
         newarchive::show(self, &ctx);
         pending::show(self, &ctx);
@@ -1951,6 +1954,10 @@ impl Indium {
         // Set inside the input closure and acted on after it, because seeding the New
         // Archive popup needs `&mut self` methods the closure cannot hold.
         let mut new_archive = false;
+        // Same reason: `request_picker` takes `&mut self` and a `&Context`, and the closure
+        // is already holding the input lock the context would have to hand back.
+        let mut open_picker = false;
+        let mut add_picker = false;
 
         ctx.input(|i| {
             for ev in &i.events {
@@ -1967,9 +1974,23 @@ impl Indium {
                     continue;
                 }
                 match key {
-                    egui::Key::Num1 => self.section = Section::Recents,
+                    // CORE §4's order, and it moved in P12: the archive is `1` because
+                    // it is what a person is looking at. The numbers are literals in the
+                    // sidebar too (`sidebar.rs`), so these two lists have to be read
+                    // together — a key that disagrees with the label beside it is worse
+                    // than no key.
+                    egui::Key::Num1 => self.section = Section::Archive,
                     egui::Key::Num2 => self.section = Section::Bookmarks,
-                    egui::Key::Num3 => self.section = Section::Archive,
+                    egui::Key::Num3 => self.section = Section::Recents,
+                    // `O` opens the desktop's picker; `Ctrl+O` still opens the path field,
+                    // so the two readings of "open" sit on one letter with and without the
+                    // modifier. `I` adds into the directory the breadcrumb names — the same
+                    // call the *Add files…* button makes. `A` is About and could not move,
+                    // and `+` is `Shift+4` on the maker's own layout, so it is not a bare
+                    // key on the machine this is built on.
+                    egui::Key::O => open_picker = true,
+                    egui::Key::I => add_picker = true,
+                    egui::Key::F1 => self.popup = Some(Popup::Keys),
                     egui::Key::A => self.popup = Some(Popup::About),
                     egui::Key::Comma => self.popup = Some(Popup::Settings),
                     egui::Key::E => {
@@ -1997,6 +2018,12 @@ impl Indium {
 
         if new_archive {
             self.open_new_archive();
+        }
+        if open_picker {
+            self.request_picker(ctx, PickerFor::Open);
+        }
+        if add_picker && self.has_archive() {
+            self.request_picker(ctx, PickerFor::Add);
         }
 
         // Movement and descent, which need `rows`.

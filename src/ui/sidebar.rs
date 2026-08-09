@@ -1,12 +1,17 @@
 //! The sidebar — CORE §4's first zone.
 //!
-//! "the wordmark at top, then *Recent files* `1`, *Bookmarks* `2`, *Archive* `3`; at
-//! the bottom *New* `N`, *Settings* `,`, *About* `A`. Numbers and letters are bare
-//! keypresses, as in JADEITE."
+//! "the wordmark at top, then *Open file* `O` and *Archive* `1`; a rule; then
+//! *Bookmarks* `2` and *Recent files* `3`; at the bottom *New* `N`, *Settings* `,`,
+//! *About* `A`. Numbers and letters are bare keypresses, as in JADEITE."
+//!
+//! The order used to run the other way — *Recent files* first and *Archive* last — and a
+//! testing round said what was wrong with it in one line: *"as a person's first focus
+//! usually the archive he/she in."* The rule below the archive is from the same note.
 
 use eframe::egui;
 
 use super::{Indium, Popup, Section};
+use crate::platform::picker::PickerFor;
 use crate::theme;
 
 /// What the sidebar's contents get, and what P1 gave them: `190 − 12 − 12`.
@@ -83,11 +88,35 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     });
                     ui.add_space(12.0);
 
-                    section_item(ui, app, Section::Recents, "Recent files", "1", true);
+                    open_item(ui, app);
+                    section_item(ui, app, Section::Archive, "Archive", "1", app.has_archive());
+                    // CORE §4: "a rule". The archive is what you are inside; the two lists
+                    // are ways of getting somewhere else, and the line says which is which.
+                    // It is legible now — `theme::HAIRLINE` was 8% white and measured
+                    // 1.2:1, which is the *other* half of the note this order came from:
+                    // "The separator staying on the New button is so faded."
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(2.0);
                     section_item(ui, app, Section::Bookmarks, "Bookmarks", "2", true);
-                    section_item(ui, app, Section::Archive, "Archive", "3", app.has_archive());
+                    section_item(ui, app, Section::Recents, "Recent files", "3", true);
                 });
         });
+}
+
+/// *Open file* — a row that is an action rather than a section.
+///
+/// It sits with *Archive* above the rule because both are about the archive you are in or
+/// about to be in, and it raises the desktop's own picker through `xdg-desktop-portal`
+/// rather than a dialog INDIUM draws. `Ctrl+O`'s path field is unchanged and still there;
+/// this is the route for people who do not know a path by heart, which is what the first
+/// note back from testing asked for: *"we need an open file option ... must use xdg-portal
+/// file picker."*
+fn open_item(ui: &mut egui::Ui, app: &mut Indium) {
+    if row(ui, "Open file", "O", false, true, None).clicked() {
+        let ctx = ui.ctx().clone();
+        app.request_picker(&ctx, PickerFor::Open);
+    }
 }
 
 fn section_item(
