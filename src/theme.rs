@@ -4,7 +4,7 @@
 //! theme setting." Every value below is transcribed from that section; none of them is
 //! configurable, and CORE §9 forbids adding a control that would make them so.
 //!
-//! The typeface is JetBrains Mono NL Nerd Font, in two weights, and it is the only one:
+//! The typeface is Fira Mono Nerd Font, in two weights, and it is the only one:
 //! CORE §6 puts the whole window in monospace rather than splitting chrome from values,
 //! so chrome and values are told apart by weight and colour instead of by family.
 
@@ -116,13 +116,23 @@ pub const WARNING: Color32 = Color32::from_rgb(0xFF, 0xD8, 0x00);
 // the rule was "1px hairlines at 8% white, nothing thicker, anywhere", and the whole of
 // the maker's "section borders are not obvious" is that sentence being obeyed.
 
-/// 1px at 8% white — every rule *inside* a zone: beneath a heading, above a footer.
-pub const HAIRLINE: Color32 = Color32::from_rgba_premultiplied(0x14, 0x14, 0x14, 0x14);
+/// 1px at 20% white — every rule *inside* a zone: beneath a heading, above a footer,
+/// between the archive and the two lists.
+///
+/// **It was 8%, and 8% is invisible.** Composited it measured 1.18–1.27:1 over the grounds,
+/// which is to say it measured nothing, and two separate testing notes said so in the same
+/// round — *"the separator staying on the New button is so faded. cant distinguish it"* and
+/// the same complaint again about the rule under the filter bar. A rule is 1px so it does
+/// not compete with an edge, not so that it cannot be seen. At 20% it clears **1.68:1 on
+/// the worst ground it is drawn on**, and CORE §6 makes that floor a rule; `a_rule_can_be_seen`
+/// is the test that holds it there. It stays under [`EDGE`]'s 22% so the two weights are
+/// still two weights and not one weight at two thicknesses.
+pub const HAIRLINE: Color32 = Color32::from_rgba_premultiplied(0x33, 0x33, 0x33, 0x33);
 /// 2px at 22% white — every boundary *around* a zone, a popup or a control.
 ///
-/// Composited over the six grounds it measures **1.88–1.95:1**, where the hairline manages
-/// **1.18–1.23:1**. These are translucent, so the figure is the composite against each
-/// ground and not the raw byte value, which would mean nothing at all.
+/// Composited over the six grounds it measures **1.88–1.95:1**. These are translucent, so
+/// the figure is the composite against each ground and not the raw byte value, which would
+/// mean nothing at all.
 pub const EDGE: Color32 = Color32::from_rgba_premultiplied(0x38, 0x38, 0x38, 0x38);
 /// The same boundary under the pointer, or while a control is held: **3.26–3.74:1** over the
 /// six grounds, and **2.81:1** over Aubergine, which is the ground a hovered control has.
@@ -180,6 +190,19 @@ pub const R_ZONE: u8 = 0;
 pub const R_CTRL: u8 = 3;
 /// Popups, menus, the modal.
 pub const R_POPUP: u8 = 10;
+/// A control's ends are semicircles. CORE §6: *"Controls are capsules."*
+///
+/// The same number as [`R_POPUP`], and that is the point rather than an accident, because it
+/// is what keeps the vocabulary at three values and no fourth. A control's height floor is
+/// `interact_size.y` = [`SB_ROW`] = 20, so half of it is 10; and epaint clamps a corner
+/// radius to half the rect it is drawn in (`clamp_corner_radius`), so the same 10 is still a
+/// true pill on a `small()` button, which is shorter. One number, a pill at every height.
+///
+/// It is applied **at the control**, never in [`install_visuals`]. `widgets.inactive`,
+/// `.hovered` and `.active` are also what a `TextEdit`, a checkbox and the status bar's
+/// progress track draw through; moving the constant there would turn the path field into a
+/// lozenge, and §6 gives the capsule to things you press.
+pub const R_PILL: u8 = R_POPUP;
 
 // --- Spacing ------------------------------------------------------------------
 
@@ -256,6 +279,18 @@ pub fn active_fill(ui: &mut egui::Ui) {
     v.selection.bg_fill = AUBERGINE;
     v.widgets.hovered.weak_bg_fill = CONTROL;
     v.widgets.hovered.bg_fill = CONTROL;
+    // CORE §6 gives the capsule to "a button, a chip, *Cancel* — anything you press", and a
+    // preset chip and an Inspector tab are pressed. A `selectable_label` takes its shape from
+    // the widget state rather than from a builder, so unlike [`button`] the radius has to be
+    // set here; this scope is the same clone-on-write child the fills above live in, so it
+    // reaches the chips and nothing else.
+    for w in [
+        &mut v.widgets.inactive,
+        &mut v.widgets.hovered,
+        &mut v.widgets.active,
+    ] {
+        w.corner_radius = R_PILL.into();
+    }
 }
 
 /// CORE §6: "monospace for every value — sizes, checksums, paths, the whole Inspector.
@@ -277,16 +312,21 @@ pub const SANS: FontFamily = FontFamily::Proportional;
 /// which this theme sets to the same `TEXT` that `override_text_color` already forces, so
 /// `.strong()` renders identically to ordinary text and always did.
 pub fn bold() -> FontFamily {
-    FontFamily::Name("jetbrains-bold".into())
+    FontFamily::Name("fira-bold".into())
 }
 
 /// Embed the typeface and make it the only one.
 ///
 /// The files are bundled assets, not dependencies (CORE §2), under the SIL Open Font
-/// Licence 1.1 in `LICENSES/`. `NL` is the no-ligature cut: a filename holding `->` or
-/// `!=` must render as the bytes the archive stores, not as the glyph a programmer's font
-/// would rather show. `…NerdFontMono…` is the single-cell icon cut, so an icon occupies
-/// one column and the entry table stays aligned.
+/// Licence 1.1 in `LICENSES/`. Fira Mono carries **no ligatures at all** — that is Fira
+/// *Code*'s job, and this is not Fira Code — so a filename holding `->` or `!=` renders as
+/// the bytes the archive stores and cannot do otherwise. `…NerdFontMono…` is the
+/// single-cell icon cut, so an icon occupies one column and the entry table stays aligned.
+///
+/// These are OTF, with CFF outlines, where the face before them was TrueType. egui
+/// rasterizes through Fontations — `skrifa`, `read-fonts`, `harfrust` — which reads CFF
+/// natively, so the format is not a special case. `assets/fonts/README.md` records the
+/// provenance and the measured coverage of both faces.
 pub fn install_fonts(ctx: &egui::Context) {
     // `empty()`, not `default()`. `eframe` is built without `default_fonts`, so
     // `default()` already returns nothing — but it returns nothing *by side effect of a
@@ -294,36 +334,38 @@ pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::empty();
 
     fonts.font_data.insert(
-        "jetbrains".to_owned(),
+        "fira".to_owned(),
         Arc::new(FontData::from_static(include_bytes!(
-            "../assets/fonts/JetBrainsMonoNLNerdFontMono-Regular.ttf"
+            "../assets/fonts/FiraMonoNerdFontMono-Regular.otf"
         ))),
     );
     fonts.font_data.insert(
-        "jetbrains-bold".to_owned(),
+        "fira-bold".to_owned(),
         Arc::new(FontData::from_static(include_bytes!(
-            "../assets/fonts/JetBrainsMonoNLNerdFontMono-Bold.ttf"
+            "../assets/fonts/FiraMonoNerdFontMono-Bold.otf"
         ))),
     );
 
     // One face in both default families, because CORE §6 puts the whole window in
     // monospace. There is no fallback behind it and no pretending otherwise: this face
-    // carries 12,218 codepoints — Latin, the arrows and box-drawing, and some ten
-    // thousand Nerd icons — but no CJK and no emoji, so a filename in Japanese or with an
-    // emoji in it renders as tofu. That is the honest cost of embedding one face and
-    // linking no fontconfig, and it is stated here so it is a known limit, not a bug
-    // report waiting to happen.
+    // carries 12,132 codepoints — Latin including the whole Turkish set, Greek, Cyrillic,
+    // the arrows and box-drawing, and some ten thousand Nerd icons — but no CJK, no emoji,
+    // and no Vietnamese, so a filename using those renders as tofu. That is the honest
+    // cost of embedding one face and linking no fontconfig, and it is stated here so it is
+    // a known limit, not a bug report waiting to happen. A glyph the face cannot draw is
+    // still a name INDIUM read correctly and will write back correctly; since P11 the
+    // reading does not depend on the drawing.
     for family in [FontFamily::Proportional, FontFamily::Monospace] {
         fonts
             .families
             .entry(family)
             .or_default()
-            .insert(0, "jetbrains".to_owned());
+            .insert(0, "fira".to_owned());
     }
 
     fonts.families.insert(
-        FontFamily::Name("jetbrains-bold".into()),
-        vec!["jetbrains-bold".to_owned(), "jetbrains".to_owned()],
+        FontFamily::Name("fira-bold".into()),
+        vec!["fira-bold".to_owned(), "fira".to_owned()],
     );
 
     ctx.set_fonts(fonts);
@@ -631,7 +673,7 @@ pub fn foot(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
 /// weight stays matched; only the fill and the ink say the button is off.
 pub fn button(ui: &mut egui::Ui, text: egui::RichText, enabled: bool) -> egui::Response {
     if enabled {
-        let r = ui.add(egui::Button::new(text));
+        let r = ui.add(egui::Button::new(text).corner_radius(R_PILL));
         if r.clicked() {
             r.surrender_focus();
         }
@@ -640,6 +682,7 @@ pub fn button(ui: &mut egui::Ui, text: egui::RichText, enabled: bool) -> egui::R
         ui.add_enabled(
             false,
             egui::Button::new(text.color(TEXT_MUTED))
+                .corner_radius(R_PILL)
                 .fill(Color32::TRANSPARENT)
                 .stroke(edge()),
         )
@@ -666,7 +709,7 @@ pub fn small_button(ui: &mut egui::Ui, text: egui::RichText, enabled: bool) -> e
     v.widgets.active.expansion = 0.0;
 
     let r = if enabled {
-        let r = scoped.add(egui::Button::new(text).small());
+        let r = scoped.add(egui::Button::new(text).small().corner_radius(R_PILL));
         if r.clicked() {
             r.surrender_focus();
         }
@@ -676,6 +719,7 @@ pub fn small_button(ui: &mut egui::Ui, text: egui::RichText, enabled: bool) -> e
             false,
             egui::Button::new(text.color(TEXT_MUTED))
                 .small()
+                .corner_radius(R_PILL)
                 .fill(Color32::TRANSPARENT)
                 .stroke(edge()),
         )
@@ -800,6 +844,54 @@ mod tests {
         ("POPUP", POPUP),
         ("CONTROL", CONTROL),
     ];
+
+    /// Composite a premultiplied translucent white over an opaque ground.
+    ///
+    /// The palette's lines are translucent, so their declared byte value means nothing on
+    /// its own — what a person sees is this, and it is what the figures are measured on.
+    fn composite(over: Color32, ground: Color32) -> Color32 {
+        let a = over.a() as f32 / 255.0;
+        let mix = |o: u8, g: u8| (o as f32 + g as f32 * (1.0 - a)).round() as u8;
+        Color32::from_rgb(
+            mix(over.r(), ground.r()),
+            mix(over.g(), ground.g()),
+            mix(over.b(), ground.b()),
+        )
+    }
+
+    /// CORE §6: a rule "clears **1.6:1 against the ground it is drawn on**, and that floor is
+    /// a test, not an intention."
+    ///
+    /// This is that test. [`HAIRLINE`] spent eight milestones at 8% white, where it measured
+    /// 1.18–1.27:1 — close enough to nothing that two separate notes in one testing round
+    /// reported the rule above *New* and the rule under the filter bar as simply absent. The
+    /// figure is easy to lose again by eye, because 8% and 20% white look much the same in a
+    /// hex literal and not at all the same on a screen.
+    ///
+    /// Aubergine is in the list because a rule can be drawn inside a hovered row, which is
+    /// the lightest ground any line in this program meets and therefore the worst case.
+    #[test]
+    fn a_rule_can_be_seen() {
+        for (name, ground) in GROUNDS.iter().chain([&("AUBERGINE", AUBERGINE)]) {
+            let seen = contrast(composite(HAIRLINE, *ground), *ground);
+            assert!(
+                seen >= 1.6,
+                "a rule on {name} measures {seen:.2}:1, under the 1.6:1 CORE §6 sets"
+            );
+        }
+    }
+
+    /// The other half of *two weights and no third*: a rule must stay quieter than an edge,
+    /// or the hierarchy is a thickness difference and nothing else.
+    #[test]
+    fn a_rule_is_quieter_than_an_edge() {
+        assert!(
+            HAIRLINE.a() < EDGE.a(),
+            "the rule ({}) is not lighter than the edge ({})",
+            HAIRLINE.a(),
+            EDGE.a()
+        );
+    }
 
     fn visuals() -> egui::Visuals {
         let ctx = egui::Context::default();
