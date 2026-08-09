@@ -1537,40 +1537,67 @@ pub fn archive_stem(path: &std::path::Path) -> String {
 
 /// Did this frame carry `Ctrl+C`, and did it carry `Ctrl+V`?
 ///
-/// Asked of the event list rather than of `key_pressed`, because a clipboard chord is
-/// not a key by the time it arrives. `egui-winit-0.36.1/src/lib.rs` matches the three
-/// clipboard chords before it emits anything, pushes `Event::Copy` / `Event::Cut` /
-/// `Event::Paste` instead, and **returns** — the `Key` event is never produced at all.
-/// Code that watches `Key::C` therefore sees nothing, for every `Ctrl+C` ever pressed.
+/// The clipboard chords, read off the event list on the **key's release**.
 ///
-/// That is not a missing shortcut. `Ctrl+C` is the *only* entry point copy-out has, so
-/// from P3 until here CORE §4's copy-out and paste-to-stage were unreachable in a
-/// shipped binary — the drop half of paste, which comes in on a different path
-/// entirely, was the only part of either that ever ran.
+/// P10 found half of this and drew the wrong conclusion from it, so the whole of it is
+/// written down here. `egui-winit-0.36.1/src/lib.rs:1019` matches the three clipboard
+/// chords before it emits anything and returns early, so the `Key` event is never
+/// produced and `key_pressed(Key::C)` is permanently false. P10 answered that by taking
+/// `Event::Copy` and `Event::Paste` instead, and shipped `v1.0.0-2` claiming both chords
+/// worked.
 ///
-/// Both spellings are accepted. A future egui that stops swallowing the chord would
-/// otherwise kill the feature a second time in exactly the same way, and since these
-/// are `bool`s, an egui that emits *both* forms still acts once.
+/// Only copy did. The paste arm is not the same shape as the other two:
 ///
-/// `Event::Cut` is deliberately not answered: CORE §4's table has no `Ctrl+X`, and an
-/// archive manager that cuts is one that deletes on a paste that may never come.
+/// ```text
+/// } else if is_paste_command(self.modifiers, active_key) {
+///     if let Some(contents) = self.clipboard.get() {
+///         ...push Event::Paste(contents)
+///     }
+///     return;          // <- outside the `if let`
+/// }
+/// ```
+///
+/// `clipboard.get()` returns text or nothing. A file manager copying a *file* offers
+/// `text/uri-list` and no plain text at all, so it returns `None`, **no event of any kind
+/// is pushed**, and the `Key::V` is swallowed on the way past. There is nothing left in
+/// the frame to notice. P10's speculative `Key` arm could never have fired, because the
+/// early return is exactly what stops that key existing.
+///
+/// What survives is the **release**. egui-winit guards the whole interception with
+/// `if pressed`, so `Key { key: V, pressed: false }` is emitted normally, for every
+/// clipboard state there is. One signal, one per chord, no dependence on what the
+/// clipboard happens to hold.
+///
+/// `Event::Copy` and `Event::Paste` are deliberately *not* also accepted. Answering both
+/// a press-form and a release-form fires the action twice whenever the clipboard does
+/// carry text, and `paste_rx.is_some()` is no guard against it — the read finishes long
+/// before a human lifts the key.
+///
+/// The one case this cannot see is `Ctrl` released before the letter, which leaves a
+/// release with no modifier on it and is indistinguishable from a bare keypress. That is
+/// the opposite of how a chord is normally let go.
+///
+/// `Ctrl+X` is deliberately not answered: CORE §4's table has no cut, and an archive
+/// manager that cuts is one that deletes on a paste that may never come.
 fn clipboard_chords(events: &[egui::Event]) -> (bool, bool) {
     let mut copy = false;
     let mut paste = false;
     for ev in events {
-        match ev {
-            egui::Event::Copy => copy = true,
-            egui::Event::Paste(_) => paste = true,
-            egui::Event::Key {
-                key,
-                pressed: true,
-                modifiers,
-                ..
-            } if modifiers.ctrl || modifiers.command => match key {
-                egui::Key::C => copy = true,
-                egui::Key::V => paste = true,
-                _ => {}
-            },
+        let egui::Event::Key {
+            key,
+            pressed: false,
+            modifiers,
+            ..
+        } = ev
+        else {
+            continue;
+        };
+        if !(modifiers.ctrl || modifiers.command) {
+            continue;
+        }
+        match key {
+            egui::Key::C => copy = true,
+            egui::Key::V => paste = true,
             _ => {}
         }
     }
@@ -1662,6 +1689,21 @@ impl Indium {
     fn handle_keys(&mut self, ctx: &egui::Context, rows: &[Row]) {
         let typing = ctx.memory(|m| m.focused().is_some());
 
+        // `focused()` is true of a `TextEdit` and of nothing else. A **label** with a live
+        // text selection never takes focus, so `typing` is false while the user is dragging
+        // across the status bar — and P10's `Ctrl+C` then started an extraction underneath
+        // someone who had asked for four words of a path. egui is already copying that
+        // selection itself; all this has to do is not also copy the archive out.
+        //
+        // It guards `Ctrl+C` alone rather than joining `typing`. Widening `typing` would
+        // switch off every bare-letter shortcut in CORE §4's table for as long as a
+        // selection existed anywhere in the window, which is a second bug wearing the
+        // first one's clothes.
+        let selecting_text = ctx
+            .plugin::<egui::text_selection::LabelSelectionState>()
+            .lock()
+            .has_selection();
+
         // `Esc` has a fixed priority, set by P2 §4 "for good": a focused filter bar
         // clears and closes first; then the topmost popup; then nothing.
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -1715,7 +1757,7 @@ impl Indium {
         if ctrl_a && self.has_archive() && !typing {
             self.selection = rows.iter().map(|r| r.path.clone()).collect();
         }
-        if ctrl_c && self.has_archive() && !typing {
+        if ctrl_c && self.has_archive() && !typing && !selecting_text {
             self.copy_out(ctx, rows);
         }
         if ctrl_v && self.has_archive() && !typing {
@@ -2285,47 +2327,73 @@ mod tests {
         );
     }
 
-    fn ctrl(key: egui::Key) -> egui::Event {
+    fn key(key: egui::Key, pressed: bool, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::Key {
             key,
             physical_key: None,
-            pressed: true,
+            pressed,
             repeat: false,
-            modifiers: egui::Modifiers::CTRL,
+            modifiers,
         }
     }
 
-    /// The bug that shipped in `v1.0`, as a test.
-    ///
-    /// This is the exact event list egui-winit produces for `Ctrl+C`: the `Copy` and no
-    /// `Key` beside it. `v1.0` asked `key_pressed(Key::C)` of this and got `false`,
-    /// which is why copy-out had no reachable entry point at all.
-    #[test]
-    fn the_copy_chord_is_answered_when_it_arrives_without_its_key() {
-        assert_eq!(clipboard_chords(&[egui::Event::Copy]), (true, false));
+    /// Held down: what egui-winit emits on the way *down*, which is nothing we may use.
+    fn down(k: egui::Key) -> egui::Event {
+        key(k, true, egui::Modifiers::CTRL)
     }
 
-    /// The other half, and the reason `Event::Paste` carries a payload we ignore:
-    /// `request_paste` does its own `text/uri-list` read, so all this has to notice is
-    /// that the chord happened.
+    /// Let go: the only signal that survives every clipboard state.
+    fn up(k: egui::Key) -> egui::Event {
+        key(k, false, egui::Modifiers::CTRL)
+    }
+
+    /// The bug `v1.0.0-2` did **not** fix, as a test.
+    ///
+    /// This is the exact event list egui-winit produces for `Ctrl+V` when a file manager
+    /// has copied a *file*: the clipboard offers `text/uri-list` and no plain text, so
+    /// `clipboard.get()` returns `None`, the `Paste` is never pushed, and the early
+    /// return eats the `Key` as well. The whole press is empty. P10 watched the press and
+    /// therefore shipped paste-to-stage still dead.
     #[test]
-    fn the_paste_chord_is_answered_when_it_arrives_without_its_key() {
+    fn the_paste_chord_is_read_on_release_because_the_press_is_empty() {
+        assert_eq!(clipboard_chords(&[]), (false, false), "the press: nothing");
+        assert_eq!(clipboard_chords(&[up(egui::Key::V)]), (false, true));
+    }
+
+    /// Copy is read the same way, though its press does carry `Event::Copy`. One rule for
+    /// both chords is worth more than a rule per chord that happens to work today.
+    #[test]
+    fn the_copy_chord_is_read_on_the_same_signal() {
+        assert_eq!(clipboard_chords(&[up(egui::Key::C)]), (true, false));
+    }
+
+    /// The press forms must be ignored, and this is the test that says why.
+    ///
+    /// When the clipboard *does* hold text, egui-winit pushes `Event::Paste` on the way
+    /// down **and** the release still arrives on the way up. Answering both would stage
+    /// the same paste twice, and `paste_rx.is_some()` cannot prevent it — the clipboard
+    /// read is finished long before a key comes back up.
+    #[test]
+    fn a_press_never_acts_so_a_text_clipboard_cannot_act_twice() {
+        assert_eq!(clipboard_chords(&[egui::Event::Copy]), (false, false));
         assert_eq!(
             clipboard_chords(&[egui::Event::Paste("/tmp/whatever".to_string())]),
-            (false, true)
+            (false, false)
         );
+        assert_eq!(clipboard_chords(&[down(egui::Key::C)]), (false, false));
+        assert_eq!(clipboard_chords(&[down(egui::Key::V)]), (false, false));
     }
 
-    /// An egui that stopped swallowing the chord must not kill the feature a second
-    /// time — and one that emits both spellings at once must not act twice.
+    /// One whole chord, in the order a window actually receives it, acts exactly once.
     #[test]
-    fn either_spelling_of_the_chord_is_answered_exactly_once() {
-        assert_eq!(clipboard_chords(&[ctrl(egui::Key::C)]), (true, false));
-        assert_eq!(clipboard_chords(&[ctrl(egui::Key::V)]), (false, true));
-        assert_eq!(
-            clipboard_chords(&[egui::Event::Copy, ctrl(egui::Key::C)]),
-            (true, false)
-        );
+    fn a_complete_chord_acts_exactly_once() {
+        let frame = [
+            egui::Event::Paste("/tmp/whatever".to_string()),
+            down(egui::Key::V),
+            up(egui::Key::V),
+            key(egui::Key::V, false, egui::Modifiers::NONE),
+        ];
+        assert_eq!(clipboard_chords(&frame), (false, true));
     }
 
     /// `Ctrl+X` is not in CORE §4's table, and a bare `C` is a shortcut for nothing.
@@ -2333,15 +2401,9 @@ mod tests {
     #[test]
     fn nothing_else_is_mistaken_for_a_clipboard_chord() {
         assert_eq!(clipboard_chords(&[egui::Event::Cut]), (false, false));
-        assert_eq!(clipboard_chords(&[ctrl(egui::Key::X)]), (false, false));
+        assert_eq!(clipboard_chords(&[up(egui::Key::X)]), (false, false));
         assert_eq!(
-            clipboard_chords(&[egui::Event::Key {
-                key: egui::Key::C,
-                physical_key: None,
-                pressed: true,
-                repeat: false,
-                modifiers: egui::Modifiers::NONE,
-            }]),
+            clipboard_chords(&[key(egui::Key::C, false, egui::Modifiers::NONE)]),
             (false, false)
         );
         assert_eq!(clipboard_chords(&[]), (false, false));
