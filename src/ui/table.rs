@@ -78,8 +78,13 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
     // Scoped, and never global. `widgets.hovered.bg_fill` is what `egui_extras` paints a
     // hovered row with, and it is also the fill behind a hovered checkbox and a hovered
     // slider rail — setting it in `install_visuals` would wash all three. And it is
-    // deliberately `ROW_HOVER` rather than `AUBERGINE`: Aubergine means *the active item*,
-    // and a full-height table where every row you pass turns Aubergine says nothing.
+    // deliberately `ROW_HOVER` rather than `AUBERGINE`. CORE §6 gives Aubergine the
+    // pointer's resting place and names this table as the one exception, which is what
+    // the exception is for: a sidebar has six rows and a hover is an event, while this
+    // list is full-height and virtualised, so a pointer crossing it would flare Aubergine
+    // at 1.72:1 over the ground on row after row. `ROW_HOVER` is the same meaning at a
+    // weight a hundred rows can carry, and it stays out of the way of the two signals
+    // that matter here — the orange selection wash and the cursor's edge.
     //
     // `selectable_labels` off is the other half, and without it this whole section is
     // dead. egui's default is `true`, which makes every plain `ui.label` allocate with
@@ -152,8 +157,8 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                         } else {
                             row.display.clone()
                         };
-                        // `F2` turns this cell into a text field rather than opening an
-                        // eighth popup — CORE §4 fixes the count at seven. A focused field
+                        // `F2` turns this cell into a text field rather than opening a
+                        // tenth popup — CORE §4 fixes the count at nine. A focused field
                         // also makes the existing `typing` guard suppress bare keys, so
                         // `Del` cannot fire into a half-typed name.
                         if app.rename_target.as_deref() == Some(row.path.as_str()) {
@@ -347,8 +352,8 @@ fn breadcrumb_bar(app: &mut Indium, ui: &mut egui::Ui) {
                 // adds *to where the breadcrumb says you are*, which is the one placement
                 // that needs no explanation.
                 //
-                // CORE §4 does not list it. `build/docs/P11.md` orders the edit; the maker
-                // lands CORE changes in his own hand, as with every zone since P6.
+                // CORE §4 lists it, as `build/docs/P11.md` ordered; the maker landed the
+                // change in his own hand, as with every zone since P6.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if theme::small_button(ui, egui::RichText::new("Add files…"), true)
                         .on_hover_text("Choose files to stage into this directory")

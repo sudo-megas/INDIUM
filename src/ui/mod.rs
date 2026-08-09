@@ -1,9 +1,10 @@
 //! The window: sidebar, table, Inspector, status bar, and every popup.
 //!
-//! CORE §4: "Five fixed zones and seven popups. Nothing else appears, ever." P2 §5 added
+//! CORE §4: "Five fixed zones and nine popups. Nothing else appears, ever." P2 §5 added
 //! the password prompt by the maker's ordered CORE edit; P4 fills in the two the count
 //! always allowed for — New Archive and Pending tasks — and puts rename in the table
-//! rather than making it an eighth.
+//! rather than making it another. P12 numbers the two §4 had been running without: Open,
+//! which the keyboard table has carried since P1, and Keys.
 
 pub mod about;
 pub mod extract;
@@ -54,15 +55,16 @@ pub enum InspectorTab {
     Preview,
 }
 
-/// The popups — eight of them, and this is all of them: rename happens in the table
+/// The popups — nine of them, and this is all of them: rename happens in the table
 /// rather than in another popup.
 ///
-/// CORE §4's numbered list stops at seven and does not carry `OpenPath`. But §4's keyboard
-/// table has carried `Ctrl+O` since P1, and the window behind it has been a real
+/// CORE §4's numbered list once stopped at seven and did not carry `OpenPath`, while §4's
+/// keyboard table had carried `Ctrl+O` since P1 and the window behind it had been a real
 /// `egui::Window` for just as long: the document ordered the mechanism and forgot to
-/// number the window it opens. This comment used to claim seven and count eight, which is
-/// the wrong half to leave standing. `build/docs/P6.md` orders the matching CORE §4 edit —
-/// the maker lands CORE changes in his own hand.
+/// number the window it opens. This comment used to claim seven and count eight, which was
+/// the wrong half to leave standing. P12 applied the edit `build/docs/P6.md` ordered, so
+/// Open is numbered eighth, and added `Keys` as the ninth — the list is now the same length
+/// in both places.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Popup {
     NewArchive,
@@ -193,7 +195,7 @@ pub struct Indium {
     /// archive changed on disk underneath it.
     pub staged_against: Vec<String>,
     /// `Some(path)` while a name is being edited in place. CORE §4 fixes the popup count
-    /// at seven, so rename is not an eighth.
+    /// at nine, so rename is not a tenth.
     pub rename_target: Option<String>,
     pub rename_input: String,
 
@@ -991,8 +993,8 @@ impl Indium {
         }
     }
 
-    /// `F2` — begin editing a name in the table. CORE §4 fixes the popup count at seven,
-    /// so this is not an eighth popup; it is the Name cell becoming a text field.
+    /// `F2` — begin editing a name in the table. CORE §4 fixes the popup count at nine,
+    /// so this is not a tenth popup; it is the Name cell becoming a text field.
     pub fn begin_rename(&mut self, rows: &[Row]) {
         if !self.has_archive() {
             return;

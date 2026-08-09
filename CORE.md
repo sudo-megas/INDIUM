@@ -61,10 +61,12 @@ No GTK. No Qt. No KF6. No portal. `build/check-deps.sh` runs
 `ldd target/release/indium` and fails if the output contains `gtk`, `Qt`, `KF6`, `X11`,
 or `portal`. It runs by hand until V1.4 wires it into CI, and it runs before every release.
 
-Bundled assets, not dependencies: JetBrains Mono NL Nerd Font, regular and bold, embedded
-in the binary, with the SIL Open Font Licence 1.1 alongside the GPL in `LICENSES/`. `NL`
-is the no-ligature cut, because a filename holding `->` must render as the two characters
-the archive stores.
+Bundled assets, not dependencies: Fira Mono Nerd Font Mono, regular and bold, embedded in
+the binary, with the SIL Open Font Licence 1.1 alongside the GPL in `LICENSES/`. Fira Mono
+carries **no ligatures at all**, which is the property that matters here — a filename
+holding `->` must render as the two characters the archive stores, and a face that cannot
+form the ligature cannot get that wrong. `Mono` is the single-cell icon cut, so a glyph in
+a name never widens a table column.
 
 ---
 
@@ -92,11 +94,17 @@ ends. They are never written to settings, recents, or anywhere else.
 
 ## 4. THE WINDOW
 
-Five fixed zones and eight popups. Nothing else appears, ever.
+Five fixed zones and nine popups. Nothing else appears, ever.
 
-**Sidebar** (family style): the wordmark at top, then *Recent files* `1`, *Bookmarks* `2`,
-*Archive* `3`; at the bottom *New* `N`, *Settings* `,`, *About* `A`. Numbers and letters
-are bare keypresses, as in JADEITE.
+**Sidebar** (family style): the wordmark at top, then *Open file* `O` and *Archive* `1`; a
+rule; then *Bookmarks* `2` and *Recent files* `3`; at the bottom *New* `N`, *Settings* `,`,
+*About* `A`. Numbers and letters are bare keypresses, as in JADEITE.
+
+The archive sits above the rule and the two lists below it because the first thing a person
+looks for is the archive they are already inside — the order used to run the other way, and a
+testing round said so plainly. *Open file* keeps the archive's company for the same reason: it
+is how you get into one. The rule is a rule and not a gap; §6 fixes what it has to be to be
+seen.
 
 **Entry table**: virtualized; columns Name, Size, Packed, Method; a breadcrumb path above
 it, with *Add files…* at the far end of that row — the picker adds into the directory the
@@ -125,13 +133,30 @@ nothing is running, because an empty row must still say something. The bar carri
 its own: `#EEEEEC` on Ubuntu Orange measures 2.4:1, so the phase and the count are read beside
 it and never on it.
 
+Three rows of fixed height is not the same as three rows anyone can read, and the first testing
+round said the bar *"looks like a mess. Cant really track whats going on there."* It was right:
+ten fields in one size, one weight and three greys, with nothing to say which mattered. So the
+bar has a hierarchy, and it is part of this document rather than a matter of taste:
+
+- **One thing per row is the subject, and it is bold.** The archive's name on the first row, the
+  entry count on the second, the phase on the third. Everything else on that row is its
+  qualifier, and secondary.
+- **A rule separates the rows.** They are three statements, not one paragraph in three pieces.
+- **Numbers hold their columns.** Sizes, counts and ratios are right-aligned to fixed positions
+  and do not move as their digits change; a number that jumps as it counts cannot be read while
+  it counts.
+- **A failure is `#FFD800`.** What INDIUM says is the only text in the window that reports both
+  triumph and disaster in the same place, and until now it reported them in the same colour.
+  Warning is already the document's word for *something has gone wrong*, and this is that.
+  A refusal is a failure; a confirmation is not.
+
 ### The popups
 
 1. **New Archive** (`N`). A subwindow, Clonezilla in content, and wearing the popup's own
-   three grounds rather than the window's. An
-   instruction line at top ("Choose how INDIUM should compress. If unsure, keep the
-   default."). Four preset chips — *Fastest*, *Balanced* (default), *Smallest*,
-   *Encrypted* — each highlighting a row in the method list below, where **every method
+   three grounds rather than the window's. An instruction line at top ("Choose how INDIUM
+   should compress. If unsure, keep the default."). Four preset chips — *Fastest*,
+   *Balanced* (default), *Smallest*, *Encrypted* — each highlighting a row in the method
+   list below, where **every method
    carries its one-sentence verdict** (§5). An *Advanced* disclosure holds the level
    slider. At the foot, a live sentence states exactly what will be built:
    *"Building photos-2026.7z — 7z, LZMA2:19, AES-256."*
@@ -150,13 +175,20 @@ it and never on it.
    raising the desktop's own picker through `xdg-desktop-portal`, and the only popup that
    is not about the archive already open. Naming an archive this window does not hold
    opens it in a window of its own, per §1.
+9. **Keys** (`F1`). The table below, drawn in the window. It exists because a person who had
+   used the program for an afternoon wrote *"I didn't know `Ctrl+O` opens a file, and still
+   don't know how to exit from the archive"* — a program whose whole interface is bare
+   keypresses owes the reader the list. It is **generated from the bindings, never typed
+   twice**: a keys popup that has drifted from the keys is worse than no keys popup.
 
 ### Keyboard
 
 | Key | Does |
 | --- | --- |
 | `1` `2` `3` | Sidebar sections |
+| `O` / `I` | Open file · Add files — both raise the desktop's own picker |
 | `N` `W` `E` `A` `,` | New Archive · Pending tasks · Extract · About · Settings |
+| `F1` | Keys — this table, in the window |
 | Arrows, `PgUp/PgDn`, `Home/End` | Move in the table |
 | `Enter` / `Backspace` | Descend / go up |
 | `Space` | Details ⇄ Preview |
@@ -216,17 +248,27 @@ contrast where a surface has to be told apart from the surface it covers, not de
 | --- | --- |
 | Base | Six grounds in aubergine, darkest first: `#180412` the gutter every zone floats in · `#24071B` the status bar · `#300A24` the wells — the entry table, text fields, the progress track · `#3D0D2E` the raised zones — sidebar, Inspector, tray · `#571342` the resting face of a control, so a button reads the same wherever it stands. Each about one and a half times the linear luminance of the one below it. A popup is not on this ladder at all — see the Popup row. |
 | Popup | Not aubergine, and deliberately: a popup covers every zone, and five milestones proved that a sixth shade of the window's own colour reads as the window slightly lit rather than as a different kind of surface. Three grounds, in steel blue at the luminance the aubergine popup used to have — `#02173F` the band across the top, naming it · `#132A3D` the body · `#00133A` the band across the foot, carrying what is about to happen, and the darkest of the three so Orange has the most to push against. Scaled from `#0F52BA` / `#4682B4` / `#0047AB` by a single constant on linear RGB, which preserves the hue exactly and spends only the lightness: as picked, the body measured 1.44:1 against muted text, and no ink — not even pure white, at 4.11:1 — could have been read on it. |
-| Structure | Canonical Aubergine `#772953` — selection context, the active item, and whatever the pointer is resting on; `#8F3164` the same colour with the light on, alive only for as long as a control is held down. One meaning at two intensities, never two meanings. |
+| Structure | Canonical Aubergine `#772953` — selection context, the active item, and whatever the pointer is resting on; `#8F3164` the same colour with the light on, alive only for as long as a control is held down. One meaning at two intensities, never two meanings. **The entry table is the one exception**, and deliberately: it is full-height and virtualised, so a pointer crossing it would flare Aubergine on row after row where a sidebar flares once. There the pointer's place is a 7% white wash instead — the same meaning at a weight a hundred rows can carry. |
 | Accent | Ubuntu Orange `#E95420` — reserved for exactly three meanings: the current selection, staged changes, and Apply/progress. Orange means *something will happen.* |
 | Text | `#EEEEEC` primary · `#BDBDBB` secondary · `#999997` muted |
 | Warning | `#FFD800` — and only where something has gone wrong: a wrong password, two passwords that differ, a settings file that would not parse. It is not an accent and never decorates. |
-| Lines | Two weights and no third. **Inside** a zone, a 1px hairline at 8% white — a rule beneath a heading, above a footer. **Around** a zone, a popup or a control, a 2px edge at 22% white, rising to 40% white under the pointer or while a control is held. Nothing thicker than 2px, anywhere. |
+| Lines | Two weights and no third. **Inside** a zone, a 1px rule — beneath a heading, above a footer, between the archive and the lists. **Around** a zone, a popup or a control, a 2px edge at 22% white, rising to 40% white under the pointer or while a control is held. Nothing thicker than 2px, anywhere. A rule is 1px so that it does not compete with an edge, **not so that it cannot be seen**: at 8% white it measured 1.2:1 on a raised zone, which is to say it measured nothing, and two separate testing notes said so. A rule clears **1.6:1 against the ground it is drawn on**, and that floor is a test, not an intention. |
+| Cursor | The keyboard's position in a list is **a line, not a colour** — the 2px edge above, at its 40% weight, drawn around the row. Orange already means the selection, and the cursor row is almost always also the selected row, so a cursor painted in Orange is Orange on Orange: it measured 2.06:1 and a testing round reported it as simply absent. A line and a wash can be read at the same time; two washes cannot. The cursor is also **kept on screen** — a row scrolled out of view is a cursor nobody can see, by a different route. |
+
+**Controls are capsules.** A button, a chip, *Cancel* — anything you press — is drawn as a
+pill: the corner radius is half the control's height, so the ends are semicircles rather than
+softened corners. This is the one shape rule in the document and it exists because a control
+that is merely a rounded rectangle is a rectangle, and reads as one. Rows are **not** capsules:
+a list is read as a column, and a stack of pills is read as a pile of separate objects. The
+radius vocabulary stays at three values and no fourth — square for a zone, 3px for a row,
+half-height for a control and for a popup, which at the sizes this window uses are the same
+number.
 
 **One typeface, monospace, everywhere** — chrome and values alike; sizes, checksums,
 paths, the whole Inspector. Monospace is what makes a verbose pane scannable instead of
 noisy, and the pane is the program, so the window wears it throughout. Chrome and values
 are told apart by weight and colour, never by family. There is no second face and no font
-setting.
+setting. The face is **Fira Mono Nerd Font**, regular and bold.
 Motion is functional only: progress moves, panels appear, and a control grows by one pixel
 under the pointer and contracts below its resting size while it is held. That last is
 function, not decoration: a control that does not answer the hand is a control that looks
@@ -311,6 +353,8 @@ This list is authored by the maker, not derived. Items enter and leave only by h
 - **No RAR — not read, not written.**
 - No external compressor binaries, ever — all format work in-process.
 - No GTK, Qt, KF6, or portal linkage — enforced by `check-deps.sh`, and by CI from V1.4.
+  *Linkage* is the word and it is meant: the file picker talks to `xdg-desktop-portal` over
+  D-Bus, in Rust, and links nothing. `ldd` is the test, and it stays clean.
 - No network at all: no update check, no telemetry, no analytics, no crash reporting.
 - The app never opens a URL — About addresses are selectable, never clickable.
 - No database — settings, bookmarks, and recents are TOML files.
