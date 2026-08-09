@@ -80,8 +80,11 @@ fn section_item(
     let active = app.section == section;
     let response = row(ui, label, key, active, enabled, None);
     if response.clicked() && enabled {
+        // No cursor reset. Each section has kept its own since P11, so leaving Archive for
+        // Bookmarks and coming back lands where you were rather than at the top — and
+        // resetting here would have written the *archive's* cursor on the way to a list,
+        // which is how the one shared field used to corrupt itself.
         app.section = section;
-        app.cursor = 0;
     }
 }
 

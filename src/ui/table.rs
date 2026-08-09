@@ -376,7 +376,7 @@ fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
                 // P2 §2: "A missing file renders dimmed." No automatic pruning — the
                 // list only loses entries by the user's hand or the cap.
                 let exists = std::path::Path::new(path).exists();
-                let focused = i == app.cursor;
+                let focused = i == app.recents_cursor;
 
                 // `theme::row` paints the focused Aubergine fill, the hover and held fills,
                 // and the pointing hand; the frame plus trailing `ui.interact` this replaces
@@ -420,10 +420,14 @@ fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
                     });
                 });
 
+                // **One click opens.** It took a double click until P11, and a recents list
+                // is not a file manager's pane — a row here names one archive and has
+                // exactly one thing it can do. The double-click requirement read as the
+                // list being broken rather than as a list wanting a second click: single
+                // clicks appeared to do nothing at all, and only clicking fast enough to
+                // register a double ever opened anything.
                 if resp.clicked() {
-                    app.cursor = i;
-                }
-                if resp.double_clicked() {
+                    app.recents_cursor = i;
                     if exists {
                         open_this = Some(path.clone());
                     } else {
@@ -485,7 +489,7 @@ fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
         .auto_shrink([false, false])
         .show(ui, |ui| {
             for (i, b) in app.settings.bookmarks.iter().enumerate() {
-                let focused = i == app.cursor;
+                let focused = i == app.bookmarks_cursor;
                 let resp = theme::row(ui, focused, LIST_PAD, |ui| {
                     // See `sidebar::row_body`: a selectable label would out-rank the row
                     // beneath it and eat the click that lands on a bookmark's name.
@@ -522,7 +526,7 @@ fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
         });
 
     if let Some(i) = focus {
-        app.cursor = i;
+        app.bookmarks_cursor = i;
     }
     if let Some(gone) = remove.and_then(|i| app.settings.bookmarks.get(i).cloned()) {
         let name = gone.name.clone();

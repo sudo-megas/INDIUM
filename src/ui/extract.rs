@@ -18,6 +18,12 @@ use super::{archive_stem, Indium, Popup};
 use crate::platform::store::Bookmark;
 use crate::theme;
 
+/// The path field's `Id`, named in one place so the widget and `caret_to_end` cannot
+/// disagree about it.
+fn path_field_id() -> egui::Id {
+    egui::Id::new("extract-path-field")
+}
+
 pub fn show(app: &mut Indium, ctx: &egui::Context) {
     if app.popup != Some(Popup::Extract) {
         return;
@@ -80,12 +86,20 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             ui.label(egui::RichText::new("Or a path").color(theme::TEXT_MUTED));
 
             ui.horizontal(|ui| {
+                // Named so `caret_to_end` can find its state after Tab rewrites the text,
+                // and `lock_focus` so Tab completes rather than leaving the field.
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut app.extract_path)
+                        .id(path_field_id())
+                        .lock_focus(true)
                         .font(egui::TextStyle::Monospace)
                         .desired_width(400.0),
                 );
-                resp.request_focus();
+                // Once, on opening. Every frame meant nothing else in this popup — the ☆,
+                // the bookmark chips, the buttons — could take focus from it.
+                if app.wants_initial_focus(&Popup::Extract) {
+                    resp.request_focus();
+                }
 
                 // P2 §2: "a small ☆ beside the popover's path field pins the typed
                 // path (prompting only for a name)".
@@ -133,6 +147,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     });
                     if ui.input(|i| i.key_pressed(egui::Key::Tab)) {
                         app.extract_path = completed;
+                        super::caret_to_end(ui.ctx(), path_field_id(), &app.extract_path);
                     }
                 }
             }

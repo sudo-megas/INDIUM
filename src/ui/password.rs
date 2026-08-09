@@ -72,7 +72,11 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     .font(egui::TextStyle::Monospace)
                     .desired_width(f32::INFINITY),
             );
-            resp.request_focus();
+            // Once, on opening. Every frame is what stopped the confirm box below from
+            // ever holding focus — see `Indium::wants_initial_focus`.
+            if app.wants_initial_focus(&Popup::Password) {
+                resp.request_focus();
+            }
 
             // A fresh encrypted archive is asked twice. There is nothing to check a typo
             // against — no existing archive to try the password on — and a typo would build

@@ -155,7 +155,19 @@ pub struct Indium {
     // --- navigation -------------------------------------------------------
     pub section: Section,
     pub cwd: String,
+    /// The row cursor **in the archive table**, and only there.
+    ///
+    /// Until P11 this one field was the cursor for all three sections at once, which was
+    /// wrong twice over. It was clamped every frame against the archive's row count
+    /// whatever section was on screen — so with a two-row archive open, a third bookmark
+    /// could be clicked but never stayed lit, and `Enter` on the fourth recent opened
+    /// whatever the cursor had been dragged back down to. And switching section threw the
+    /// position away, because one number cannot remember three places.
     pub cursor: usize,
+    /// The row cursor in *Recent files*. See [`Indium::cursor`].
+    pub recents_cursor: usize,
+    /// The row cursor in *Bookmarks*. See [`Indium::cursor`].
+    pub bookmarks_cursor: usize,
     /// Selected archive paths. Kept as paths, not row indices, so a selection
     /// survives descending, filtering and re-listing.
     pub selection: BTreeSet<String>,
@@ -163,6 +175,9 @@ pub struct Indium {
     /// `Some` while the filter bar is open, even when empty.
     pub filter: Option<String>,
     pub filter_focus_requested: bool,
+    /// The popup whose first field has already been handed focus. See
+    /// [`Indium::wants_initial_focus`].
+    pub focus_given_to: Option<Popup>,
 
     // --- staging (P4) -----------------------------------------------------
     /// The queue CORE §3 calls the staging engine. Empty means the tray is hidden.
@@ -212,6 +227,9 @@ pub struct Indium {
     pub openwith_candidates: Vec<Candidate>,
     pub openwith_filter: String,
     pub openwith_show_all: bool,
+    /// Which application the keyboard is on. P11: the filter field held focus every
+    /// frame, so the list could only ever be reached with the pointer.
+    pub openwith_cursor: usize,
     pub openwith_path: Option<PathBuf>,
     pub openwith_name: String,
     pub openwith_mime: String,
@@ -270,10 +288,13 @@ impl Indium {
             section: Section::Recents,
             cwd: String::new(),
             cursor: 0,
+            recents_cursor: 0,
+            bookmarks_cursor: 0,
             selection: BTreeSet::new(),
             inspector_tab: InspectorTab::Details,
             filter: None,
             filter_focus_requested: false,
+            focus_given_to: None,
 
             popup: None,
             extract_path: String::new(),
@@ -305,6 +326,7 @@ impl Indium {
             openwith_candidates: Vec::new(),
             openwith_filter: String::new(),
             openwith_show_all: false,
+            openwith_cursor: 0,
             openwith_path: None,
             openwith_name: String::new(),
             openwith_mime: String::new(),
@@ -716,6 +738,36 @@ impl Indium {
         }
     }
 
+    /// How many rows the section on screen is showing.
+    ///
+    /// `rows()` answers for the archive and for nothing else, which is the whole of the
+    /// bug P11 fixed: every clamp in `handle_keys` measured the cursor against a list the
+    /// user might not even be looking at.
+    pub fn section_len(&self, rows: &[Row]) -> usize {
+        match self.section {
+            Section::Archive => rows.len(),
+            Section::Recents => self.recents.sorted().len(),
+            Section::Bookmarks => self.settings.bookmarks.len(),
+        }
+    }
+
+    /// The cursor belonging to the section on screen.
+    pub fn section_cursor(&self) -> usize {
+        match self.section {
+            Section::Archive => self.cursor,
+            Section::Recents => self.recents_cursor,
+            Section::Bookmarks => self.bookmarks_cursor,
+        }
+    }
+
+    pub fn set_section_cursor(&mut self, i: usize) {
+        match self.section {
+            Section::Archive => self.cursor = i,
+            Section::Recents => self.recents_cursor = i,
+            Section::Bookmarks => self.bookmarks_cursor = i,
+        }
+    }
+
     pub fn entry(&self, path: &str) -> Option<&Entry> {
         self.entries.iter().find(|e| e.path == path)
     }
@@ -745,8 +797,29 @@ impl Indium {
     /// Every close path routes through here. CORE §9 says passwords are "typed per use,
     /// wiped after", and before P4 an `Esc` cleared the popup and the parked action but
     /// left the plaintext sitting on the window until the next prompt overwrote it.
+    /// True exactly once per opening of `which`: the frame its first field takes focus.
+    ///
+    /// Three popups used to call `request_focus()` unconditionally, every frame, for as
+    /// long as they were open — which meant no *second* field in any of them could hold
+    /// focus for longer than one frame. Clicking the confirm box in the Password popup
+    /// bounced straight back to the box above it, so a new encrypted archive could not be
+    /// given a password at all; the Open-With filter had the same grip on its own popup,
+    /// so `↑`/`↓` could never reach the list of applications.
+    ///
+    /// Keyed on *which* popup was focused rather than on a `bool` per popup, so opening
+    /// one arms it with no help from the twenty-odd places that assign `self.popup`. The
+    /// pairing is with `close_popup` below, which forgets it again.
+    pub fn wants_initial_focus(&mut self, which: &Popup) -> bool {
+        if self.focus_given_to.as_ref() == Some(which) {
+            return false;
+        }
+        self.focus_given_to = Some(which.clone());
+        true
+    }
+
     pub fn close_popup(&mut self) {
         self.popup = None;
+        self.focus_given_to = None;
         self.pending = None;
         self.password_input.clear();
         self.password_confirm.clear();
@@ -1482,6 +1555,7 @@ impl Indium {
         self.openwith_mime = mime;
         self.openwith_filter.clear();
         self.openwith_show_all = false;
+        self.openwith_cursor = 0;
         self.popup = Some(Popup::OpenWith);
     }
 
@@ -1579,6 +1653,29 @@ pub fn archive_stem(path: &std::path::Path) -> String {
 ///
 /// `Ctrl+X` is deliberately not answered: CORE §4's table has no cut, and an archive
 /// manager that cuts is one that deletes on a paste that may never come.
+/// Put the caret at the end of a `TextEdit` whose text was just replaced from outside it.
+///
+/// Assigning to the `String` behind a `TextEdit` changes what is drawn and nothing else:
+/// egui keeps the caret in `TextEditState`, keyed by the widget's `Id`, and a caret that
+/// was at column 9 stays at column 9 in a line that is now forty characters long. So `Tab`
+/// completed the path and then left the user to click past the end of what they had just
+/// been given — which is most of the point of tab completion gone.
+///
+/// The widget must therefore be given an explicit `Id`; an auto-generated one is not
+/// knowable from out here.
+fn caret_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
+    let Some(mut state) = egui::TextEdit::load_state(ctx, id) else {
+        return;
+    };
+    // Characters, not bytes: `CCursor` counts the former, and a completed path is exactly
+    // where a name outside ASCII turns up.
+    let end = egui::text::CCursor::new(text.chars().count());
+    state
+        .cursor
+        .set_char_range(Some(egui::text::CCursorRange::one(end)));
+    state.store(ctx, id);
+}
+
 fn clipboard_chords(events: &[egui::Event]) -> (bool, bool) {
     let mut copy = false;
     let mut paste = false;
@@ -1629,6 +1726,14 @@ impl eframe::App for Indium {
 
         self.drain_worker(&ctx);
         self.take_dropped_files(&ctx);
+
+        // A popup that is no longer the open one has no claim on focus. This one line is
+        // what re-arms `wants_initial_focus` for the *next* opening, and it lives here
+        // rather than at every site that assigns `self.popup` — several of which set it to
+        // `None` directly without going through `close_popup`.
+        if self.focus_given_to != self.popup {
+            self.focus_given_to = None;
+        }
 
         let rows = self.rows();
         self.handle_keys(&ctx, &rows);
@@ -1840,29 +1945,33 @@ impl Indium {
             )
         });
 
-        let len = rows.len();
+        // `section_len`, not `rows.len()`. Measuring against the archive while Bookmarks
+        // was on screen is what stopped the third bookmark ever staying lit and what made
+        // `Enter` on a recent open the wrong row or none at all — one line, three symptoms.
+        let len = self.section_len(rows);
         let moved = up || down || pgup || pgdn || home || end;
         if len > 0 {
             let step = 12usize;
+            let mut at = self.section_cursor();
             if up {
-                self.cursor = self.cursor.saturating_sub(1);
+                at = at.saturating_sub(1);
             }
             if down {
-                self.cursor = (self.cursor + 1).min(len - 1);
+                at = (at + 1).min(len - 1);
             }
             if pgup {
-                self.cursor = self.cursor.saturating_sub(step);
+                at = at.saturating_sub(step);
             }
             if pgdn {
-                self.cursor = (self.cursor + step).min(len - 1);
+                at = (at + step).min(len - 1);
             }
             if home {
-                self.cursor = 0;
+                at = 0;
             }
             if end {
-                self.cursor = len - 1;
+                at = len - 1;
             }
-            self.cursor = self.cursor.min(len - 1);
+            self.set_section_cursor(at.min(len - 1));
 
             // Moving the cursor selects what it lands on, which is what makes
             // "Inspector updates on arrow-key movement" (P1's manual checklist) true.
@@ -1879,7 +1988,7 @@ impl Indium {
                 self.forget_preview(ctx);
             }
         } else {
-            self.cursor = 0;
+            self.set_section_cursor(0);
         }
 
         match self.section {
@@ -1906,7 +2015,7 @@ impl Indium {
             }
             Section::Recents => {
                 if enter {
-                    if let Some(r) = self.recents.sorted().get(self.cursor).cloned() {
+                    if let Some(r) = self.recents.sorted().get(self.recents_cursor).cloned() {
                         let path = PathBuf::from(&r.path);
                         if path.exists() {
                             self.open_archive(ctx, path, None);
@@ -1916,7 +2025,7 @@ impl Indium {
                     }
                 }
                 if del {
-                    if let Some(r) = self.recents.sorted().get(self.cursor).cloned() {
+                    if let Some(r) = self.recents.sorted().get(self.recents_cursor).cloned() {
                         let path = r.path.clone();
                         // The success line first, the write last: a save that failed has
                         // something to say, and it must not be overwritten by a sentence
@@ -1927,8 +2036,8 @@ impl Indium {
                 }
             }
             Section::Bookmarks => {
-                if del && self.cursor < self.settings.bookmarks.len() {
-                    let gone = self.settings.bookmarks[self.cursor].clone();
+                if del && self.bookmarks_cursor < self.settings.bookmarks.len() {
+                    let gone = self.settings.bookmarks[self.bookmarks_cursor].clone();
                     let name = gone.name.clone();
                     self.change_settings(move |s| s.bookmarks.retain(|b| *b != gone));
                     self.status = format!("Removed bookmark {name}.");
@@ -2249,12 +2358,19 @@ fn open_path_popup(app: &mut Indium, ctx: &egui::Context) {
         .show(ctx, |ui| {
             ui.set_min_width(460.0);
             ui.label(egui::RichText::new("Path to an archive").color(theme::TEXT_SECONDARY));
+            // Named, because `caret_to_end` below has to find this field's state, and
+            // `lock_focus` so `Tab` completes the path instead of leaving the field.
+            let field = egui::Id::new("open-path-field");
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut app.open_path)
+                    .id(field)
+                    .lock_focus(true)
                     .font(egui::TextStyle::Monospace)
                     .desired_width(f32::INFINITY),
             );
-            resp.request_focus();
+            if app.wants_initial_focus(&Popup::OpenPath) {
+                resp.request_focus();
+            }
 
             if let Some(completed) = extract::complete_path(&app.open_path) {
                 ui.horizontal(|ui| {
@@ -2267,6 +2383,7 @@ fn open_path_popup(app: &mut Indium, ctx: &egui::Context) {
                 });
                 if ui.input(|i| i.key_pressed(egui::Key::Tab)) {
                     app.open_path = completed;
+                    caret_to_end(ctx, field, &app.open_path);
                 }
             }
 

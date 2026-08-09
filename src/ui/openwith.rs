@@ -45,12 +45,31 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             );
             ui.add_space(8.0);
 
+            // Read before the field is built, so the answer cannot depend on what a
+            // focused `TextEdit` decides to do with an arrow key.
+            let (up, down, enter) = ui.input(|i| {
+                (
+                    i.key_pressed(egui::Key::ArrowUp),
+                    i.key_pressed(egui::Key::ArrowDown),
+                    i.key_pressed(egui::Key::Enter),
+                )
+            });
+
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut app.openwith_filter)
                     .hint_text("filter")
                     .desired_width(f32::INFINITY),
             );
-            resp.request_focus();
+            // Once. It used to be every frame, which is why the list below could be seen
+            // but never reached: focus returned here before an arrow key could land.
+            if app.wants_initial_focus(&Popup::OpenWith) {
+                resp.request_focus();
+            }
+            // A narrowed list is a different list, so the cursor goes back to its head
+            // rather than staying on whatever row happens to be at that index now.
+            if resp.changed() {
+                app.openwith_cursor = 0;
+            }
 
             ui.add_space(6.0);
 
@@ -65,6 +84,24 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 .filter(|c| show_all || c.exact || c.is_default)
                 .filter(|c| needle.is_empty() || c.app.name.to_lowercase().contains(&needle))
                 .collect();
+
+            // The keyboard's place in the list, moved and clamped together so the cursor
+            // can never point past a list the filter just shortened.
+            if visible.is_empty() {
+                app.openwith_cursor = 0;
+            } else {
+                let last = visible.len() - 1;
+                if up {
+                    app.openwith_cursor = app.openwith_cursor.saturating_sub(1);
+                }
+                if down {
+                    app.openwith_cursor = (app.openwith_cursor + 1).min(last);
+                }
+                app.openwith_cursor = app.openwith_cursor.min(last);
+                if enter {
+                    launch = visible.get(app.openwith_cursor).map(|c| (*c).clone());
+                }
+            }
 
             if visible.is_empty() {
                 ui.label(
@@ -81,15 +118,18 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 .max_height(theme::list_height(ctx, 300.0, 300.0))
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    for c in &visible {
+                    for (i, c) in visible.iter().enumerate() {
                         // Through `theme::row`, which reads its own `Response`. These rows
                         // had no fill in any state and no cursor at all, so a list built to
                         // be clicked gave no sign that it could be. P7 §2.
                         //
-                        // `active` is always false: Aubergine means *the active item*, and
-                        // nothing in this picker is chosen yet. The default application is
-                        // already named by its own chip, which is the honest place for it.
-                        let r = theme::row(ui, false, egui::Margin::symmetric(8, 5), |ui| {
+                        // `active` was always false while nothing in the picker could be
+                        // chosen without the pointer. P11 gave the list a keyboard cursor,
+                        // and Aubergine means *the active item* — which is now exactly what
+                        // `Enter` would open. The default application keeps its own chip;
+                        // being the default and being under the cursor are different facts.
+                        let on_cursor = i == app.openwith_cursor;
+                        let r = theme::row(ui, on_cursor, egui::Margin::symmetric(8, 5), |ui| {
                             ui.horizontal(|ui| {
                                 ui.label(egui::RichText::new(&c.app.name).color(theme::TEXT));
                                 if c.is_default {
