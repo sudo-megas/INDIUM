@@ -1,3 +1,34 @@
+indium (1.0.0-3) unstable; urgency=medium
+
+  * Every filename is read correctly, whatever alphabet it is in. libarchive
+    converts a stored name into the current locale's character set as it reads
+    the header, and a Rust program never calls setlocale — so INDIUM ran in the
+    C locale, any name with a byte outside ASCII failed to convert, and the
+    entry arrived with no name at all. A nameless entry matched no selection,
+    so extraction and copy-out skipped it in silence. Every kopek.txt,
+    resume.pdf and Japanese filename in every archive has been left behind
+    since the first release. An archive INDIUM cannot name every member of is
+    now refused outright rather than partly extracted.
+  * Ctrl+V really does stage files now. 1.0.0-2 claimed this and shipped only
+    half of it: the toolkit swallows the paste chord whether or not it has any
+    text to hand back, and a file manager copying a file offers no plain text
+    at all, so nothing was emitted and nothing could be noticed. The chord is
+    read when the key comes back up, which survives every clipboard state.
+  * Ctrl+C no longer starts an extraction while text in the status bar is
+    selected.
+  * Add files... beside the breadcrumb, and Browse... in the Ctrl+O popup, both
+    raising the desktop's own file picker through xdg-desktop-portal. Dragging
+    files onto the window needs X11 and has never worked on Wayland: winit
+    implements no Wayland drag-and-drop.
+  * One click opens a recent file. The third bookmark stays highlighted, Enter
+    on a recent opens it, and each sidebar section keeps its own cursor.
+  * The confirm-password box accepts typing, arrow keys choose an application
+    in Open With, and Tab completion leaves the caret at the end of the path.
+  * The sidebar no longer draws over itself in a short window, and
+    build/install-desktop.sh runs from any directory.
+
+ -- sudo-megas <sudo-megas@users.noreply.github.com>  Sun, 09 Aug 2026 14:39:58 +0300
+
 indium (1.0.0-2) unstable; urgency=medium
 
   * Ctrl+C and Ctrl+V work. In 1.0.0-1 neither did anything at all: the toolkit

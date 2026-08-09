@@ -7,7 +7,7 @@ pkgver=1.0.0
 # workflow derives the tag it will accept from it — so the two packages cannot disagree
 # about which build they are, and a tag cannot be pushed over a tree that means a
 # different one. `2` is P10: the source changed, and the version did not.
-pkgrel=2
+pkgrel=3
 pkgdesc="An archive manager for Linux on Wayland where the metadata is the main event."
 arch=('x86_64')
 url="https://github.com/sudo-megas/INDIUM"
