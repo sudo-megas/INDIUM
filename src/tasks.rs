@@ -1227,9 +1227,11 @@ pub fn apply(
             // wording stopped after the first of those, which reads as a failure rather
             // than as the refusal it is — the staged changes are still here, and the only
             // thing lost is the assumption they were built on.
-            return Err("Another window changed this archive after these changes were \
+            return Err(
+                "Another window changed this archive after these changes were \
                         staged, so nothing was written. Re-open it and stage them again."
-                .to_string());
+                    .to_string(),
+            );
         }
     }
 
