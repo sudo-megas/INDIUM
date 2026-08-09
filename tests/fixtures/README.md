@@ -229,6 +229,45 @@ python3 -c "open('/home/megas/INDIUM/tests/fixtures/notrar.rar','wb').write(
 > of its return code** (`ARCHIVE_OK`, `ARCHIVE_EOF`, or `ARCHIVE_FATAL`); the name
 > contains `RAR` in all three cases.
 
+## `utf8.zip`
+
+Names outside ASCII, in three scripts, plus one directory whose own name is outside ASCII
+so that a selection has to match a non-ASCII prefix. Every entry carries zip's UTF-8 flag
+(bit 11), which `zipfile` sets on its own for any name it cannot encode as CP437.
+
+```python
+#!/usr/bin/env python3
+"""Build tests/fixtures/utf8.zip: names outside ASCII, in three scripts."""
+import zipfile
+OUT = "/home/megas/INDIUM/tests/fixtures/utf8.zip"
+FILES = [
+    ("köpek.txt",        b"INDIUM utf8 kopek\n"),
+    ("日本語.txt",        b"INDIUM utf8 nihongo\n"),
+    ("Ünlü/naïve.txt",   b"INDIUM utf8 naive\n"),
+]
+with zipfile.ZipFile(OUT, "w", zipfile.ZIP_DEFLATED) as z:
+    zi = zipfile.ZipInfo("Ünlü/", date_time=(2024, 1, 2, 3, 4, 4))
+    zi.external_attr = (0o755 << 16) | 0x10
+    z.writestr(zi, b"")
+    for name, payload in FILES:
+        zi = zipfile.ZipInfo(name, date_time=(2024, 1, 2, 3, 4, 4))
+        zi.external_attr = 0o644 << 16
+        zi.compress_type = zipfile.ZIP_DEFLATED
+        z.writestr(zi, payload)
+```
+
+`list_all` reports the four entries in this order: `Ünlü`, `köpek.txt`, `日本語.txt`,
+`Ünlü/naïve.txt`.
+
+> **This fixture exists because every other one is pure ASCII, and that is what let P11's
+> worst defect survive seven milestones of green tests.** libarchive converts a stored name
+> into the *current locale's* charset while reading the header; a Rust program never calls
+> `setlocale`, so INDIUM ran in the `C` locale, the conversion failed for every byte outside
+> ASCII, and `archive_entry_pathname` returned NULL. The entry listed with an empty name,
+> matched no selection, and extraction skipped it in the same breath it skips a file nobody
+> asked for. `arch::ensure_ctype_locale` is the fix; these are the tests that hold it down.
+> Disable that one call and all three fail — which is how they were checked.
+
 ---
 
 ## Notes for whoever writes the assertions

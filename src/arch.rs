@@ -103,6 +103,10 @@ extern "C" {
 
     fn archive_entry_pathname(e: *mut ArchiveEntry) -> *const c_char;
     fn archive_entry_set_pathname(e: *mut ArchiveEntry, p: *const c_char);
+    // The `_utf8` half of the name accessors. See `entry_pathname` for why every name
+    // INDIUM reads or writes goes through these and not through the plain ones.
+    fn archive_entry_pathname_utf8(e: *mut ArchiveEntry) -> *const c_char;
+    fn archive_entry_set_pathname_utf8(e: *mut ArchiveEntry, p: *const c_char);
     fn archive_entry_size(e: *mut ArchiveEntry) -> i64;
     fn archive_entry_mtime(e: *mut ArchiveEntry) -> i64;
     fn archive_entry_mtime_is_set(e: *mut ArchiveEntry) -> c_int;
@@ -120,8 +124,19 @@ extern "C" {
     fn archive_entry_filetype(e: *mut ArchiveEntry) -> u32;
     fn archive_entry_symlink(e: *mut ArchiveEntry) -> *const c_char;
     fn archive_entry_hardlink(e: *mut ArchiveEntry) -> *const c_char;
+    fn archive_entry_symlink_utf8(e: *mut ArchiveEntry) -> *const c_char;
+    fn archive_entry_hardlink_utf8(e: *mut ArchiveEntry) -> *const c_char;
     fn archive_entry_is_encrypted(e: *mut ArchiveEntry) -> c_int;
 }
+
+// Not libarchive's, but the reason libarchive can read a name at all. See
+// `ensure_ctype_locale`.
+unsafe extern "C" {
+    fn setlocale(category: c_int, locale: *const c_char) -> *mut c_char;
+}
+/// glibc's `__LC_CTYPE`, checked against `/usr/include/bits/locale.h` by hand, as every
+/// other constant in this file was.
+const LC_CTYPE: c_int = 0;
 
 // The write half, added by P4 §3. Same rule as above: every declaration is one INDIUM
 // uses, checked by hand against the installed headers. Four of these are easy to get
@@ -170,8 +185,8 @@ extern "C" {
     fn archive_entry_set_gid(e: *mut ArchiveEntry, gid: i64);
     fn archive_entry_set_uname(e: *mut ArchiveEntry, n: *const c_char);
     fn archive_entry_set_gname(e: *mut ArchiveEntry, n: *const c_char);
-    fn archive_entry_set_symlink(e: *mut ArchiveEntry, p: *const c_char);
-    fn archive_entry_set_hardlink(e: *mut ArchiveEntry, p: *const c_char);
+    fn archive_entry_set_symlink_utf8(e: *mut ArchiveEntry, p: *const c_char);
+    fn archive_entry_set_hardlink_utf8(e: *mut ArchiveEntry, p: *const c_char);
 
     /// Preferred over `archive_read_data_block` for the rebuild's reader: it fills a
     /// caller buffer in one call, and it materialises sparse holes as zeros, which is
@@ -194,6 +209,67 @@ fn cstr_to_string(p: *const c_char) -> Option<String> {
     // and valid until the next call that invalidates it.
     let bytes = unsafe { CStr::from_ptr(p) }.to_bytes();
     Some(String::from_utf8_lossy(bytes).into_owned())
+}
+
+/// Put this process into the user's own character set, once, before libarchive reads a name.
+///
+/// **This is the whole of P11's worst find.** libarchive converts an entry's stored name
+/// into the *current locale's* encoding at the moment it reads the header, and a C program
+/// enables that by calling `setlocale` on the way in — `bsdtar` does, which is why `bsdtar`
+/// has always extracted `köpek.txt` correctly from the very archive INDIUM dropped it from.
+/// **A Rust program never calls `setlocale` at all.** The process therefore sits in the `C`
+/// locale for the whole of its life, the target charset is ASCII, and a name with any byte
+/// outside it simply cannot be converted.
+///
+/// libarchive's answer to a conversion it cannot do is to store nothing, so
+/// `archive_entry_pathname` hands back **NULL** rather than a mangled string.
+/// `cstr_to_string(NULL).unwrap_or_default()` turned that into an empty name; an empty name
+/// matches no selection; and `extract`'s `if !selection_matches(..) { skip_data(); continue; }`
+/// then dropped the entry without a word. Every `köpek.txt`, `résumé.pdf` and `日本語.txt`
+/// in every archive listed as a nameless row and was silently left behind by extraction,
+/// copy-out, preview and CRC alike — from P1 until here, in every shipped binary.
+///
+/// `archive_entry_pathname_utf8` is *not* a fix for it, though it looks like one and P11
+/// tried it first: the conversion has already failed by then, and re-encoding nothing gives
+/// nothing. Proven, not assumed — the accessor was swapped in and `köpek.txt` was still
+/// nameless. It is kept below anyway, as a second line worth the two lines it costs.
+///
+/// `LC_CTYPE` rather than `LC_ALL`, and that is deliberate. `LC_CTYPE` is the only category
+/// libarchive's charset conversion consults, while `LC_ALL` would also adopt the user's
+/// `LC_NUMERIC` — and on the machine this was found on that is `tr_TR.UTF-8`, where the
+/// decimal separator is a comma. Every C library in the process, the GL stack included,
+/// would start parsing and printing numbers differently as a side effect of naming a file.
+/// One category, one purpose.
+///
+/// It lives here rather than in `main` because the library is driven directly by the tests
+/// in `tests/`, and a fix a caller has to remember is a fix that goes missing.
+fn ensure_ctype_locale() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // SAFETY: a valid NUL-terminated empty string, and `Once` guarantees this runs
+        // exactly once — `setlocale` is not safe to race against itself.
+        unsafe {
+            setlocale(LC_CTYPE, c"".as_ptr());
+        }
+    });
+}
+
+/// One name off a libarchive entry, asked for as UTF-8 first.
+///
+/// The locale accessor is correct once [`ensure_ctype_locale`] has run, and is what
+/// libarchive itself documents. Asking for UTF-8 first costs nothing and is what INDIUM
+/// wants regardless — `Entry::raw_path` is a `String` — so it is asked first and the
+/// locale form is the fallback.
+///
+/// # Safety
+/// `ep` must be a live libarchive entry, valid until the next call that invalidates it.
+unsafe fn entry_name(
+    ep: *mut ArchiveEntry,
+    utf8: unsafe extern "C" fn(*mut ArchiveEntry) -> *const c_char,
+    mbs: unsafe extern "C" fn(*mut ArchiveEntry) -> *const c_char,
+) -> Option<String> {
+    // SAFETY: the caller's guarantee, forwarded to two read-only getters.
+    unsafe { cstr_to_string(utf8(ep)).or_else(|| cstr_to_string(mbs(ep))) }
 }
 
 fn last_error(a: *mut Archive) -> String {
@@ -405,6 +481,10 @@ fn mentions_passphrase(msg: &str) -> bool {
 
 impl Reader {
     pub fn open(path: &Path, passphrase: Option<&Secret>) -> Result<Reader, ArchiveError> {
+        // Before anything else, and before every read path in the program, because a name
+        // libarchive has already failed to convert cannot be recovered afterwards.
+        ensure_ctype_locale();
+
         // The gate comes before anything is handed to libarchive.
         if looks_like_rar(path) {
             return Err(ArchiveError::Rar);
@@ -522,7 +602,8 @@ impl Reader {
         // SAFETY: `ep` is a live entry owned by libarchive, valid until the next
         // `archive_read_next_header` call. Every getter below is read-only.
         let entry = unsafe {
-            let raw_path = cstr_to_string(archive_entry_pathname(ep)).unwrap_or_default();
+            let raw_path = entry_name(ep, archive_entry_pathname_utf8, archive_entry_pathname)
+                .unwrap_or_default();
             let filetype = archive_entry_filetype(ep);
             let normalized = util::normalize_archive_path(&raw_path);
             let size = archive_entry_size(ep).max(0) as u64;
@@ -546,8 +627,10 @@ impl Reader {
                 gname: cstr_to_string(archive_entry_gname(ep)).filter(|s| !s.is_empty()),
                 mode: archive_entry_mode(ep),
                 filetype,
-                symlink: cstr_to_string(archive_entry_symlink(ep)).filter(|s| !s.is_empty()),
-                hardlink: cstr_to_string(archive_entry_hardlink(ep)).filter(|s| !s.is_empty()),
+                symlink: entry_name(ep, archive_entry_symlink_utf8, archive_entry_symlink)
+                    .filter(|s| !s.is_empty()),
+                hardlink: entry_name(ep, archive_entry_hardlink_utf8, archive_entry_hardlink)
+                    .filter(|s| !s.is_empty()),
                 encrypted: archive_entry_is_encrypted(ep) != 0,
             }
         };
@@ -820,6 +903,24 @@ pub fn extract(
         .filter(|e| selection_matches(&e.path, wanted))
         .collect();
 
+    // A nameless entry is the shape P11's locale defect took, and this is the line that
+    // makes it impossible for it — or anything like it — to be silent a second time.
+    //
+    // An entry whose name did not survive the read matches no selection, so the loop
+    // below would `skip_data(); continue;` past it exactly as it would past a file the
+    // user did not ask for. The two are indistinguishable from inside the loop and mean
+    // opposite things. Judged here instead, over the whole listing rather than the
+    // selection, and before a single byte is written: an archive INDIUM cannot name every
+    // member of is one it refuses to extract at all, rather than one it extracts almost
+    // all of. `ensure_ctype_locale` should mean this is never reached.
+    if listing.iter().any(|e| e.path.is_empty()) {
+        return Err(ArchiveError::Other(
+            "this archive holds an entry whose name could not be read on this system; \
+             nothing was extracted"
+                .to_string(),
+        ));
+    }
+
     for entry in &selected {
         if path_escapes(&entry.raw_path) {
             return Err(ArchiveError::UnsafePath(entry.raw_path.clone()));
@@ -925,6 +1026,12 @@ pub fn extract(
         // SAFETY: `ep` is libarchive's live current entry — we have not advanced the
         // reader since `next_entry` returned — and `ctarget` outlives the call.
         let rc = unsafe {
+            // Deliberately the **locale** setter and not `_utf8`, which is the opposite of
+            // what the writer does two hundred lines down and is not an oversight. What
+            // goes in here is a *filesystem* path INDIUM already holds as bytes, not a
+            // name to be stored in an archive: libarchive must lay these bytes down
+            // exactly as given. Naming them UTF-8 would invite a conversion on the way to
+            // the syscall, and a path is bytes on Linux, not text.
             archive_entry_set_pathname(ep, ctarget.as_ptr());
             archive_read_extract(reader.raw, ep, EXTRACT_FLAGS)
         };
@@ -1160,6 +1267,10 @@ impl Writer {
     /// options are all set before the file is opened, because opening "freezes the
     /// settings".
     pub fn create(path: &Path, recipe: &Recipe) -> Result<Writer, String> {
+        // The write half needs it for the same reason the read half does: a name is
+        // converted on its way *into* an archive as well as out of one.
+        ensure_ctype_locale();
+
         // SAFETY: a fresh handle; every early return frees it before leaving.
         let raw = unsafe { archive_write_new() };
         if raw.is_null() {
@@ -1308,7 +1419,13 @@ impl Sink for Writer {
         // above outlives the header call below.
         unsafe {
             archive_entry_clear(self.entry);
-            archive_entry_set_pathname(self.entry, cpath.as_ptr());
+            // `_utf8`, and for the mirror of `entry_name`'s reason. A Rust `String` is
+            // UTF-8; handing those bytes to the locale setter in a process that never
+            // called `setlocale` tells libarchive they are ASCII, so a zip gets the bytes
+            // with its UTF-8 flag left clear and every other tool reads them as CP437.
+            // Naming the encoding writes the flag and makes the name mean the same thing
+            // to a reader that is not INDIUM.
+            archive_entry_set_pathname_utf8(self.entry, cpath.as_ptr());
             archive_entry_set_filetype(self.entry, filetype);
             archive_entry_set_perm(self.entry, meta.mode & 0o7777);
             archive_entry_set_size(self.entry, size);
@@ -1321,10 +1438,10 @@ impl Sink for Writer {
                 archive_entry_set_gname(self.entry, n.as_ptr());
             }
             if let Some(t) = csymlink.as_ref() {
-                archive_entry_set_symlink(self.entry, t.as_ptr());
+                archive_entry_set_symlink_utf8(self.entry, t.as_ptr());
             }
             if let Some(t) = chardlink.as_ref() {
-                archive_entry_set_hardlink(self.entry, t.as_ptr());
+                archive_entry_set_hardlink_utf8(self.entry, t.as_ptr());
             }
             // Only set a timestamp that was actually read. An entry whose mtime the
             // source never recorded must not acquire one here.

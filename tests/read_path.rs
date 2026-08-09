@@ -617,3 +617,87 @@ fn an_encrypted_header_7z_extracts_after_the_prompt() {
         "the bytes must be the payload the fixtures README records"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Names outside ASCII — P11
+// ---------------------------------------------------------------------------
+
+/// The names `utf8.zip` stores, in the order `list_all` reports them.
+const UTF8_NAMES: [&str; 4] = ["Ünlü", "köpek.txt", "日本語.txt", "Ünlü/naïve.txt"];
+
+/// **The regression test for P11's worst find**, and the one no earlier milestone had.
+///
+/// libarchive converts a stored name into the *current locale's* charset as it reads the
+/// header. A Rust program never calls `setlocale`, so INDIUM ran its whole life in the `C`
+/// locale, every name with a byte outside ASCII failed to convert, and
+/// `archive_entry_pathname` returned **NULL** — which arrived here as an empty string.
+///
+/// Every fixture before this one is pure ASCII, which is exactly why seven milestones of
+/// tests all passed while `köpek.txt` was unreachable in a shipped binary.
+#[test]
+fn every_name_survives_the_read_whatever_alphabet_it_is_in() {
+    let entries = arch::list_all(&fixture("utf8.zip"), None).expect("utf8.zip lists");
+    assert_eq!(paths_of(&entries), UTF8_NAMES);
+    for e in &entries {
+        assert!(
+            !e.path.is_empty(),
+            "a nameless entry means the locale conversion failed again: {e:?}"
+        );
+    }
+}
+
+/// The half that lost data. A name that did not survive the read matches no selection, so
+/// `extract` skipped it exactly as it skips a file nobody asked for — silently, and
+/// reporting success for the files that happened to be ASCII.
+#[test]
+fn extraction_writes_every_name_rather_than_the_ascii_ones() {
+    let dir = TempDir::new("utf8");
+    let n = arch::extract(
+        &fixture("utf8.zip"),
+        &wanted(&UTF8_NAMES),
+        dir.path(),
+        None,
+        None,
+        &no_cancel(),
+    )
+    .expect("extracted");
+
+    assert_eq!(n, 4, "one directory and three files");
+    for (name, payload) in [
+        ("köpek.txt", &b"INDIUM utf8 kopek\n"[..]),
+        ("日本語.txt", &b"INDIUM utf8 nihongo\n"[..]),
+        ("Ünlü/naïve.txt", &b"INDIUM utf8 naive\n"[..]),
+    ] {
+        let on_disk = dir.path().join(name);
+        assert!(on_disk.exists(), "{name} never reached disk");
+        assert_eq!(
+            std::fs::read(&on_disk).expect("readable"),
+            payload,
+            "{name} has the wrong bytes"
+        );
+    }
+}
+
+/// Selecting the directory must pull the child beneath it, which is the path `Ctrl+C` on a
+/// folder takes. `selection_matches` is pure `str` work, so a name that arrived empty made
+/// it answer `false` for a child it should have claimed.
+#[test]
+fn selecting_a_directory_outside_ascii_takes_what_is_under_it() {
+    let dir = TempDir::new("utf8sel");
+    let n = arch::extract(
+        &fixture("utf8.zip"),
+        &wanted(&["Ünlü"]),
+        dir.path(),
+        None,
+        None,
+        &no_cancel(),
+    )
+    .expect("extracted");
+
+    assert_eq!(n, 2, "the directory and the one file inside it");
+    assert!(dir.path().join("Ünlü/naïve.txt").exists());
+    assert!(
+        !dir.path().join("köpek.txt").exists(),
+        "nothing outside the selection may be written"
+    );
+}
