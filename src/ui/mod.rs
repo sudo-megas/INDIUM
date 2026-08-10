@@ -2315,6 +2315,33 @@ fn status_bar(app: &mut Indium, ui: &mut egui::Ui) {
                     theme::hairline(),
                 );
             }
+
+            // CORE §4: "The proportion done is drawn as a 2px line along the bar's own top
+            // edge." Painted for the same reason the two hairlines above are painted and
+            // never allocated — `exact_size` means this panel cannot grow to absorb
+            // anything new, and a widget here would push row 3 out of the window.
+            //
+            // 2px is the edge weight §6 already owns, and Orange is already Apply/progress,
+            // so this measurement costs the document no new vocabulary at all.
+            if let Some(p) = &app.progress {
+                let frac = if p.total == 0 {
+                    0.0
+                } else {
+                    (p.done as f32 / p.total as f32).clamp(0.0, 1.0)
+                };
+                // Out to the frame's own edge rather than the content lane's: the inner
+                // margin is where the padding starts, so backing out by it lands on the
+                // line the 2px stroke draws.
+                let pad = sb_frame().inner_margin;
+                let edge = lane.expand2(egui::vec2(pad.left as f32, pad.top as f32));
+                let run = egui::Rect::from_min_size(
+                    edge.left_top(),
+                    egui::vec2(edge.width() * frac, 2.0),
+                );
+                ui.painter()
+                    .with_clip_rect(edge)
+                    .rect_filled(run, 0.0, theme::ORANGE);
+            }
         });
 }
 
@@ -2580,23 +2607,15 @@ fn sb_progress(app: &Indium, ui: &mut egui::Ui) {
                         .size(13.0)
                         .color(theme::TEXT),
                 );
-                let frac = if total == 0 {
-                    0.0
-                } else {
-                    done as f32 / total as f32
-                };
-                // **No `.text(...)`.** `ProgressBar` paints its label with
-                // `override_text_color`, which this theme sets to `TEXT` — 2.4:1 on
-                // `ORANGE`, and unfixable from outside the widget. The phase and the
-                // count are therefore drawn as ordinary labels on either side of the
-                // bar, where they are read against the bar's own ground.
-                ui.add(
-                    egui::ProgressBar::new(frac)
-                        .desired_width(ui.available_width())
-                        .desired_height(12.0)
-                        .corner_radius(theme::R_CTRL)
-                        .fill(theme::ORANGE),
-                );
+                // **The track is not here any more.** CORE §4: "The proportion done is
+                // drawn as a 2px line along the bar's own top edge, not as a track inside
+                // the row: it is the one measurement in the window that wants the whole
+                // width, and the edge is already there." `status_bar` paints it, because
+                // only `status_bar` knows where the panel's edge is.
+                //
+                // What stays is what a track could never carry anyway: the phase, the
+                // count, and the Cancel that is the only user-reachable writer to
+                // `app.cancel` in the program.
             });
         } else if app.listing {
             // `progress` is consulted first and `listing` second, as the old bar did:
