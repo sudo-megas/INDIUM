@@ -2255,22 +2255,16 @@ impl Indium {
 /// The smallest window INDIUM will run in, and the one number `main.rs` hands the
 /// compositor as `with_min_inner_size`.
 ///
-/// **900** is the three zones' own floors added up: the sidebar is fixed at 202, the
-/// Inspector will not go under 272, and the entry table cannot show Name, Size, Packed and
-/// Method in less than 384 — the four column widths *plus* the `item_spacing.x` that
-/// `egui_extras` charges between them — and about 10 more for its scrollbar, over 20 of
-/// central chrome. It was 880, which was below its own sum because the spacing was forgotten.
-///
-/// **680** is a height the sidebar's header, list rows and reserved foot fit inside.
-///
-/// Both are only a **request**, and this compositor declines them: measured on KWin, INDIUM
-/// asks for 1180×720 and is handed 960×540 whatever floor it names. Nothing here tries to
-/// force the point — a program that resizes the window out from under the hand dragging it is
-/// worse than a short window. Shorter than this and the sidebar scrolls, which is what any
-/// program does when its contents outgrow it.
-pub const MIN_W: f32 = 900.0;
+/// **Low on purpose.** It used to be 900×680 — the size at which all three zones are
+/// comfortable — and that is the wrong thing for a floor to be: a person dragging the edge
+/// inward hits it and the window stops dead under their hand, which reads as the program
+/// snapping rather than as a limit. Comfort is not the floor's job. The floor's job is to
+/// refuse a window nothing can be done in, and every zone degrades on its own well before
+/// this: the sidebar scrolls, the table clips its columns, the Inspector has its own
+/// `MIN_CONTENT`. So this is small enough that ordinary resizing never meets it.
+pub const MIN_W: f32 = 640.0;
 /// See [`MIN_W`].
-pub const MIN_H: f32 = 680.0;
+pub const MIN_H: f32 = 480.0;
 
 /// The whole panel, gutter included.
 ///
