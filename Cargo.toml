@@ -6,7 +6,7 @@ license = "GPL-3.0-only"
 description = "An archive manager for Linux on Wayland where the metadata is the main event."
 
 [dependencies]
-ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "file_chooser"] }
+ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "file_chooser", "open_uri"] }
 eframe = { version = "0.36.1", default-features = false, features = ["glow", "wayland"] }
 egui_extras = { version = "0.36.1", features = ["image"] }
 futures-lite = "2.6.1"

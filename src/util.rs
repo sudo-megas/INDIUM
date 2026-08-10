@@ -226,6 +226,41 @@ pub fn parent_dir(path: &str) -> &str {
     }
 }
 
+/// Shorten `s` to at most `cells` columns by taking the middle out, not the end.
+///
+/// CORE §4: *"The directory is elided in the middle, never at the end, because the end is
+/// the folder the archive is actually in and the start is the tree it belongs to; a path
+/// that keeps only one of those has kept the wrong half."* egui's own `.truncate()` cuts
+/// the tail, which on `/home/megas/Downloads/2026/archives/holiday` throws away the only
+/// word that identifies it.
+///
+/// **Counts `chars`, never bytes.** The corpus this program is tested against is Turkish,
+/// where `ş` and `ğ` are two bytes each, and a byte-slicing version of this function would
+/// panic on the first one.
+///
+/// The tail gets the odd column when the budget is odd: between the tree and the leaf, the
+/// leaf is what a person is looking for.
+pub fn elide_middle(s: &str, cells: usize) -> String {
+    let n = s.chars().count();
+    if n <= cells {
+        return s.to_string();
+    }
+    match cells {
+        0 => String::new(),
+        1 => "…".to_string(),
+        _ => {
+            let keep = cells - 1;
+            let head = keep / 2;
+            let tail = keep - head;
+            let mut out = String::with_capacity(s.len());
+            out.extend(s.chars().take(head));
+            out.push('…');
+            out.extend(s.chars().skip(n - tail));
+            out
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // What a preview is looking at — P5 §B2
 // ---------------------------------------------------------------------------
@@ -416,5 +451,62 @@ mod tests {
             Content::Text,
             "it is printable, so it reads as text"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // elide_middle — CORE §4's "never at the end"
+    // -----------------------------------------------------------------------
+
+    const LONG: &str = "/home/megas/Downloads/2026/archives/holiday-crete";
+
+    #[test]
+    fn a_path_that_fits_is_not_touched() {
+        assert_eq!(elide_middle(LONG, LONG.chars().count()), LONG);
+        assert_eq!(elide_middle(LONG, 500), LONG);
+        assert_eq!(elide_middle("", 0), "");
+    }
+
+    #[test]
+    fn an_elided_path_never_exceeds_its_budget() {
+        for cells in 0..=60 {
+            let out = elide_middle(LONG, cells);
+            assert!(
+                out.chars().count() <= cells,
+                "budget {cells} produced {} columns: {out}",
+                out.chars().count()
+            );
+        }
+    }
+
+    #[test]
+    fn both_ends_survive_the_elision() {
+        let out = elide_middle(LONG, 24);
+        assert!(out.starts_with('/'), "the root went missing: {out}");
+        assert!(
+            out.ends_with("crete"),
+            "the leaf went missing, which is the half worth keeping: {out}"
+        );
+        assert!(out.contains('…'));
+    }
+
+    /// The reason this counts `chars` and not bytes. Every one of these is two bytes, so a
+    /// byte-slicing implementation panics somewhere in this string rather than returning
+    /// something merely ugly.
+    #[test]
+    fn a_turkish_path_elides_without_panicking() {
+        let turkish = "/home/megas/belgeler/açık-şeyler/AŞÇALIKĞA-yedek";
+        for cells in 0..=turkish.chars().count() + 5 {
+            let out = elide_middle(turkish, cells);
+            assert!(out.chars().count() <= cells);
+        }
+        assert!(elide_middle(turkish, 20).ends_with("yedek"));
+    }
+
+    /// A lane too narrow for anything still has to return something drawable.
+    #[test]
+    fn an_impossible_budget_degrades_rather_than_panics() {
+        assert_eq!(elide_middle(LONG, 0), "");
+        assert_eq!(elide_middle(LONG, 1), "…");
+        assert_eq!(elide_middle(LONG, 2).chars().count(), 2);
     }
 }

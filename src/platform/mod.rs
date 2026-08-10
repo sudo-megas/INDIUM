@@ -1,13 +1,15 @@
 //! The Linux specifics.
 //!
 //! CORE §3 gives this module "clipboard, `.desktop` parsing for Open With,
-//! default-app registration, XDG paths, and the second window". P1 and P2 need only the
-//! paths and the TOML store; the rest arrives with P3. The window arrives with P8: on
-//! this platform a window is a process, which is what makes it a Linux specific like the
-//! others.
+//! default-app registration, XDG paths, the second window ... and handing a directory to
+//! the desktop's file manager". P1 and P2 need only the paths and the TOML store; the rest
+//! arrives with P3. The window arrives with P8: on this platform a window is a process,
+//! which is what makes it a Linux specific like the others. The file manager arrives with
+//! P13, and goes through the portal for the reason `picker` already does.
 
 pub mod apps;
 pub mod clipboard;
+pub mod open;
 pub mod picker;
 pub mod scratch;
 pub mod store;

@@ -268,6 +268,11 @@ pub struct Indium {
     paste_rx: Option<Receiver<Result<Vec<PathBuf>, String>>>,
     /// The portal file picker's answer, and what it was asked for.
     picker_rx: Option<Receiver<PickedFiles>>,
+    /// The answer from `platform::open::open_directory`, which only ever needs to be heard
+    /// when it is bad — but it does need to be heard. A folder that silently fails to open
+    /// is the same defect the second testing round found in extraction: work that reports
+    /// success it did not have.
+    reveal_rx: Option<Receiver<Result<(), String>>>,
 
     // --- Preview (P5) -----------------------------------------------------
     pub preview: Option<PreviewData>,
@@ -382,6 +387,7 @@ impl Indium {
             apply_rx: None,
             paste_rx: None,
             picker_rx: None,
+            reveal_rx: None,
             preview: None,
             preview_loading: None,
             preview_rx: None,
@@ -534,6 +540,10 @@ impl Indium {
             Some(rx) => rx.try_iter().collect(),
             None => Vec::new(),
         };
+        let reveal_msgs: Vec<Result<(), String>> = match &self.reveal_rx {
+            Some(rx) => rx.try_iter().collect(),
+            None => Vec::new(),
+        };
         let preview_msgs: Vec<PreviewRead> = match &self.preview_rx {
             Some(rx) => rx.try_iter().collect(),
             None => Vec::new(),
@@ -628,6 +638,16 @@ impl Indium {
                     self.status = Status::bad(msg);
                     self.passphrase = None;
                 }
+            }
+        }
+
+        for result in reveal_msgs {
+            self.reveal_rx = None;
+            // Success says nothing. The window the user asked for is now in front of
+            // them, and a status line announcing it would be talking about something they
+            // can already see.
+            if let Err(e) = result {
+                self.status = Status::bad(e);
             }
         }
 
@@ -1264,6 +1284,25 @@ impl Indium {
         };
         std::thread::spawn(move || {
             let _ = tx.send((what, picker::open_files(title, multiple)));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Show a directory in the desktop's file manager — CORE §4's clickable path.
+    ///
+    /// On a worker for the reason `request_picker` is: the portal call is a D-Bus round
+    /// trip, and a backend that decides to prompt holds it open for as long as the user
+    /// thinks. Nothing in the window waits on the answer, which is why the only thing that
+    /// comes back is a sentence for when it failed.
+    pub fn reveal_directory(&mut self, ctx: &egui::Context, dir: PathBuf) {
+        if self.reveal_rx.is_some() {
+            return;
+        }
+        let (tx, rx) = channel();
+        self.reveal_rx = Some(rx);
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::platform::open::open_directory(&dir));
             ctx.request_repaint();
         });
     }
@@ -2301,7 +2340,7 @@ fn sb_row(ui: &mut egui::Ui, layout: egui::Layout, add: impl FnOnce(&mut egui::U
 /// The name on the left because it is the answer to "which window is this"; the directory
 /// on the right because it is the longest thing in the bar and the least urgent, so it is
 /// what gives way when the window narrows.
-fn sb_what_is_open(app: &Indium, ui: &mut egui::Ui) {
+fn sb_what_is_open(app: &mut Indium, ui: &mut egui::Ui) {
     sb_row(ui, egui::Layout::left_to_right(egui::Align::Center), |ui| {
         match app.archive_path.as_ref().and_then(|p| p.file_name()) {
             // The row's subject, so it is bold — CORE §4. It is also the answer to
@@ -2360,17 +2399,55 @@ fn sb_what_is_open(app: &Indium, ui: &mut egui::Ui) {
             .unwrap_or_default();
         if !dir.is_empty() {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(dir)
-                            .family(theme::MONO)
-                            .size(12.0)
-                            .color(theme::TEXT_MUTED),
+                // CORE §4: "elided in the middle, never at the end, because the end is the
+                // folder the archive is actually in and the start is the tree it belongs
+                // to; a path that keeps only one of those has kept the wrong half."
+                //
+                // egui's own `.truncate()` cuts the tail, which is what this replaces. The
+                // budget has to be counted rather than guessed, so it is measured: one
+                // glyph advance out of the font at the size this row actually uses, and
+                // the width divided by it. **That arithmetic is only true because the face
+                // is monospace** (CORE §6) — a double-width script would elide short. The
+                // corpus this program is tested against is Turkish, which is single-width.
+                let font = egui::FontId::new(12.0, theme::MONO);
+                // `fonts_mut`, not `fonts`: measuring a glyph can populate the atlas, so
+                // the accessor that admits it is the correct one.
+                let cell = ui.ctx().fonts_mut(|f| f.glyph_width(&font, '0')).max(1.0);
+                let gap = ui.spacing().item_spacing.x;
+                // Less the folder glyph and the space before it, which are added after
+                // this label because the lane runs right to left.
+                let budget = ((ui.available_width() - cell - gap) / cell)
+                    .floor()
+                    .max(0.0) as usize;
+                let shown = crate::util::elide_middle(&dir, budget);
+
+                let hit = ui
+                    .add(
+                        egui::Label::new(
+                            egui::RichText::new(shown)
+                                .family(theme::MONO)
+                                .size(12.0)
+                                .color(theme::TEXT_MUTED),
+                        )
+                        // CORE §4: "clicking it hands that folder to the desktop's file
+                        // manager." The tray strip is the precedent — §4 says of it "the
+                        // strip itself is a button" — so a bar element that acts is a
+                        // shape this window already has.
+                        .sense(egui::Sense::click()),
                     )
-                    // Truncated rather than wrapped: a second line has nowhere to go
-                    // in a lane of fixed height, and a path elided at the end still
-                    // says which tree the archive lives in.
-                    .truncate(),
+                    .on_hover_text(&dir)
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+
+                if hit.clicked() {
+                    let ctx = ui.ctx().clone();
+                    app.reveal_directory(&ctx, PathBuf::from(&dir));
+                }
+
+                ui.label(
+                    egui::RichText::new(theme::icon::FOLDER)
+                        .family(theme::MONO)
+                        .size(12.0)
+                        .color(theme::TEXT_MUTED),
                 );
             });
         }
