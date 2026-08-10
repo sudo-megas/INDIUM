@@ -273,8 +273,6 @@ pub struct Indium {
     /// is the same defect the second testing round found in extraction: work that reports
     /// success it did not have.
     reveal_rx: Option<Receiver<Result<(), String>>>,
-    /// How many times the window floor has been asserted; see `hold_the_floor`.
-    floor_tries: u8,
 
     // --- Preview (P5) -----------------------------------------------------
     pub preview: Option<PreviewData>,
@@ -390,7 +388,6 @@ impl Indium {
             paste_rx: None,
             picker_rx: None,
             reveal_rx: None,
-            floor_tries: 0,
             preview: None,
             preview_loading: None,
             preview_rx: None,
@@ -517,41 +514,6 @@ impl Indium {
             // INDIUM repaints nothing and costs nothing".
             ctx.request_repaint();
         });
-    }
-
-    /// Make the window at least [`MIN_W`] × [`MIN_H`], because asking was not enough.
-    ///
-    /// `with_min_inner_size` is a *request*, and this compositor does not grant it: KWin
-    /// restores a remembered geometry and hands INDIUM whatever it had last time. Measured
-    /// rather than assumed — asked for 1180×720 with a floor of 880×680 and given
-    /// **960×540**, which is 140 short of what the sidebar needs and exactly why its two
-    /// list sections were reported scrolling out of their own zone.
-    ///
-    /// A resize *command* is a different thing from a builder hint and this one is honoured.
-    /// It fires at most three times and stops for good the moment the window is big enough,
-    /// so a person who drags the edge in afterwards keeps the window they chose — the floor
-    /// is a starting condition, not a leash.
-    fn hold_the_floor(&mut self, ctx: &egui::Context) {
-        if self.floor_tries >= 3 {
-            return;
-        }
-        let Some(seen) = ctx.input(|i| i.raw.screen_rect) else {
-            return;
-        };
-        let (w, h) = (seen.width(), seen.height());
-        // The first frame can arrive before the compositor has said anything.
-        if w <= 0.0 || h <= 0.0 {
-            return;
-        }
-        if w + 0.5 < MIN_W || h + 0.5 < MIN_H {
-            self.floor_tries += 1;
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
-                w.max(MIN_W),
-                h.max(MIN_H),
-            )));
-        } else {
-            self.floor_tries = 3;
-        }
     }
 
     fn drain_worker(&mut self, ctx: &egui::Context) {
@@ -1927,7 +1889,6 @@ impl eframe::App for Indium {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
-        self.hold_the_floor(&ctx);
         self.drain_worker(&ctx);
         self.take_dropped_files(&ctx);
 
@@ -2304,9 +2265,14 @@ impl Indium {
 /// Inspector will not go under 272, and the entry table cannot show Name, Size, Packed and
 /// Method in less than 360 plus its scrollbar, over 20 of central chrome.
 ///
-/// **680** is what the sidebar needs to show all seven of its rows: its sections lay out to
-/// 326.1 and its foot to 146.6, so the panel wants 472.7 inside a frame costing 40, above a
-/// status bar taking [`SB_HEIGHT`].
+/// **680** is the height at which the sidebar can show all seven rows *and* its whole header.
+///
+/// Both are only ever a **request**. This compositor declines them — measured, it hands
+/// INDIUM 960×540 whatever is asked — and P13 briefly answered that by commanding the window
+/// back up to the floor on startup. That was removed: a program that resizes the window while
+/// a person is dragging its edge is a program fighting its user, and it stopped being
+/// necessary the moment `sidebar` learned to give up its header instead of its rows. The
+/// floor is what INDIUM would like; the sidebar is what makes any smaller size survivable.
 pub const MIN_W: f32 = 880.0;
 /// See [`MIN_W`].
 pub const MIN_H: f32 = 680.0;
