@@ -104,7 +104,17 @@ fn main() -> eframe::Result<()> {
             // (14+14 inner, 2+2 edge, 4+4 gutter) and the status bar takes `SB_HEIGHT`, so
             // the floor is 472.7 + 40 + 136 = 648.7. 680 is that, rounded up with enough
             // slack that the last row is not flush against the edge it sits on.
-            .with_min_inner_size([840.0, 680.0]),
+            //
+            // **880 is measured too, and by the same method.** The three zones have hard
+            // floors: the sidebar is fixed at 202 (166 of content + 36 of frame), the
+            // Inspector will not go below 272 (`MIN_CONTENT` 236 + 36), and the entry table
+            // cannot show its four columns in less than 360 — `Name` is `at_least(120)` and
+            // Size, Packed and Method are exact at 84, 84 and 72 — plus its scrollbar. The
+            // central zone's own chrome is 20, asked of the running program rather than
+            // counted: at a 960 root the sidebar took 202, the Inspector its default 342 and
+            // the table 396, and 960 − 940 is that 20. 202 + 272 + 376 + 20 = 870, and 880
+            // is that with a little air.
+            .with_min_inner_size([880.0, 680.0]),
         ..Default::default()
     };
 
