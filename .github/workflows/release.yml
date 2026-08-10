@@ -270,6 +270,22 @@ jobs:
           sed -i "s|#tag=[^\"]*|#$frag|" build/package/PKGBUILD
           grep -n '^source=' build/package/PKGBUILD
 
+      # The PKGBUILD fetches its source from GitHub over the network, which is the whole
+      # point of it — the package is built from an immutable name, not from whatever happens
+      # to be in the checkout. That only works anonymously while the repository is public,
+      # and this one is not: the clone reached `Making package: indium 1.0.0-4` and then
+      # died on `could not read Username for 'https://github.com'`.
+      #
+      # `--system`, not `--global`, and that is the point: `makepkg` runs as `builder`
+      # (below), so a config written into root's home would never be read. `/etc/gitconfig`
+      # is read by every user in a container that exists for one job and is thrown away.
+      # The token is the run's own, scoped to this repository, and expires with the job.
+      - name: Let the build clone a private repository
+        run: |
+          git config --system \
+            url."https://x-access-token:${{ github.token }}@github.com/".insteadOf \
+            "https://github.com/"
+
       # makepkg refuses to run as root and is right to: build() and check() run arbitrary
       # code from the PKGBUILD, and fakeroot exists so that package() can write root-owned
       # files without any of the rest of it being root. The container starts as root, so a
