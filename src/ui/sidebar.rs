@@ -122,30 +122,39 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     // **960×540** — 140 short of what the sidebar wants, which is exactly how
                     // *Bookmarks* and *Recent files* ended up below the fold. A zone that
                     // only works at sizes it cannot insist on is a zone that does not work.
-                    let (mark, subtitle) = header_tier(inner);
+                    let header = header_tier(inner);
                     ui.vertical_centered(|ui| {
-                        // **The mark is dropped, never shrunk past legibility.** CORE §6
-                        // says the icon is photorealistic PNG, and photorealism is the one
-                        // kind of image that has nothing left at 24 points — it goes to
-                        // mush, and a smudge above the rows reads as a rendering fault
-                        // rather than as a small logo. The wordmark is type and type
-                        // survives being small, so it is the part that stays.
-                        if let Some(size) = mark {
-                            ui.add(theme::mark(size));
+                        if header == Header::Inline {
+                            ui.horizontal(|ui| {
+                                ui.add(theme::mark(26.0));
+                                ui.add_space(6.0);
+                                ui.label(
+                                    egui::RichText::new("INDIUM")
+                                        .size(23.0)
+                                        .color(theme::TEXT)
+                                        .family(theme::bold()),
+                                );
+                            });
+                        } else {
+                            ui.add(theme::mark(if header == Header::Full {
+                                50.0
+                            } else {
+                                40.0
+                            }));
                             ui.add_space(4.0);
-                        }
-                        ui.label(
-                            egui::RichText::new("INDIUM")
-                                .size(23.0)
-                                .color(theme::TEXT)
-                                .family(theme::bold()),
-                        );
-                        if subtitle {
                             ui.label(
-                                egui::RichText::new("archive manager")
-                                    .size(13.0)
-                                    .color(theme::TEXT_MUTED),
+                                egui::RichText::new("INDIUM")
+                                    .size(23.0)
+                                    .color(theme::TEXT)
+                                    .family(theme::bold()),
                             );
+                            if header == Header::Full {
+                                ui.label(
+                                    egui::RichText::new("archive manager")
+                                        .size(13.0)
+                                        .color(theme::TEXT_MUTED),
+                                );
+                            }
                         }
                     });
                     ui.add_space(6.0);
@@ -287,14 +296,32 @@ const COMPACT_HEADER: f32 = 404.0;
 /// rule. Returns the mark's size — `None` when there is no room for it at all — and whether
 /// the subtitle is drawn. The wordmark is never dropped: it is type, and type stays legible
 /// at any size the zone can be.
-fn header_tier(inner: f32) -> (Option<f32>, bool) {
+fn header_tier(inner: f32) -> Header {
     if inner >= FULL_HEADER {
-        (Some(50.0), true)
+        Header::Full
     } else if inner >= COMPACT_HEADER {
-        (Some(40.0), false)
+        Header::Stacked
     } else {
-        (None, false)
+        Header::Inline
     }
+}
+
+/// How the mark and the wordmark are arranged when the zone is generous or tight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Header {
+    /// The mark at 50 above the wordmark, subtitle beneath. The family layout.
+    Full,
+    /// The mark at 40 above the wordmark. The subtitle is what a tight zone spends first.
+    Stacked,
+    /// The mark beside the wordmark, on one line.
+    ///
+    /// **The mark is never dropped.** It was, briefly, and that was wrong twice over: it
+    /// made the logo vanish from windows this compositor hands out all day, and the attempt
+    /// before that shrank it alone in the middle of the zone, where a photograph at
+    /// twenty-four points reads as damage rather than as a logo. Beside type it reads as a
+    /// logotype, which is what it is — and it costs the zone nothing, because the line was
+    /// already the wordmark's height.
+    Inline,
 }
 
 /// The contents of one sidebar line — label on the left, bare-key hint on the right —
@@ -402,37 +429,44 @@ mod tests {
         window - super::super::SB_HEIGHT - 40.0
     }
 
-    /// The question a person actually asks: **at what size does the mark come back?**
+    /// **The mark is on screen at every size.** This is what the whole sidebar argument came
+    /// down to: the logo kept vanishing from ordinary windows, because a rule that was
+    /// correct on paper dropped it at exactly the heights this compositor hands out.
     ///
-    /// Answered here rather than by eye, because the eye was wrong twice: this display
-    /// scales by 1.25, so a 540-point window photographs as 675 pixels and a screenshot
-    /// compared against a point threshold decides the opposite of the program.
+    /// Asserted rather than eyeballed, because the eye was wrong twice — this display scales
+    /// by 1.25, so a 540-point window photographs as 675 pixels, and a screenshot compared
+    /// against a point threshold decides the opposite of the program.
     #[test]
-    fn the_mark_returns_once_the_zone_can_afford_it() {
-        // The window the compositor keeps handing us. No mark, and that is the trade —
-        // all seven rows fit instead.
-        assert_eq!(header_tier(inner_at(540.0)), (None, false));
-
-        // INDIUM's own floor. Everything: mark, wordmark, subtitle.
-        assert_eq!(header_tier(inner_at(680.0)), (Some(50.0), true));
-
-        // The boundary either side, to the point.
+    fn the_mark_is_never_absent() {
+        for h in (240..1200).step_by(4) {
+            let t = header_tier(inner_at(h as f32));
+            assert!(
+                matches!(t, Header::Full | Header::Stacked | Header::Inline),
+                "no header at all at {h}"
+            );
+        }
+        // The window the compositor keeps handing us: the mark is beside the name, not gone.
+        assert_eq!(header_tier(inner_at(540.0)), Header::Inline);
+        assert_eq!(header_tier(inner_at(564.0)), Header::Inline);
+        // INDIUM's own floor: everything, stacked, with the subtitle.
+        assert_eq!(header_tier(inner_at(680.0)), Header::Full);
+        // The boundary, to the point.
         let full = FULL_HEADER + super::super::SB_HEIGHT + 40.0;
-        assert_eq!(header_tier(inner_at(full)), (Some(50.0), true));
-        assert_eq!(header_tier(inner_at(full - 1.0)), (Some(40.0), false));
+        assert_eq!(header_tier(inner_at(full)), Header::Full);
+        assert_eq!(header_tier(inner_at(full - 1.0)), Header::Stacked);
     }
 
     /// The three tiers are ordered: more room never buys less header.
     #[test]
     fn the_header_never_shrinks_as_the_window_grows() {
-        let mut last = (None, false);
+        let rank = |t: Header| match t {
+            Header::Inline => 0,
+            Header::Stacked => 1,
+            Header::Full => 2,
+        };
+        let mut last = Header::Inline;
         for h in (300..900).step_by(5) {
             let now = header_tier(inner_at(h as f32));
-            let rank = |t: (Option<f32>, bool)| match t {
-                (None, _) => 0,
-                (Some(_), false) => 1,
-                (Some(_), true) => 2,
-            };
             assert!(
                 rank(now) >= rank(last),
                 "at {h} the header went backwards: {last:?} -> {now:?}"
@@ -441,15 +475,11 @@ mod tests {
         }
     }
 
-    /// The wordmark is the one thing that never goes. It is type; the mark is a photograph.
+    /// The subtitle is the first thing a tight zone gives up, and the only tier that keeps it
+    /// is the roomiest.
     #[test]
-    fn every_tier_still_draws_something() {
-        for h in [300.0, 540.0, 604.0, 680.0, 1080.0] {
-            let (mark, subtitle) = header_tier(inner_at(h));
-            assert!(
-                mark.is_some() || !subtitle,
-                "a subtitle without a mark at {h}"
-            );
-        }
+    fn the_subtitle_is_the_first_thing_given_up() {
+        assert_eq!(header_tier(inner_at(1080.0)), Header::Full);
+        assert_ne!(header_tier(inner_at(560.0)), Header::Full);
     }
 }
