@@ -100,9 +100,10 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     // and every version of it was worse than a header that simply does not
                     // move: a first launch and a one-pixel drag could show two different
                     // layouts, which is a worse thing to look at than any one of them. If
-                    // the window is too short to hold this and all seven rows, the rows
-                    // scroll, exactly as they did before and exactly as every other program
-                    // handles a window smaller than its contents.
+                    // the window is too short to hold this and the four rows beneath it,
+                    // those four scroll — the foot reserves its height first and stays put —
+                    // exactly as they did before and exactly as every other program handles
+                    // a window smaller than its contents.
                     ui.vertical_centered(|ui| {
                         ui.add(theme::mark(50.0));
                         ui.add_space(4.0);
@@ -232,24 +233,6 @@ fn action_item(
 /// cannot drift apart in height.
 const ROW_PAD: egui::Margin = egui::Margin::symmetric(8, 3);
 
-/// How the mark and the wordmark are arranged when the zone is generous or tight.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Header {
-    /// The mark at 50 above the wordmark, subtitle beneath. The family layout.
-    Full,
-    /// The mark at 40 above the wordmark. The subtitle is what a tight zone spends first.
-    Stacked,
-    /// The mark beside the wordmark, on one line.
-    ///
-    /// **The mark is never dropped.** It was, briefly, and that was wrong twice over: it
-    /// made the logo vanish from windows this compositor hands out all day, and the attempt
-    /// before that shrank it alone in the middle of the zone, where a photograph at
-    /// twenty-four points reads as damage rather than as a logo. Beside type it reads as a
-    /// logotype, which is what it is — and it costs the zone nothing, because the line was
-    /// already the wordmark's height.
-    Inline,
-}
-
 /// The contents of one sidebar line — label on the left, bare-key hint on the right —
 /// shared by the live arm and the unavailable one so the two cannot drift apart.
 ///
@@ -275,9 +258,10 @@ fn row_body(
         // CORE §4: "Every row carries a leading glyph in the same ink as its label."
         //
         // The same ink, and not a muted one, so an active row brightens as a single object
-        // rather than as a label with a dimmer thing stuck to it. It costs no layout: §2's
-        // `Mono` cut is single-cell, so the glyph occupies exactly one column and the
-        // labels stay aligned down the sidebar as if it were a character of the word.
+        // rather than as a label with a dimmer thing stuck to it. At `ICON_SCALE` the glyph
+        // is the tallest thing in the line and sets the row's height; what it does not cost
+        // is *alignment* — §2's `Mono` cut is single-cell, so every row spends exactly one
+        // column on its glyph and the labels stay flush down the sidebar.
         ui.label(
             egui::RichText::new(icon)
                 .family(theme::MONO)

@@ -97,23 +97,21 @@ fn main() -> eframe::Result<()> {
             // floor the program can actually be used at is the better half of the answer,
             // and a scrollbar over a wordmark is not a layout anyone chose.
             //
-            // **680 is measured, not chosen.** P13's icons made every sidebar row taller,
-            // and at 600 the two list sections scrolled out of their own zone. Asked of the
-            // running program rather than estimated: the sections lay out to 326.1 and the
-            // foot to 146.6, so the panel needs 472.7 inside its frame; the frame costs 40
-            // (14+14 inner, 2+2 edge, 4+4 gutter) and the status bar takes `SB_HEIGHT`, so
-            // the floor is 472.7 + 40 + 136 = 648.7. 680 is that, rounded up with enough
-            // slack that the last row is not flush against the edge it sits on.
+            // **680** is a height the sidebar fits inside with slack: its header, its four
+            // list rows and its reserved foot, above a status bar of `SB_HEIGHT`. It was
+            // raised from 600 because P13's icons made every row taller and the two list
+            // sections went below the fold. The precise figures this comment used to carry
+            // were measured before P13 trimmed 45 points of padding out of the zone and are
+            // not restated here rather than restated wrongly.
             //
-            // **880 is measured too, and by the same method.** The three zones have hard
-            // floors: the sidebar is fixed at 202 (166 of content + 36 of frame), the
-            // Inspector will not go below 272 (`MIN_CONTENT` 236 + 36), and the entry table
-            // cannot show its four columns in less than 360 — `Name` is `at_least(120)` and
-            // Size, Packed and Method are exact at 84, 84 and 72 — plus its scrollbar. The
-            // central zone's own chrome is 20, asked of the running program rather than
-            // counted: at a 960 root the sidebar took 202, the Inspector its default 342 and
-            // the table 396, and 960 − 940 is that 20. 202 + 272 + 376 + 20 = 870, and 880
-            // is that with a little air.
+            // **900** is the three zones' own floors added up: the sidebar is fixed at 202
+            // (166 of content + 36 of frame); the Inspector will not go under 272
+            // (`MIN_CONTENT` 236 + 36); and the entry table cannot show its four columns in
+            // less than 384 — `Name` is `at_least(120)`, Size, Packed and Method are exact
+            // at 84, 84 and 72, and `egui_extras` charges `item_spacing.x` between them, so
+            // three gaps of 8 — plus about 10 for a solid scrollbar. Over 20 of central
+            // chrome, measured: at a 960 root the sidebar took 202, the Inspector its
+            // default 342 and the table 396, and 960 − 940 is that 20.
             .with_min_inner_size([indium::ui::MIN_W, indium::ui::MIN_H]),
         ..Default::default()
     };

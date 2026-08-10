@@ -102,7 +102,6 @@ rule; then *Bookmarks* `2` and *Recent files* `3`; at the bottom *New* `N`, *Set
 leading glyph in the same ink as its label, so the column can be found by shape before it is
 read; §6 says which glyphs and what they are allowed to do.
 
-
 The archive sits above the rule and the two lists below it because the first thing a person
 looks for is the archive they are already inside — the order used to run the other way, and a
 testing round said so plainly. *Open file* keeps the archive's company for the same reason: it

@@ -2242,12 +2242,6 @@ impl Indium {
 // Status bar — CORE §4's fifth zone
 // ---------------------------------------------------------------------------
 
-/// The whole panel, gutter included.
-///
-/// 3 × SB_ROW(32) + 2 × SB_GAP(4) = 104 of content, + 10 + 10 of inner margin, + the 2 + 2
-/// the edge costs, + the 4 + 4 of `zone()`'s outer gutter = 136. `exact_size` counts every
-/// one of those, so this number is the panel and its half-gutter rim together. It was 100
-/// until P13 raised `SB_ROW` to carry an icon at `ICON_SCALE`.
 ///
 /// **The edge is in that sum, and has to be.** `Frame::total_margin` is `inner_margin +
 /// stroke.width + outer_margin`, and the box egui actually paints is `content +
@@ -2261,21 +2255,29 @@ impl Indium {
 /// The smallest window INDIUM will run in, and the one number `main.rs` hands the
 /// compositor as `with_min_inner_size`.
 ///
-/// **880** is the three zones' own floors added up: the sidebar is fixed at 202, the
+/// **900** is the three zones' own floors added up: the sidebar is fixed at 202, the
 /// Inspector will not go under 272, and the entry table cannot show Name, Size, Packed and
-/// Method in less than 360 plus its scrollbar, over 20 of central chrome.
+/// Method in less than 384 — the four column widths *plus* the `item_spacing.x` that
+/// `egui_extras` charges between them — and about 10 more for its scrollbar, over 20 of
+/// central chrome. It was 880, which was below its own sum because the spacing was forgotten.
 ///
-/// **680** is the height at which the sidebar shows all seven rows beneath its header.
+/// **680** is a height the sidebar's header, list rows and reserved foot fit inside.
 ///
 /// Both are only a **request**, and this compositor declines them: measured on KWin, INDIUM
 /// asks for 1180×720 and is handed 960×540 whatever floor it names. Nothing here tries to
 /// force the point — a program that resizes the window out from under the hand dragging it is
 /// worse than a short window. Shorter than this and the sidebar scrolls, which is what any
 /// program does when its contents outgrow it.
-pub const MIN_W: f32 = 880.0;
+pub const MIN_W: f32 = 900.0;
 /// See [`MIN_W`].
 pub const MIN_H: f32 = 680.0;
 
+/// The whole panel, gutter included.
+///
+/// 3 × SB_ROW(32) + 2 × SB_GAP(4) = 104 of content, + 10 + 10 of inner margin, + the 2 + 2
+/// the edge costs, + the 4 + 4 of `zone()`'s outer gutter = 136. `exact_size` counts every
+/// one of those, so this number is the panel and its half-gutter rim together. It was 100
+/// until P13 raised `SB_ROW` to carry an icon at `ICON_SCALE`.
 const SB_HEIGHT: f32 = 136.0;
 
 /// The status bar's frame, named so the height above can be checked against it.
@@ -2302,9 +2304,9 @@ fn status_bar(app: &mut Indium, ui: &mut egui::Ui) {
         .show_separator_line(false)
         .frame(sb_frame())
         .show(ui, |ui| {
-            // The 4 in the arithmetic above is this line. egui's default is 5.0, which
-            // makes the three rows 70 tall in a lane that is 68 — and the third row is
-            // the one that gets clipped.
+            // The 4 in the arithmetic above is this line. The theme's own `item_spacing.y`
+            // is 5.0, which would make the three rows 106 tall in a lane that is 104 — and
+            // the third row is the one that gets clipped.
             ui.spacing_mut().item_spacing.y = theme::SB_GAP;
             // And this is what keeps Cancel to its 20. `interact_size.y` is `CONTROL_H`,
             // which P13 split away from `SB_ROW` precisely so that a taller row does not
@@ -2603,15 +2605,6 @@ fn sb_progress(app: &Indium, ui: &mut egui::Ui) {
         .map(|p| (p.done, p.total, p.label.clone()));
 
     sb_row(ui, egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        // The track is `extreme_bg_color`, which `install_visuals` sets to `WINDOW` —
-        // the colour of the entry table's well, and *lighter* than the floor this bar
-        // paints. A rail lighter than the surface it lies on reads as raised, which is
-        // exactly backwards for a groove that something fills up. `VOID` is the only
-        // ground darker than `STATUS_BAR`, so the track recedes and the orange sits
-        // down in it. Scoped to this row: `visuals_mut` is clone-on-write per `Ui`, and
-        // every text field in the program wants the lighter well (theme §Base).
-        ui.visuals_mut().extreme_bg_color = theme::VOID;
-
         if let Some((done, total, label)) = running {
             // Orange with a Cancel beside it is CORE §6's third permitted meaning —
             // Apply/progress — and this is the only place in the window that draws it.
@@ -2647,9 +2640,9 @@ fn sb_progress(app: &Indium, ui: &mut egui::Ui) {
             // `E` works while a listing is still streaming in, and when both are true
             // the Cancel has to reach the worker that is writing files.
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                // Sized explicitly: a `Spinner` left to itself takes
-                // `interact_size.y`, which is a whole SB_ROW, and a lane-height
-                // spinner is the tallest thing in a bar that is otherwise all text.
+                // Sized explicitly: a `Spinner` left to itself takes `interact_size.y`,
+                // which is `CONTROL_H` — 20, and still taller than the 13pt text beside
+                // it, which would make the spinner the loudest thing in a bar of words.
                 ui.add(egui::Spinner::new().color(theme::ORANGE).size(14.0));
                 let n = app.entries.len();
                 ui.label(

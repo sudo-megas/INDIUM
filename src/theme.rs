@@ -186,9 +186,10 @@ pub fn edge_hot() -> Stroke {
 /// make that impossible, they suit a monospace window, and the gutter plus the 2px edge do
 /// all the floating.
 pub const R_ZONE: u8 = 0;
-/// Buttons, chips, hand-rolled rows. The status bar's progress track used this until P13
-/// moved the proportion to a square-ended 2px line on the panel's edge; text fields and
-/// checkboxes still draw through it.
+/// Hand-rolled rows, text fields, checkboxes, and any button not built through [`button`] —
+/// the two raw `ui.button()` calls in the tray still land here. Buttons and chips made the
+/// theme's way take [`R_PILL`] instead. The status bar's progress track used this until P13
+/// moved the proportion to a square-ended 2px line on the panel's edge.
 pub const R_CTRL: u8 = 3;
 /// Popups, menus, the modal.
 pub const R_POPUP: u8 = 10;
@@ -201,8 +202,8 @@ pub const R_POPUP: u8 = 10;
 /// true pill on a `small()` button, which is shorter. One number, a pill at every height.
 ///
 /// It is applied **at the control**, never in [`install_visuals`]. `widgets.inactive`,
-/// `.hovered` and `.active` are also what a `TextEdit`, a checkbox and the status bar's
-/// checkboxes draw through; moving the constant there would turn the path field into a
+/// `.hovered` and `.active` are also what a `TextEdit` and a checkbox draw through;
+/// moving the constant there would turn the path field into a
 /// lozenge, and §6 gives the capsule to things you press.
 pub const R_PILL: u8 = R_POPUP;
 
@@ -261,7 +262,7 @@ pub const SECTION_ABOVE: f32 = 14.0;
 /// from a *git clone of the tag*. `include_bytes!` on a file git does not carry would fail
 /// the build for every person who ever packages INDIUM, and would fail it at `cargo build`
 /// with a missing-file error rather than anywhere informative. 1024 is the largest master the
-/// repository actually holds. It is drawn at 84px in the sidebar and 150px in About, so even
+/// repository actually holds. It is drawn at 50px in the sidebar and 150px in About, so even
 /// a 2× display asks for less than a third of it.
 pub const MARK: &[u8] = include_bytes!("../build/icons/indium-1024.png");
 
@@ -636,8 +637,10 @@ fn install_spacing(ctx: &egui::Context) {
 
         // The four this function's own doc comment promised to write down and never did.
         // A popup's padding, a menu's padding, the `CollapsingHeader` offset in New Archive,
-        // and the minimum height of every button — which now matches a status-bar row and a
-        // table row, so the three cannot disagree about how tall one line is.
+        // and the minimum height of every button — `CONTROL_H`, which matches a table row.
+        // The status bar's row is `SB_ROW` and no longer agrees with either: P13 split the
+        // two so that a taller bar could carry a double-size glyph without making every
+        // button in the program taller with it.
         style.spacing.window_margin = egui::Margin::same(14);
         style.spacing.menu_margin = egui::Margin::same(8);
         style.spacing.indent = 18.0;
@@ -673,8 +676,8 @@ pub fn zone(fill: Color32) -> egui::Frame {
 /// rather than shrunk to it. A popup whose content outgrew the window therefore lost its
 /// title band off the top and its foot off the bottom — which is to say it lost its name
 /// and the button it exists for, and kept the middle. The window's minimum inner height is
-/// 480 (`main.rs`) and three of the popups wanted more than that on their own, so this was
-/// never a small-screen edge case.
+/// [`crate::ui::MIN_H`], and it is only ever a request — this compositor hands INDIUM less —
+/// so a popup taller than the window it covers is not a small-screen edge case.
 pub fn popup_max_height(ctx: &egui::Context) -> f32 {
     (ctx.content_rect().height() - 2.0 * GUTTER as f32).max(240.0)
 }
