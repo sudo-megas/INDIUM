@@ -710,11 +710,17 @@ pub fn list_height(ctx: &egui::Context, chrome: f32, want: f32) -> f32 {
 /// status bar rows of fixed height.
 ///
 /// The negative outer margin is what makes it a band. `egui::Window` resolves to
-/// `Frame::popup`, whose inner margin insets its whole content; a footer that respected that
+/// `Frame::window`, whose inner margin insets its whole content; a footer that respected that
 /// inset would be a floating strip with popup-coloured gutters down both sides and along the
-/// bottom, which is a panel, not a foot. Pulling back by the inner margin puts the band's
-/// edges back on the popup's edges. `PAD` is the value `install_spacing` gives that margin,
-/// so the two move together.
+/// bottom, which is a panel, not a foot. Pulling back by that inset puts the band's edges
+/// back on the popup's edges.
+///
+/// **It pulls back by `PAD` and the inset is `window_margin`, and those are 12 and 14** — so
+/// two points of popup ground still show at the left, right and bottom of every foot. The
+/// two used to be the same number and no longer are; an audit found it, and it is written
+/// down here rather than fixed in a milestone that has already been asked to stop moving.
+/// The fix is one line — give `window_margin` the value `PAD` in `install_spacing` — and it
+/// changes the padding of all nine popups, which is why it is not being done in passing.
 pub fn foot(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::NONE
         .fill(POPUP_FOOT)
