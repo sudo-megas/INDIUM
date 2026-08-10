@@ -106,23 +106,25 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
 
         let mut table = TableBuilder::new(ui)
             .striped(false)
-            .resizable(true)
+            // **Not resizable, and that is what makes the columns track the window.**
+            // `egui_extras` remembers a *resizable* column as `Size::exact(previous width)`
+            // and then ignores the available width entirely — so the one column that must
+            // follow the window, `Name`, was the one being frozen at whatever width it had
+            // on the first frame. Widening left a dead strip to the right of `Method` with
+            // the row's wash running under it; narrowing clipped instead of giving way.
+            // P14 first set this on the three *exact* columns, which changed nothing,
+            // because those already had nothing to solve. Solving from the spec every frame
+            // is what `Column::remainder` meant, and hand-dragging a column boundary is not
+            // something CORE asks for anywhere.
+            .resizable(false)
             // `egui_extras` gates its hover fill on `self.sense.interactive()`, and the default
             // is `Sense::hover()`, which is not. This one line is what switches row hover on.
             .sense(egui::Sense::click())
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            // **Only Name is resizable, and that is load-bearing.** `resizable(true)` on
-            // the *builder* makes `egui_extras` remember every column as `Size::exact` after
-            // the first frame, and `Sizing::to_lengths` then ignores the available width
-            // entirely — so the table stopped tracking the window: widen it and Name did not
-            // grow, leaving dead space to the right of Method; narrow it and the columns
-            // clipped instead of giving way. Marking the three fixed columns not-resizable
-            // leaves Name as the one that absorbs the difference, which is what
-            // `Column::remainder` said in the first place.
             .column(Column::remainder().at_least(120.0).clip(true))
-            .column(Column::exact(84.0).resizable(false))
-            .column(Column::exact(84.0).resizable(false))
-            .column(Column::exact(72.0).resizable(false));
+            .column(Column::exact(84.0))
+            .column(Column::exact(84.0))
+            .column(Column::exact(72.0));
 
         // Only when the keyboard moved it, and only for the one frame the flag is up.
         // Asking every frame would fight the wheel: scroll away to read something and the
