@@ -58,7 +58,7 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     // 600 — so how little this costs decides how short a window still
                     // shows all three sections without scrolling.
                     ui.separator();
-                    ui.add_space(2.0);
+                    ui.add_space(1.0);
                     action_item(
                         ui,
                         app,
@@ -94,26 +94,47 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     // CORE §4 draws this zone "(family style)", and the family puts the
                     // mark above the wordmark, centred, with the sections left-aligned
                     // beneath it. The header block is the only centred thing in the window.
+                    //
+                    // **It gives way before the rows do.** CORE §4 says every section is
+                    // reachable, and a section scrolled out of its own zone is not; the
+                    // wordmark is decoration by comparison. So the header is measured
+                    // against the room actually left and drawn at whichever of three sizes
+                    // fits — full, then without its subtitle, then the mark alone.
+                    //
+                    // This exists because asking for room does not get it. `main.rs` names a
+                    // floor of `MIN_H` and the compositor is free to ignore it: measured on
+                    // KWin, INDIUM asked for 1180×720 with a floor of 880×680 and was handed
+                    // **960×540** — 140 short of what the sidebar wants, which is exactly how
+                    // *Bookmarks* and *Recent files* ended up below the fold. A zone that
+                    // only works at sizes it cannot insist on is a zone that does not work.
+                    let room = ui.available_height();
+                    let (mark, wordmark, subtitle) = if room >= FULL_HEADER {
+                        (50.0, true, true)
+                    } else if room >= COMPACT_HEADER {
+                        (30.0, true, false)
+                    } else {
+                        (24.0, false, false)
+                    };
                     ui.vertical_centered(|ui| {
-                        ui.add_space(2.0);
-                        // 84 until P12, when the sidebar gained an *Open file* row and a
-                        // rule and stopped fitting: at 84 the last section scrolled out of
-                        // its own zone, which is a worse failure than a smaller mark.
-                        ui.add(theme::mark(58.0));
-                        ui.add_space(6.0);
-                        ui.label(
-                            egui::RichText::new("INDIUM")
-                                .size(23.0)
-                                .color(theme::TEXT)
-                                .family(theme::bold()),
-                        );
-                        ui.label(
-                            egui::RichText::new("archive manager")
-                                .size(13.0)
-                                .color(theme::TEXT_MUTED),
-                        );
+                        ui.add(theme::mark(mark));
+                        ui.add_space(4.0);
+                        if wordmark {
+                            ui.label(
+                                egui::RichText::new("INDIUM")
+                                    .size(23.0)
+                                    .color(theme::TEXT)
+                                    .family(theme::bold()),
+                            );
+                        }
+                        if subtitle {
+                            ui.label(
+                                egui::RichText::new("archive manager")
+                                    .size(13.0)
+                                    .color(theme::TEXT_MUTED),
+                            );
+                        }
                     });
-                    ui.add_space(8.0);
+                    ui.add_space(6.0);
 
                     open_item(ui, app);
                     section_item(
@@ -130,9 +151,9 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     // It is legible now — `theme::HAIRLINE` was 8% white and measured
                     // 1.2:1, which is the *other* half of the note this order came from:
                     // "The separator staying on the New button is so faded."
-                    ui.add_space(2.0);
+                    ui.add_space(1.0);
                     ui.separator();
-                    ui.add_space(2.0);
+                    ui.add_space(1.0);
                     section_item(
                         ui,
                         app,
@@ -225,7 +246,19 @@ fn action_item(
 
 /// The padding of one sidebar line, shared by the live and the unavailable arm so the two
 /// cannot drift apart in height.
-const ROW_PAD: egui::Margin = egui::Margin::symmetric(8, 5);
+const ROW_PAD: egui::Margin = egui::Margin::symmetric(8, 3);
+
+/// Above this much room in the scroll lane, the header is drawn whole.
+///
+/// Both numbers are the measured cost of the thing they gate, not guesses. Whole, the lane
+/// wants **294.1**: four section rows at 184 and a header at 110. Drop the subtitle and
+/// shrink the mark and it wants **250**. Drop the wordmark as well and it wants **219**,
+/// which is what fits the 230 the compositor's 540-tall window actually leaves.
+const FULL_HEADER: f32 = 296.0;
+/// Below [`FULL_HEADER`]: the subtitle goes and the mark shrinks. Below *this*, the wordmark
+/// goes too — a sidebar that cannot show *Recent files* has failed at its job, and a
+/// wordmark is the part of it that is only decoration.
+const COMPACT_HEADER: f32 = 252.0;
 
 /// The contents of one sidebar line — label on the left, bare-key hint on the right —
 /// shared by the live arm and the unavailable one so the two cannot drift apart.

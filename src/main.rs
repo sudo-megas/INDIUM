@@ -114,7 +114,7 @@ fn main() -> eframe::Result<()> {
             // counted: at a 960 root the sidebar took 202, the Inspector its default 342 and
             // the table 396, and 960 − 940 is that 20. 202 + 272 + 376 + 20 = 870, and 880
             // is that with a little air.
-            .with_min_inner_size([880.0, 680.0]),
+            .with_min_inner_size([indium::ui::MIN_W, indium::ui::MIN_H]),
         ..Default::default()
     };
 

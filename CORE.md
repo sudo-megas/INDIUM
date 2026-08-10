@@ -102,6 +102,14 @@ rule; then *Bookmarks* `2` and *Recent files* `3`; at the bottom *New* `N`, *Set
 leading glyph in the same ink as its label, so the column can be found by shape before it is
 read; §6 says which glyphs and what they are allowed to do.
 
+**Every row is visible or the header gives way.** A section a person cannot see is a section
+they do not have, so when the zone runs short it is the wordmark that goes — first the
+subtitle, then the wordmark itself, leaving the mark alone above the rows. The rows never
+scroll out. This is a rule and not an optimisation: INDIUM names a minimum window size and
+the compositor is free to ignore it, and one measurably does — asked for 1180×720 with a
+floor of 880×680, INDIUM was handed 960×540. A zone that only works at sizes it cannot
+insist on does not work.
+
 The archive sits above the rule and the two lists below it because the first thing a person
 looks for is the archive they are already inside — the order used to run the other way, and a
 testing round said so plainly. *Open file* keeps the archive's company for the same reason: it
