@@ -162,7 +162,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                         .entry(&row.path)
                         .map(|e| (e.encrypted, e.is_dir, e.size, e.packed, e.method.clone()));
 
-                    let (first_cell, _) = tr.col(|ui| {
+                    tr.col(|ui| {
                         let colour = if focused {
                             theme::ORANGE
                         } else if row.is_dir {
@@ -247,7 +247,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                         mono_right(ui, &text, theme::TEXT_MUTED);
                     });
 
-                    let (last_cell, _) = tr.col(|ui| {
+                    tr.col(|ui| {
                         let text = entry
                             .as_ref()
                             .map(|e| e.4.clone())
@@ -270,16 +270,20 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                     // directory now works from any column rather than from the name alone.
                     let line = tr.response();
                     if focused {
-                        // **The cells, not the row.** `TableRow::response` spans the whole
-                        // line including the gutter the scrollbar reserves, but
-                        // `egui_extras` paints its striped/selected/hovered fills *per
-                        // cell* (`layout.rs`, `gapless_rect` from each cell's `max_rect`).
-                        // Ringing the response therefore drew a box wider than the orange
-                        // wash it was supposed to sit on, and the overhang read as an
-                        // empty fifth column — which is exactly how it was reported.
-                        // The union of the first and last cells is what is actually
-                        // painted, so it is what the ring follows.
-                        cursor_rect = Some(first_cell.union(last_cell));
+                        // **The row, not the cells.** `TableRow::col` hands back each cell's
+                        // *content* rect — the extent of the text drawn in it, not the column
+                        // it was given — so a union of the first and last was only ever as
+                        // wide as the words: measured, `212..266` for a name against a row of
+                        // `212..645`.
+                        //
+                        // P13 changed this line the other way, from the row to the cells, on
+                        // the strength of a report that the ring stuck out past the wash. The
+                        // report was real and the diagnosis was not: the columns had frozen
+                        // at their first-frame widths and it was the *wash* that was stopping
+                        // short. P14 fixed the columns; with them filling the row again the
+                        // row's own rect is exactly what `egui_extras` paints, which is what
+                        // this asked for in the first place.
+                        cursor_rect = Some(line.rect);
                     }
                     if line.clicked() {
                         clicked = Some((i, ui_ctx.input(|inp| inp.modifiers.ctrl)));
