@@ -96,7 +96,15 @@ fn main() -> eframe::Result<()> {
             // that survivable — the sidebar reserves its foot and scrolls the rest — but a
             // floor the program can actually be used at is the better half of the answer,
             // and a scrollbar over a wordmark is not a layout anyone chose.
-            .with_min_inner_size([840.0, 600.0]),
+            //
+            // **680 is measured, not chosen.** P13's icons made every sidebar row taller,
+            // and at 600 the two list sections scrolled out of their own zone. Asked of the
+            // running program rather than estimated: the sections lay out to 326.1 and the
+            // foot to 146.6, so the panel needs 472.7 inside its frame; the frame costs 40
+            // (14+14 inner, 2+2 edge, 4+4 gutter) and the status bar takes `SB_HEIGHT`, so
+            // the floor is 472.7 + 40 + 136 = 648.7. 680 is that, rounded up with enough
+            // slack that the last row is not flush against the edge it sits on.
+            .with_min_inner_size([840.0, 680.0]),
         ..Default::default()
     };
 

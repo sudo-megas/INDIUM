@@ -2244,9 +2244,10 @@ impl Indium {
 
 /// The whole panel, gutter included.
 ///
-/// 3 × SB_ROW(20) + 2 × SB_GAP(4) = 68 of content, + 10 + 10 of inner margin, + the 2 + 2
-/// the edge costs, + the 4 + 4 of `zone()`'s outer gutter = 100. `exact_size` counts every
-/// one of those, so this number is the panel and its half-gutter rim together.
+/// 3 × SB_ROW(32) + 2 × SB_GAP(4) = 104 of content, + 10 + 10 of inner margin, + the 2 + 2
+/// the edge costs, + the 4 + 4 of `zone()`'s outer gutter = 136. `exact_size` counts every
+/// one of those, so this number is the panel and its half-gutter rim together. It was 100
+/// until P13 raised `SB_ROW` to carry an icon at `ICON_SCALE`.
 ///
 /// **The edge is in that sum, and has to be.** `Frame::total_margin` is `inner_margin +
 /// stroke.width + outer_margin`, and the box egui actually paints is `content +
@@ -2257,7 +2258,7 @@ impl Indium {
 /// window, and the bottom rim vanished entirely. `the_status_bar_is_as_tall_as_it_says`
 /// pins the arithmetic, because a panel that overflows `exact_size` is reported at the
 /// size it asked for — the clamp is on the number, not on the paint.
-const SB_HEIGHT: f32 = 100.0;
+const SB_HEIGHT: f32 = 136.0;
 
 /// The status bar's frame, named so the height above can be checked against it.
 fn sb_frame() -> egui::Frame {
@@ -2287,10 +2288,11 @@ fn status_bar(app: &mut Indium, ui: &mut egui::Ui) {
             // makes the three rows 70 tall in a lane that is 68 — and the third row is
             // the one that gets clipped.
             ui.spacing_mut().item_spacing.y = theme::SB_GAP;
-            // And this is what keeps row 3 to its 20. `interact_size.y` is SB_ROW, so a
-            // button is a row tall by default — but the theme's 3px of vertical padding
-            // would push Cancel to 23 and take the row with it, in a panel that can no
-            // longer grow to absorb it.
+            // And this is what keeps Cancel to its 20. `interact_size.y` is `CONTROL_H`,
+            // which P13 split away from `SB_ROW` precisely so that a taller row does not
+            // drag every button in the program up with it — but the theme's 3px of
+            // vertical padding would still push Cancel to 23, and a control that grows
+            // inside a row is one that decides the row's height instead of sitting in it.
             ui.spacing_mut().button_padding.y = 1.0;
 
             // CORE §4: "A rule separates the rows. They are three statements, not one
@@ -2382,7 +2384,7 @@ fn sb_what_is_open(app: &mut Indium, ui: &mut egui::Ui) {
                 ui.label(
                     egui::RichText::new(theme::icon::ARCHIVE)
                         .family(theme::MONO)
-                        .size(13.0)
+                        .size(13.0 * theme::ICON_SCALE)
                         .color(theme::TEXT),
                 );
                 ui.label(
@@ -2442,10 +2444,10 @@ fn sb_what_is_open(app: &mut Indium, ui: &mut egui::Ui) {
                 let cell = ui.ctx().fonts_mut(|f| f.glyph_width(&font, '0')).max(1.0);
                 let gap = ui.spacing().item_spacing.x;
                 // Less the folder glyph and the space before it, which are added after
-                // this label because the lane runs right to left.
-                let budget = ((ui.available_width() - cell - gap) / cell)
-                    .floor()
-                    .max(0.0) as usize;
+                // this label because the lane runs right to left. The glyph is drawn at
+                // `ICON_SCALE`, so it costs that many cells and not one.
+                let glyph = cell * theme::ICON_SCALE + gap;
+                let budget = ((ui.available_width() - glyph) / cell).floor().max(0.0) as usize;
                 let shown = crate::util::elide_middle(&dir, budget);
 
                 let hit = ui
@@ -2473,7 +2475,7 @@ fn sb_what_is_open(app: &mut Indium, ui: &mut egui::Ui) {
                 ui.label(
                     egui::RichText::new(theme::icon::FOLDER)
                         .family(theme::MONO)
-                        .size(12.0)
+                        .size(12.0 * theme::ICON_SCALE)
                         .color(theme::TEXT_MUTED),
                 );
             });
@@ -2556,7 +2558,7 @@ fn sb_the_numbers(app: &Indium, ui: &mut egui::Ui) {
                 ui.label(
                     egui::RichText::new(theme::icon::WARNING)
                         .family(theme::MONO)
-                        .size(13.0)
+                        .size(13.0 * theme::ICON_SCALE)
                         .color(theme::WARNING),
                 );
             }

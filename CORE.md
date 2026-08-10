@@ -282,7 +282,10 @@ rather than nearly true. They come from the **Font Awesome** range the Nerd Font
 no second range is mixed with it: mixing icon families reads exactly like mixing typefaces. The
 `Mono` cut §2 names is the reason this costs nothing — every glyph is one cell, so an icon never
 widens a column or moves a number off its own. **An icon replaces a word; it never garnishes
-one.** A folder glyph beside a path that already looks like a path is decoration, and §6 has no
+one.** **An icon is drawn at twice the size of the text it stands beside**, and the row grows to
+carry it rather than the glyph shrinking to fit — a Font Awesome glyph carries padding inside its
+em box, so at 1× it puts about nine points of ink next to a thirteen-point capital and reads as
+an afterthought. This is why the status bar's rows are taller than the entry table's. A folder glyph beside a path that already looks like a path is decoration, and §6 has no
 room for decoration; a glyph *instead of* a label is what the sidebar and the status bar use it
 for. The one deliberate redundancy is the warning glyph before a failure: colour alone carrying
 meaning fails anyone who cannot separate `#FFD800` from grey, so there the shape and the colour

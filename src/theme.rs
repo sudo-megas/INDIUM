@@ -194,7 +194,7 @@ pub const R_POPUP: u8 = 10;
 ///
 /// The same number as [`R_POPUP`], and that is the point rather than an accident, because it
 /// is what keeps the vocabulary at three values and no fourth. A control's height floor is
-/// `interact_size.y` = [`SB_ROW`] = 20, so half of it is 10; and epaint clamps a corner
+/// `interact_size.y` = [`CONTROL_H`] = 20, so half of it is 10; and epaint clamps a corner
 /// radius to half the rect it is drawn in (`clamp_corner_radius`), so the same 10 is still a
 /// true pill on a `small()` button, which is shorter. One number, a pill at every height.
 ///
@@ -218,10 +218,32 @@ pub const GUTTER: i8 = 8;
 /// gutter. The status bar was measured at four pixels short before anyone noticed, because
 /// `Panel` clamps the rect it *reports* to `exact_size` and paints the overflow anyway.
 pub const PAD: i8 = 12;
-/// One status-bar row: the same 20.0 the entry table uses for a row.
-pub const SB_ROW: f32 = 20.0;
+/// The height floor of anything you press, and the number [`R_PILL`] is half of.
+///
+/// **This used to be [`SB_ROW`], and P13 split them.** They were the same 20 for eleven
+/// milestones and the coupling read as economy rather than as a claim — but the moment the
+/// status bar grew to carry a double-size glyph, "a button is a row tall" would have made
+/// every button in the program 32 tall and turned R_PILL's 10 into a merely rounded corner,
+/// which is exactly the shape CORE §6 refuses. A control's height is its own number now.
+pub const CONTROL_H: f32 = 20.0;
+/// One status-bar row.
+///
+/// Tall enough for an icon at [`ICON_SCALE`] — CORE §6 draws them at twice the text they
+/// name, and 13 × 2 needs more than the 20 this was until P13. The bar grew with it, which
+/// is the trade the maker asked for in as many words: "icons only sensible when they are
+/// big enough."
+pub const SB_ROW: f32 = 32.0;
 /// Between status-bar rows.
 pub const SB_GAP: f32 = 4.0;
+
+/// How much bigger an icon is than the text it stands beside.
+///
+/// CORE §6 gives icons the same face as everything else, which means they also inherit its
+/// sizes — and at 1× they were simply too small to be worth drawing: a Font Awesome glyph
+/// carries padding inside its em box, so a 13pt icon puts about nine points of ink beside a
+/// thirteen-point capital. Doubling is the maker's number, and the status bar's row height
+/// was raised to carry it rather than the icon shrunk to fit.
+pub const ICON_SCALE: f32 = 2.0;
 /// Above a section heading.
 pub const SECTION_ABOVE: f32 = 14.0;
 
@@ -617,7 +639,7 @@ fn install_spacing(ctx: &egui::Context) {
         style.spacing.window_margin = egui::Margin::same(14);
         style.spacing.menu_margin = egui::Margin::same(8);
         style.spacing.indent = 18.0;
-        style.spacing.interact_size.y = SB_ROW;
+        style.spacing.interact_size.y = CONTROL_H;
     });
 }
 

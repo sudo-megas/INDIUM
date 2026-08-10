@@ -152,7 +152,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                         .entry(&row.path)
                         .map(|e| (e.encrypted, e.is_dir, e.size, e.packed, e.method.clone()));
 
-                    tr.col(|ui| {
+                    let (first_cell, _) = tr.col(|ui| {
                         let colour = if focused {
                             theme::ORANGE
                         } else if row.is_dir {
@@ -237,7 +237,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                         mono_right(ui, &text, theme::TEXT_MUTED);
                     });
 
-                    tr.col(|ui| {
+                    let (last_cell, _) = tr.col(|ui| {
                         let text = entry
                             .as_ref()
                             .map(|e| e.4.clone())
@@ -260,7 +260,16 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                     // directory now works from any column rather than from the name alone.
                     let line = tr.response();
                     if focused {
-                        cursor_rect = Some(line.rect);
+                        // **The cells, not the row.** `TableRow::response` spans the whole
+                        // line including the gutter the scrollbar reserves, but
+                        // `egui_extras` paints its striped/selected/hovered fills *per
+                        // cell* (`layout.rs`, `gapless_rect` from each cell's `max_rect`).
+                        // Ringing the response therefore drew a box wider than the orange
+                        // wash it was supposed to sit on, and the overhang read as an
+                        // empty fifth column — which is exactly how it was reported.
+                        // The union of the first and last cells is what is actually
+                        // painted, so it is what the ring follows.
+                        cursor_rect = Some(first_cell.union(last_cell));
                     }
                     if line.clicked() {
                         clicked = Some((i, ui_ctx.input(|inp| inp.modifiers.ctrl)));

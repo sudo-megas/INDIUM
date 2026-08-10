@@ -255,7 +255,12 @@ fn row_body(
         // rather than as a label with a dimmer thing stuck to it. It costs no layout: §2's
         // `Mono` cut is single-cell, so the glyph occupies exactly one column and the
         // labels stay aligned down the sidebar as if it were a character of the word.
-        ui.label(egui::RichText::new(icon).family(theme::MONO).color(ink));
+        ui.label(
+            egui::RichText::new(icon)
+                .family(theme::MONO)
+                .size(13.0 * theme::ICON_SCALE)
+                .color(ink),
+        );
         ui.label(egui::RichText::new(label).color(ink));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if let Some(t) = tag {
