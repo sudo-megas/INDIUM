@@ -122,13 +122,7 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     // **960×540** — 140 short of what the sidebar wants, which is exactly how
                     // *Bookmarks* and *Recent files* ended up below the fold. A zone that
                     // only works at sizes it cannot insist on is a zone that does not work.
-                    let (mark, subtitle) = if inner >= FULL_HEADER {
-                        (Some(50.0), true)
-                    } else if inner >= COMPACT_HEADER {
-                        (Some(40.0), false)
-                    } else {
-                        (None, false)
-                    };
+                    let (mark, subtitle) = header_tier(inner);
                     ui.vertical_centered(|ui| {
                         // **The mark is dropped, never shrunk past legibility.** CORE §6
                         // says the icon is photorealistic PNG, and photorealism is the one
@@ -286,6 +280,23 @@ const FULL_HEADER: f32 = 432.0;
 /// files* has failed at its job, and the mark is the part of it that scales worst.
 const COMPACT_HEADER: f32 = 404.0;
 
+/// Which header the sidebar can afford, given its whole inner height.
+///
+/// Pulled out of the drawing code so it can be *asserted* rather than screenshotted: a
+/// photograph of a window proves what one compositor did on one afternoon, and this is the
+/// rule. Returns the mark's size — `None` when there is no room for it at all — and whether
+/// the subtitle is drawn. The wordmark is never dropped: it is type, and type stays legible
+/// at any size the zone can be.
+fn header_tier(inner: f32) -> (Option<f32>, bool) {
+    if inner >= FULL_HEADER {
+        (Some(50.0), true)
+    } else if inner >= COMPACT_HEADER {
+        (Some(40.0), false)
+    } else {
+        (None, false)
+    }
+}
+
 /// The contents of one sidebar line — label on the left, bare-key hint on the right —
 /// shared by the live arm and the unavailable one so the two cannot drift apart.
 ///
@@ -378,4 +389,67 @@ fn row(
         };
         row_body(ui, icon, label, key, ink, tag);
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What the zone's inner height is at a given window height: the status bar takes
+    /// `SB_HEIGHT`, and the sidebar's own frame takes 40 — 14+14 of inner margin, 2+2 of
+    /// edge, 4+4 of gutter. Both measured against the running program.
+    fn inner_at(window: f32) -> f32 {
+        window - super::super::SB_HEIGHT - 40.0
+    }
+
+    /// The question a person actually asks: **at what size does the mark come back?**
+    ///
+    /// Answered here rather than by eye, because the eye was wrong twice: this display
+    /// scales by 1.25, so a 540-point window photographs as 675 pixels and a screenshot
+    /// compared against a point threshold decides the opposite of the program.
+    #[test]
+    fn the_mark_returns_once_the_zone_can_afford_it() {
+        // The window the compositor keeps handing us. No mark, and that is the trade —
+        // all seven rows fit instead.
+        assert_eq!(header_tier(inner_at(540.0)), (None, false));
+
+        // INDIUM's own floor. Everything: mark, wordmark, subtitle.
+        assert_eq!(header_tier(inner_at(680.0)), (Some(50.0), true));
+
+        // The boundary either side, to the point.
+        let full = FULL_HEADER + super::super::SB_HEIGHT + 40.0;
+        assert_eq!(header_tier(inner_at(full)), (Some(50.0), true));
+        assert_eq!(header_tier(inner_at(full - 1.0)), (Some(40.0), false));
+    }
+
+    /// The three tiers are ordered: more room never buys less header.
+    #[test]
+    fn the_header_never_shrinks_as_the_window_grows() {
+        let mut last = (None, false);
+        for h in (300..900).step_by(5) {
+            let now = header_tier(inner_at(h as f32));
+            let rank = |t: (Option<f32>, bool)| match t {
+                (None, _) => 0,
+                (Some(_), false) => 1,
+                (Some(_), true) => 2,
+            };
+            assert!(
+                rank(now) >= rank(last),
+                "at {h} the header went backwards: {last:?} -> {now:?}"
+            );
+            last = now;
+        }
+    }
+
+    /// The wordmark is the one thing that never goes. It is type; the mark is a photograph.
+    #[test]
+    fn every_tier_still_draws_something() {
+        for h in [300.0, 540.0, 604.0, 680.0, 1080.0] {
+            let (mark, subtitle) = header_tier(inner_at(h));
+            assert!(
+                mark.is_some() || !subtitle,
+                "a subtitle without a mark at {h}"
+            );
+        }
+    }
 }
