@@ -35,12 +35,20 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
         // 2px edge — two lines a pixel apart, which is worse than either alone.
         .show_separator_line(false)
         .show(root, |ui| {
-            // **Measured here and nowhere else.** This is the sidebar's whole inner height,
-            // read before the foot panel below reserves any of it — a stable number that
-            // tracks the window (364 in the 540-tall window the compositor hands us, 499 in
-            // a 675). The header tier used to be chosen from inside the scroll lane, which
-            // is what was left *after* the foot had taken its 133.6, and that is why the
-            // mark disappeared from a window with room to spare for it.
+            // **Measured here and nowhere else.** The sidebar's whole inner height, read
+            // before the foot below reserves any of it: 364 in the 540-point window the
+            // compositor keeps handing us, 504 in a 680.
+            //
+            // Choosing the tier from *here* rather than from inside the scroll lane is a
+            // change of yardstick, not of behaviour — the lane is this number less the
+            // foot's fixed 133.6, so the two sets of thresholds decide identically. It is
+            // the better one to measure against because it does not move when the foot
+            // changes, and because it is the number a person can reason about: the zone.
+            //
+            // **Everything in this file is points, not pixels.** This machine runs at a
+            // scale of 1.25, so the 540-point window measures 675 pixels in a screenshot —
+            // a distinction that cost an afternoon when a screen capture and the program
+            // disagreed by exactly that ratio and the capture was believed.
             let inner = ui.available_height();
             // The bottom group sits at the foot of the panel, as CORE draws it — and it
             // **reserves its space before the sections above are laid out**, which is the
@@ -268,13 +276,15 @@ const ROW_PAD: egui::Margin = egui::Margin::symmetric(8, 3);
 /// each and you get what the zone needs: 427.7, 399.7, 348.5.
 ///
 /// They are compared against the height read at the top of `show`, which is the zone before
-/// the foot has taken anything — the lane's own height is the wrong yardstick, because it is
-/// already 133.6 short and using it hid the mark in windows with ample room for it.
-const FULL_HEADER: f32 = 428.0;
+/// the foot has taken anything. Measuring the lane instead would decide the same way — it is
+/// this number less the foot — but the zone does not shift when the foot does, and a couple
+/// of points of slack are added on top so that rounding to physical pixels at a fractional
+/// display scale cannot land the comparison on the wrong side of the line.
+const FULL_HEADER: f32 = 432.0;
 /// Below [`FULL_HEADER`]: the subtitle goes and the mark comes down to 40. Below *this* the
 /// mark goes entirely and the wordmark stands alone — a sidebar that cannot show *Recent
 /// files* has failed at its job, and the mark is the part of it that scales worst.
-const COMPACT_HEADER: f32 = 400.0;
+const COMPACT_HEADER: f32 = 404.0;
 
 /// The contents of one sidebar line — label on the left, bare-key hint on the right —
 /// shared by the live arm and the unavailable one so the two cannot drift apart.
