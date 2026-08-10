@@ -35,6 +35,13 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
         // 2px edge — two lines a pixel apart, which is worse than either alone.
         .show_separator_line(false)
         .show(root, |ui| {
+            // **Measured here and nowhere else.** This is the sidebar's whole inner height,
+            // read before the foot panel below reserves any of it — a stable number that
+            // tracks the window (364 in the 540-tall window the compositor hands us, 499 in
+            // a 675). The header tier used to be chosen from inside the scroll lane, which
+            // is what was left *after* the foot had taken its 133.6, and that is why the
+            // mark disappeared from a window with room to spare for it.
+            let inner = ui.available_height();
             // The bottom group sits at the foot of the panel, as CORE draws it — and it
             // **reserves its space before the sections above are laid out**, which is the
             // whole of P11's fix here.
@@ -107,10 +114,9 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     // **960×540** — 140 short of what the sidebar wants, which is exactly how
                     // *Bookmarks* and *Recent files* ended up below the fold. A zone that
                     // only works at sizes it cannot insist on is a zone that does not work.
-                    let room = ui.available_height();
-                    let (mark, subtitle) = if room >= FULL_HEADER {
+                    let (mark, subtitle) = if inner >= FULL_HEADER {
                         (Some(50.0), true)
-                    } else if room >= COMPACT_HEADER {
+                    } else if inner >= COMPACT_HEADER {
                         (Some(40.0), false)
                     } else {
                         (None, false)
@@ -254,17 +260,21 @@ fn action_item(
 /// cannot drift apart in height.
 const ROW_PAD: egui::Margin = egui::Margin::symmetric(8, 3);
 
-/// Above this much room in the scroll lane, the header is drawn whole.
+/// Above this much of the sidebar's **inner height**, the header is drawn whole.
 ///
-/// Both numbers are the measured cost of the thing they gate, not guesses. Whole, the lane
-/// wants **294.1**: four section rows at 184 and a header at 110. Drop the subtitle and
-/// shrink the mark and it wants **250**. Drop the wordmark as well and it wants **219**,
-/// which is what fits the 230 the compositor's 540-tall window actually leaves.
-const FULL_HEADER: f32 = 296.0;
+/// Every number here is measured from the running program, not estimated. The foot costs
+/// **133.6**. The scroll lane wants **294.1** with the header whole, about **266** without
+/// its subtitle and with the mark at 40, and **214.9** with no mark at all. Add the foot to
+/// each and you get what the zone needs: 427.7, 399.7, 348.5.
+///
+/// They are compared against the height read at the top of `show`, which is the zone before
+/// the foot has taken anything — the lane's own height is the wrong yardstick, because it is
+/// already 133.6 short and using it hid the mark in windows with ample room for it.
+const FULL_HEADER: f32 = 428.0;
 /// Below [`FULL_HEADER`]: the subtitle goes and the mark comes down to 40. Below *this* the
 /// mark goes entirely and the wordmark stands alone — a sidebar that cannot show *Recent
 /// files* has failed at its job, and the mark is the part of it that scales worst.
-const COMPACT_HEADER: f32 = 268.0;
+const COMPACT_HEADER: f32 = 400.0;
 
 /// The contents of one sidebar line — label on the left, bare-key hint on the right —
 /// shared by the live arm and the unavailable one so the two cannot drift apart.
