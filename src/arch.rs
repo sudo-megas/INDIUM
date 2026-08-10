@@ -1096,6 +1096,30 @@ pub fn extract(
             return Err(ArchiveError::Other(msg));
         }
 
+        // ARCHIVE_WARN carries two opposite meanings at this call. It is what libarchive
+        // returns for a file it wrote but could not finish stamping — `EXTRACT_PERM`
+        // against vfat is the everyday case, and failing that extraction would be wrong.
+        // It is *also* what it returns for a file it could not create at all: a
+        // destination the user cannot write answers -20 with `Can't create '<path>'` and
+        // leaves nothing behind. Treating both as written is what let `/boot` report
+        // "Extracted 1 entry." with an empty directory underneath.
+        //
+        // The wording is libarchive's and not worth parsing, so the filesystem is asked
+        // instead. `symlink_metadata`, because a symlink entry that points nowhere is a
+        // legitimate extraction and `exists` would follow it and say no.
+        //
+        // One case survives on purpose: a target left by an earlier extraction cannot be
+        // told from one written a moment ago, so a failed overwrite still counts. Closing
+        // it means comparing timestamps, which costs more than the case is worth.
+        if rc == ARCHIVE_WARN && std::fs::symlink_metadata(&target).is_err() {
+            let msg = last_error(reader.raw);
+            return Err(ArchiveError::Other(if msg.is_empty() {
+                format!("could not write {}", target.display())
+            } else {
+                msg
+            }));
+        }
+
         written += 1;
         if let Some(tx) = tx {
             let _ = tx.send(ExtractMsg::Progress {

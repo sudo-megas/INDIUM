@@ -8,6 +8,7 @@
 
 use std::fs;
 use std::io::Cursor;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -841,5 +842,61 @@ fn rebuilding_into_7z_drops_links_without_failing_verification() {
         after.len(),
         before.len() - links,
         "exactly the links are missing, and nothing else"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A destination that cannot be written
+// ---------------------------------------------------------------------------
+
+/// The second testing round extracted an entry into `/boot` — root-owned, mode `0700` —
+/// and the window answered *"Extracted 1 entry."* over an empty directory.
+///
+/// libarchive is the reason. `archive_read_extract` answers `ARCHIVE_WARN` (-20) both for
+/// a file it wrote but could not finish stamping and for a file it could not create at
+/// all, and `extract` counted the second as written. A count that includes files which do
+/// not exist makes every sentence built on it a lie, so this test holds the floor: a
+/// destination that refuses the write must fail, and must leave nothing behind.
+#[test]
+fn a_destination_that_cannot_be_written_fails_rather_than_counts() {
+    let dir = TempDir::new("unwritable");
+    let source = dir.join("in.tar");
+    write_payload(&source, &recipe(&source, Method::Store));
+
+    let dest = dir.join("locked");
+    fs::create_dir_all(&dest).expect("could not make the destination");
+    fs::set_permissions(&dest, PermissionsExt::from_mode(0o500))
+        .expect("could not close the destination");
+
+    // Root ignores the mode bits, and so do a few filesystems. Rather than ask who this
+    // process is, ask the directory whether it actually refuses — which is the condition
+    // the test needs, and the only one it can assert against.
+    if fs::write(dest.join(".probe"), b"").is_ok() {
+        let _ = fs::remove_file(dest.join(".probe"));
+        let _ = fs::set_permissions(&dest, PermissionsExt::from_mode(0o755));
+        eprintln!("skipped: this filesystem lets this process write a 0500 directory");
+        return;
+    }
+
+    let wanted: std::collections::HashSet<String> = ["alpha.txt".to_string()].into_iter().collect();
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let result = arch::extract(&source, &wanted, &dest, None, None, &cancel);
+
+    // Put the mode back before asserting, or a failure here leaves a directory the
+    // harness cannot clear.
+    let _ = fs::set_permissions(&dest, PermissionsExt::from_mode(0o755));
+
+    let landed = fs::read_dir(&dest)
+        .expect("the destination must still be readable")
+        .count();
+    assert_eq!(
+        landed, 0,
+        "nothing can have been written into a 0500 directory"
+    );
+    let e = result.expect_err("a destination that refuses every write cannot report success");
+    assert!(
+        e.to_string().to_lowercase().contains("create")
+            || e.to_string().to_lowercase().contains("write"),
+        "the sentence must name the writing as what failed, not something else: {e}"
     );
 }
