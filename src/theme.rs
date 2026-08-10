@@ -235,7 +235,7 @@ pub const CONTROL_H: f32 = 20.0;
 /// name, and 13 × 2 needs more than the 20 this was until P13. The bar grew with it, which
 /// is the trade the maker asked for in as many words: "icons only sensible when they are
 /// big enough."
-pub const SB_ROW: f32 = 32.0;
+pub const SB_ROW: f32 = 24.0;
 /// Between status-bar rows.
 pub const SB_GAP: f32 = 4.0;
 
@@ -244,9 +244,14 @@ pub const SB_GAP: f32 = 4.0;
 /// CORE §6 gives icons the same face as everything else, which means they also inherit its
 /// sizes — and at 1× they were simply too small to be worth drawing: a Font Awesome glyph
 /// carries padding inside its em box, so a 13pt icon puts about nine points of ink beside a
-/// thirteen-point capital. Doubling is the maker's number, and the status bar's row height
-/// was raised to carry it rather than the icon shrunk to fit.
-pub const ICON_SCALE: f32 = 2.0;
+/// thirteen-point capital, which is why 1× read as no icon at all.
+///
+/// **It was 2× for an afternoon and that was too much.** At double the text the glyph sets
+/// every row's height, which added 36 points to the status bar and about 120 to the sidebar
+/// — and a window that had fitted everything for twelve milestones stopped fitting anything.
+/// Every problem that followed was a consequence of this number. 1.4 is large enough to read
+/// as a glyph and small enough that the rows are the height they always were.
+pub const ICON_SCALE: f32 = 1.4;
 /// Above a section heading.
 pub const SECTION_ABOVE: f32 = 14.0;
 

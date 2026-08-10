@@ -2262,17 +2262,17 @@ impl Indium {
 /// refuse a window nothing can be done in, and every zone degrades on its own well before
 /// this: the sidebar scrolls, the table clips its columns, the Inspector has its own
 /// `MIN_CONTENT`. So this is small enough that ordinary resizing never meets it.
-pub const MIN_W: f32 = 640.0;
+pub const MIN_W: f32 = 840.0;
 /// See [`MIN_W`].
-pub const MIN_H: f32 = 480.0;
+pub const MIN_H: f32 = 600.0;
 
 /// The whole panel, gutter included.
 ///
-/// 3 × SB_ROW(32) + 2 × SB_GAP(4) = 104 of content, + 10 + 10 of inner margin, + the 2 + 2
-/// the edge costs, + the 4 + 4 of `zone()`'s outer gutter = 136. `exact_size` counts every
+/// 3 × SB_ROW(24) + 2 × SB_GAP(4) = 80 of content, + 10 + 10 of inner margin, + the 2 + 2
+/// the edge costs, + the 4 + 4 of `zone()`'s outer gutter = 112. `exact_size` counts every
 /// one of those, so this number is the panel and its half-gutter rim together. It was 100
 /// until P13 raised `SB_ROW` to carry an icon at `ICON_SCALE`.
-const SB_HEIGHT: f32 = 136.0;
+const SB_HEIGHT: f32 = 112.0;
 
 /// The status bar's frame, named so the height above can be checked against it.
 fn sb_frame() -> egui::Frame {
