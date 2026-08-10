@@ -59,9 +59,33 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     // shows all three sections without scrolling.
                     ui.separator();
                     ui.add_space(2.0);
-                    action_item(ui, app, "New", "N", Some(Popup::NewArchive), true);
-                    action_item(ui, app, "Settings", ",", Some(Popup::Settings), true);
-                    action_item(ui, app, "About", "A", Some(Popup::About), true);
+                    action_item(
+                        ui,
+                        app,
+                        theme::icon::NEW,
+                        "New",
+                        "N",
+                        Some(Popup::NewArchive),
+                        true,
+                    );
+                    action_item(
+                        ui,
+                        app,
+                        theme::icon::SETTINGS,
+                        "Settings",
+                        ",",
+                        Some(Popup::Settings),
+                        true,
+                    );
+                    action_item(
+                        ui,
+                        app,
+                        theme::icon::ABOUT,
+                        "About",
+                        "A",
+                        Some(Popup::About),
+                        true,
+                    );
                 });
 
             egui::ScrollArea::vertical()
@@ -92,7 +116,15 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     ui.add_space(8.0);
 
                     open_item(ui, app);
-                    section_item(ui, app, Section::Archive, "Archive", "1", app.has_archive());
+                    section_item(
+                        ui,
+                        app,
+                        Section::Archive,
+                        theme::icon::ARCHIVE,
+                        "Archive",
+                        "1",
+                        app.has_archive(),
+                    );
                     // CORE §4: "a rule". The archive is what you are inside; the two lists
                     // are ways of getting somewhere else, and the line says which is which.
                     // It is legible now — `theme::HAIRLINE` was 8% white and measured
@@ -101,8 +133,24 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     ui.add_space(2.0);
                     ui.separator();
                     ui.add_space(2.0);
-                    section_item(ui, app, Section::Bookmarks, "Bookmarks", "2", true);
-                    section_item(ui, app, Section::Recents, "Recent files", "3", true);
+                    section_item(
+                        ui,
+                        app,
+                        Section::Bookmarks,
+                        theme::icon::BOOKMARK,
+                        "Bookmarks",
+                        "2",
+                        true,
+                    );
+                    section_item(
+                        ui,
+                        app,
+                        Section::Recents,
+                        theme::icon::RECENT,
+                        "Recent files",
+                        "3",
+                        true,
+                    );
                 });
         });
 }
@@ -116,7 +164,17 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
 /// note back from testing asked for: *"we need an open file option ... must use xdg-portal
 /// file picker."*
 fn open_item(ui: &mut egui::Ui, app: &mut Indium) {
-    if row(ui, "Open file", "O", false, true, None).clicked() {
+    if row(
+        ui,
+        theme::icon::FOLDER_OPEN,
+        "Open file",
+        "O",
+        false,
+        true,
+        None,
+    )
+    .clicked()
+    {
         let ctx = ui.ctx().clone();
         app.request_picker(&ctx, PickerFor::Open);
     }
@@ -126,12 +184,13 @@ fn section_item(
     ui: &mut egui::Ui,
     app: &mut Indium,
     section: Section,
+    icon: &str,
     label: &str,
     key: &str,
     enabled: bool,
 ) {
     let active = app.section == section;
-    let response = row(ui, label, key, active, enabled, None);
+    let response = row(ui, icon, label, key, active, enabled, None);
     if response.clicked() && enabled {
         // No cursor reset. Each section has kept its own since P11, so leaving Archive for
         // Bookmarks and coming back lands where you were rather than at the top — and
@@ -144,6 +203,7 @@ fn section_item(
 fn action_item(
     ui: &mut egui::Ui,
     app: &mut Indium,
+    icon: &str,
     label: &str,
     key: &str,
     popup: Option<Popup>,
@@ -152,7 +212,7 @@ fn action_item(
     // Every sidebar action is live as of P4, so nothing carries a "not yet" tag any
     // more. The parameter stays because the next milestone will want it again.
     let tag = if enabled { None } else { Some("soon") };
-    let response = row(ui, label, key, false, enabled, tag);
+    let response = row(ui, icon, label, key, false, enabled, tag);
     if response.clicked() {
         match &popup {
             // New Archive needs its fields seeded, which is what `N` does too.
@@ -179,9 +239,23 @@ const ROW_PAD: egui::Margin = egui::Margin::symmetric(8, 5);
 /// landed on the words "Recent files" and only the padding around them would still work.
 /// Nothing in a sidebar line is text anyone wants to select, so the flag goes off; the
 /// `Ui`'s style is clone-on-write, so this dies with the row.
-fn row_body(ui: &mut egui::Ui, label: &str, key: &str, ink: egui::Color32, tag: Option<&str>) {
+fn row_body(
+    ui: &mut egui::Ui,
+    icon: &str,
+    label: &str,
+    key: &str,
+    ink: egui::Color32,
+    tag: Option<&str>,
+) {
     ui.style_mut().interaction.selectable_labels = false;
     ui.horizontal(|ui| {
+        // CORE §4: "Every row carries a leading glyph in the same ink as its label."
+        //
+        // The same ink, and not a muted one, so an active row brightens as a single object
+        // rather than as a label with a dimmer thing stuck to it. It costs no layout: §2's
+        // `Mono` cut is single-cell, so the glyph occupies exactly one column and the
+        // labels stay aligned down the sidebar as if it were a character of the word.
+        ui.label(egui::RichText::new(icon).family(theme::MONO).color(ink));
         ui.label(egui::RichText::new(label).color(ink));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if let Some(t) = tag {
@@ -206,6 +280,7 @@ fn row_body(ui: &mut egui::Ui, label: &str, key: &str, ink: egui::Color32, tag: 
 /// One sidebar line: label on the left, its bare-key hint on the right.
 fn row(
     ui: &mut egui::Ui,
+    icon: &str,
     label: &str,
     key: &str,
     active: bool,
@@ -221,7 +296,7 @@ fn row(
             .inner_margin(ROW_PAD)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                row_body(ui, label, key, theme::TEXT_MUTED, tag);
+                row_body(ui, icon, label, key, theme::TEXT_MUTED, tag);
             })
             .response;
     }
@@ -237,6 +312,6 @@ fn row(
         } else {
             theme::TEXT_SECONDARY
         };
-        row_body(ui, label, key, ink, tag);
+        row_body(ui, icon, label, key, ink, tag);
     })
 }

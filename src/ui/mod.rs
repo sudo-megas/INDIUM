@@ -2306,12 +2306,26 @@ fn sb_what_is_open(app: &Indium, ui: &mut egui::Ui) {
         match app.archive_path.as_ref().and_then(|p| p.file_name()) {
             // The row's subject, so it is bold — CORE §4. It is also the answer to
             // "which window is this", which on a desktop full of them is the question.
-            Some(name) => ui.label(
-                egui::RichText::new(name.to_string_lossy())
-                    .family(theme::bold())
-                    .size(13.0)
-                    .color(theme::TEXT),
-            ),
+            //
+            // **A glyph takes the ink of the text it names**, here and everywhere else in
+            // the bar: the drawer is as bright as the name, the folder below is as muted
+            // as the path, and the triangle on row 2 is the same yellow as the failure. A
+            // glyph in a third colour would be a fourth thing to read rather than a
+            // shorter way of reading the first.
+            Some(name) => {
+                ui.label(
+                    egui::RichText::new(theme::icon::ARCHIVE)
+                        .family(theme::MONO)
+                        .size(13.0)
+                        .color(theme::TEXT),
+                );
+                ui.label(
+                    egui::RichText::new(name.to_string_lossy())
+                        .family(theme::bold())
+                        .size(13.0)
+                        .color(theme::TEXT),
+                )
+            }
             None => ui.label(
                 egui::RichText::new("No archive open.")
                     .family(theme::MONO)
@@ -2429,6 +2443,19 @@ fn sb_the_numbers(app: &Indium, ui: &mut egui::Ui) {
                 )
                 .truncate(),
             );
+            // CORE §6's one sanctioned redundancy: "colour alone carrying meaning fails
+            // anyone who cannot separate `#FFD800` from grey, so there the shape and the
+            // colour say the same thing on purpose." Added *after* the sentence because
+            // this layout is right-to-left — the first widget in is the rightmost, so the
+            // triangle lands to the left of the words, which is where it is read.
+            if app.status.bad {
+                ui.label(
+                    egui::RichText::new(theme::icon::WARNING)
+                        .family(theme::MONO)
+                        .size(13.0)
+                        .color(theme::WARNING),
+                );
+            }
         });
     });
 }

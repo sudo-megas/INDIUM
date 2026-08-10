@@ -315,6 +315,61 @@ pub fn bold() -> FontFamily {
     FontFamily::Name("fira-bold".into())
 }
 
+/// The two faces, named once so [`install_fonts`] and the tests read the same bytes.
+///
+/// Same shape as [`MARK`], and for the same reason: a second `include_bytes!` on the same
+/// path is a second copy in the binary, and a test that parses a *different* copy from the
+/// one the window draws with is a test that proves nothing.
+pub const FACE_REGULAR: &[u8] = include_bytes!("../assets/fonts/FiraMonoNerdFontMono-Regular.otf");
+/// The bold cut; see [`FACE_REGULAR`].
+pub const FACE_BOLD: &[u8] = include_bytes!("../assets/fonts/FiraMonoNerdFontMono-Bold.otf");
+
+/// CORE §6: "Icons are glyphs of that same face … from the **Font Awesome** range the Nerd
+/// Font patches in, and no second range is mixed with it."
+///
+/// Named by **role, never by codepoint**, so no call site anywhere holds a hex escape and
+/// changing what *the archive* looks like is one edit rather than a search. Every one of
+/// these is checked against the embedded `cmap` by `every_icon_exists_in_both_faces` —
+/// which is the test that makes a missing glyph a build failure instead of a box on
+/// somebody's screen.
+///
+/// The rule these obey is §6's: **an icon replaces a word, it never garnishes one.** The
+/// single deliberate exception is [`icon::WARNING`], which doubles the colour on purpose.
+pub mod icon {
+    /// The drawer. *The archive* — the same shape in the sidebar and the status bar, so
+    /// one glyph has one meaning wherever it appears.
+    pub const ARCHIVE: &str = "\u{f187}";
+    /// A directory on disk, as opposed to one inside an archive.
+    pub const FOLDER: &str = "\u{f07b}";
+    /// *Open file* — the folder you are about to look in, so it is the open one.
+    pub const FOLDER_OPEN: &str = "\u{f07c}";
+    pub const BOOKMARK: &str = "\u{f02e}";
+    /// A clock, for *Recent files*.
+    pub const RECENT: &str = "\u{f017}";
+    /// A plus, for *New*.
+    pub const NEW: &str = "\u{f067}";
+    /// A gear, for *Settings*.
+    pub const SETTINGS: &str = "\u{f013}";
+    /// An `i` in a circle, for *About*.
+    pub const ABOUT: &str = "\u{f05a}";
+    /// The triangle, and **only** where something has gone wrong — the same restriction
+    /// CORE §6 puts on [`super::WARNING`], the colour it is always drawn in.
+    pub const WARNING: &str = "\u{f071}";
+
+    /// Every icon this program draws, for the test that checks they all exist.
+    pub const ALL: &[(&str, &str)] = &[
+        ("ARCHIVE", ARCHIVE),
+        ("FOLDER", FOLDER),
+        ("FOLDER_OPEN", FOLDER_OPEN),
+        ("BOOKMARK", BOOKMARK),
+        ("RECENT", RECENT),
+        ("NEW", NEW),
+        ("SETTINGS", SETTINGS),
+        ("ABOUT", ABOUT),
+        ("WARNING", WARNING),
+    ];
+}
+
 /// Embed the typeface and make it the only one.
 ///
 /// The files are bundled assets, not dependencies (CORE §2), under the SIL Open Font
@@ -335,15 +390,11 @@ pub fn install_fonts(ctx: &egui::Context) {
 
     fonts.font_data.insert(
         "fira".to_owned(),
-        Arc::new(FontData::from_static(include_bytes!(
-            "../assets/fonts/FiraMonoNerdFontMono-Regular.otf"
-        ))),
+        Arc::new(FontData::from_static(FACE_REGULAR)),
     );
     fonts.font_data.insert(
         "fira-bold".to_owned(),
-        Arc::new(FontData::from_static(include_bytes!(
-            "../assets/fonts/FiraMonoNerdFontMono-Bold.otf"
-        ))),
+        Arc::new(FontData::from_static(FACE_BOLD)),
     );
 
     // One face in both default families, because CORE §6 puts the whole window in
@@ -1110,5 +1161,107 @@ mod tests {
             assert_ne!(c, ORANGE, "orange reached a widget state");
         }
         assert_eq!(v.selection.stroke.color, ORANGE);
+    }
+
+    // -----------------------------------------------------------------------
+    // The icons exist
+    // -----------------------------------------------------------------------
+
+    /// Read a big-endian `u16` / `u32` out of a font table.
+    fn be16(d: &[u8], o: usize) -> u32 {
+        u16::from_be_bytes([d[o], d[o + 1]]) as u32
+    }
+    fn be32(d: &[u8], o: usize) -> u32 {
+        u32::from_be_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]])
+    }
+
+    /// Does this face have a glyph for `cp`?
+    ///
+    /// A hand-rolled `cmap` walk, and deliberately so: the alternative is a font-parsing
+    /// crate as a dev-dependency to answer one yes-or-no question, which is exactly what
+    /// CORE §2 exists to refuse. Format 12 is preferred over format 4 because it is exact
+    /// — a codepoint inside a format-12 group *has* a glyph, where a format-4 segment can
+    /// still map to glyph 0 — and this face carries one.
+    fn face_covers(face: &[u8], cp: u32) -> bool {
+        let tables = be16(face, 4) as usize;
+        let mut cmap = None;
+        for i in 0..tables {
+            let rec = 12 + i * 16;
+            if &face[rec..rec + 4] == b"cmap" {
+                cmap = Some(be32(face, rec + 8) as usize);
+            }
+        }
+        let cmap = cmap.expect("the face has no cmap table");
+
+        let subs = be16(face, cmap + 2) as usize;
+        let mut chosen: Option<(u32, usize)> = None;
+        for i in 0..subs {
+            let sub = cmap + be32(face, cmap + 4 + i * 8 + 4) as usize;
+            let fmt = be16(face, sub);
+            if fmt == 12 {
+                chosen = Some((12, sub));
+                break;
+            }
+            if fmt == 4 && chosen.is_none() {
+                chosen = Some((4, sub));
+            }
+        }
+        match chosen.expect("the face has no format 4 or 12 cmap subtable") {
+            (12, sub) => {
+                let groups = be32(face, sub + 12) as usize;
+                (0..groups).any(|g| {
+                    let p = sub + 16 + g * 12;
+                    cp >= be32(face, p) && cp <= be32(face, p + 4)
+                })
+            }
+            (_, sub) => {
+                let segx2 = be16(face, sub + 6) as usize;
+                let ends = sub + 14;
+                let starts = sub + 16 + segx2;
+                (0..segx2 / 2).any(|i| {
+                    let s = be16(face, starts + i * 2);
+                    s != 0xFFFF && cp >= s && cp <= be16(face, ends + i * 2)
+                })
+            }
+        }
+    }
+
+    /// CORE §6: "Icons are glyphs of that same face."
+    ///
+    /// The whole point of the icon work is that it costs no new asset — which is only true
+    /// while every glyph it names is actually in the two files the binary carries. A
+    /// codepoint that is not there does not fail loudly; it draws a box, and a box is
+    /// indistinguishable from a font that failed to load. So it is checked here, against
+    /// the same bytes `install_fonts` hands to egui, in **both** weights — the bold cut is
+    /// a separate file and a separate `cmap`, and a bold sidebar row would be the place a
+    /// one-weight assumption showed up.
+    #[test]
+    fn every_icon_exists_in_both_faces() {
+        for (name, glyph) in icon::ALL {
+            let mut chars = glyph.chars();
+            let cp = chars.next().expect("an icon cannot be the empty string") as u32;
+            assert!(
+                chars.next().is_none(),
+                "icon::{name} is more than one glyph, which breaks the single-cell rule"
+            );
+            for (weight, face) in [("regular", FACE_REGULAR), ("bold", FACE_BOLD)] {
+                assert!(
+                    face_covers(face, cp),
+                    "icon::{name} (U+{cp:04X}) is missing from the {weight} face; \
+                     it would draw as tofu"
+                );
+            }
+        }
+    }
+
+    /// Named-by-role is only worth anything if the names are distinct: two roles sharing a
+    /// codepoint is a copy-paste slip that reads as a deliberate choice on screen.
+    #[test]
+    fn no_two_icons_are_the_same_glyph() {
+        for (i, (na, a)) in icon::ALL.iter().enumerate() {
+            for (nb, b) in &icon::ALL[i + 1..] {
+                assert_ne!(a, b, "icon::{na} and icon::{nb} are the same glyph");
+            }
+        }
     }
 }
