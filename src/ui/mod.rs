@@ -470,10 +470,10 @@ impl Indium {
                     path.file_name()
                         .unwrap_or(path.as_os_str())
                         .to_string_lossy()
-                ),
-                Err(e) => e,
-            }
-            .into();
+                )
+                .into(),
+                Err(e) => Status::bad(e),
+            };
             return;
         }
         if self.work_running() {
@@ -625,7 +625,7 @@ impl Indium {
                     self.progress = None;
                     self.extract_rx = None;
                     self.post_extract = PostExtract::None;
-                    self.status = msg.into();
+                    self.status = Status::bad(msg);
                     self.passphrase = None;
                 }
             }
@@ -657,7 +657,7 @@ impl Indium {
                 }
                 Err(e) => {
                     self.preview = None;
-                    self.status = e.into();
+                    self.status = Status::bad(e);
                 }
             }
         }
@@ -773,7 +773,7 @@ impl Indium {
                 }
             }
             other => {
-                self.status = other.to_string().into();
+                self.status = Status::bad(other.to_string());
                 self.archive_info = None;
             }
         }
@@ -816,9 +816,9 @@ impl Indium {
     /// Change the settings file. Shaped exactly like `change_recents`.
     pub fn change_settings(&mut self, change: impl FnOnce(&mut Settings)) {
         if self.settings_broken {
-            self.status = "settings.toml could not be parsed earlier; it will not be overwritten."
-                .to_string()
-                .into();
+            self.status = Status::bad(
+                "settings.toml could not be parsed earlier; it will not be overwritten.",
+            );
             return;
         }
         match self.store.change_settings(change) {
@@ -1032,7 +1032,7 @@ impl Indium {
     /// Push a task, or say why it cannot be pushed.
     fn stage(&mut self, task: Task) {
         if let Some(refusal) = self.staging_refusal() {
-            self.status = refusal.into();
+            self.status = Status::bad(refusal);
             return;
         }
         if self.staged_against.is_empty() {
@@ -1063,7 +1063,7 @@ impl Indium {
             return;
         }
         if let Some(refusal) = self.staging_refusal() {
-            self.status = refusal.into();
+            self.status = Status::bad(refusal);
             return;
         }
         if let Some(row) = rows.get(self.cursor) {
