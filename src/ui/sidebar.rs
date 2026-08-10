@@ -94,29 +94,24 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     );
                 });
 
+            // **The bar floats here, and only here.** egui decides whether a `ScrollArea`
+            // needs a scrollbar with a bare comparison — no hysteresis — and the program's
+            // `ScrollStyle::solid()` makes a visible bar cost 10 points of *width*, ramped
+            // over 0.2s. In this zone the content sits within a few points of the viewport
+            // at ordinary window heights, so that decision flips back and forth and takes
+            // the whole sidebar with it.
+            //
+            // A floating bar has `floating_allocated_width: 0.0`, so it overlays the content
+            // instead of displacing it: the decision can flip as often as it likes and the
+            // layout never moves. `AlwaysVisible` was tried first and worked, but it leaves
+            // a track drawn down a zone with nothing to scroll, which is a worse thing to
+            // look at than the problem it solved.
+            //
+            // Scoped to this `Ui`, whose style is clone-on-write, so the wells and the
+            // Inspector keep the solid bars §6 wants them to have.
+            ui.spacing_mut().scroll = egui::style::ScrollStyle::floating();
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
-                // **The track is always there, and that is the fix.** egui decides whether
-                // to show a scrollbar with a bare comparison — no hysteresis, no dead band
-                // — and `ScrollStyle::solid()` makes a visible bar cost 10 points of width,
-                // ramped over 0.2s. So at the one window height where this zone's content
-                // and its viewport are equal, the whole sidebar reflowed by 10 points every
-                // time a drag crossed it.
-                //
-                // That height is not exotic. This zone's content is a constant ~257 points
-                // and its viewport is the window less the status bar, the frame and the
-                // reserved foot, so the crossing sits at a window of about **515 points**
-                // — and this compositor hands INDIUM 540. Twenty-five points of slack, or
-                // about thirty physical pixels of drag. **P13 is what put it there:** the
-                // icons made every row taller and the status bar taller with them, spending
-                // three quarters of the slack the zone used to have. Before that the
-                // crossing was near 470 and nothing could reach it, which is why two whole
-                // testing rounds on this same machine saw none of it.
-                //
-                // `AlwaysVisible` short-circuits the decision to a constant, so the width
-                // never changes and there is nothing left to cross. Shrinking the content
-                // would only move the crossing; the compositor decides the window, not us.
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
                 .show(ui, |ui| {
                     // CORE §4 draws this zone "(family style)", and the family puts the
                     // mark above the wordmark, centred, with the sections left-aligned
