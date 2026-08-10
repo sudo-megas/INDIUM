@@ -43,7 +43,7 @@ five dependencies, and honest at fifty.
 | `wl-clipboard-rs` | P3 | Puts `text/uri-list` on the Wayland clipboard so copy-out works into any file manager. |
 | `image` (via `egui_extras` `image` feature) | already linked; formats chosen at P5 | Decodes the image formats the Preview tab shows. It is not a new dependency — `eframe` pulls it through its clipboard path already, with PNG on — so P5 names the formats rather than adding the crate. |
 | `serde` + `toml` | P2 | Read and write the settings, bookmarks, and recent-files TOML files. |
-| `ashpd` (+ `zbus`, `futures-lite`) | P11 | The desktop's own file picker, over `xdg-desktop-portal`. The only alternative was drawing a file dialog, and §6 has no vocabulary for one. It brings a D-Bus stack with it — the largest dependency INDIUM has taken since libarchive, and taken deliberately: the picker a user has already chosen beats one INDIUM invents, and it is the only kind that survives a sandbox. |
+| `ashpd` (+ `zbus`, `futures-lite`) | P11 | The desktop's own file picker, over `xdg-desktop-portal`. The only alternative was drawing a file dialog, and §6 has no vocabulary for one. It brings a D-Bus stack with it — the largest dependency INDIUM has taken since libarchive, and taken deliberately: the picker a user has already chosen beats one INDIUM invents, and it is the only kind that survives a sandbox. P13 turns on its `open_uri` feature as well, for *"show me this folder"* — the feature is `open_uri = []` upstream, so it adds no crate and no linkage, only D-Bus calls over the `zbus` already here. |
 
 Everything not in this table is the standard library or hand-written: CRC32 is a
 twenty-line table, byte formatting is ten lines, argument handling is `std::env::args`.
@@ -80,7 +80,7 @@ One binary crate, `indium`, with modules. No workspace, no premature abstraction
 | `model` | Archive state: entries, selection, the open archive's identity. |
 | `tasks` | The staging engine. Every mutation — add, remove, rename, create — is a task in a queue. **Apply** builds the new archive in a temp file beside the target, verifies it by walking its entries, then atomically renames over the original. The original is never touched until the replacement is proven. |
 | `ui` | The window: sidebar, table, Inspector, tray, status bar, and every popup. |
-| `platform` | The Linux specifics: clipboard, `.desktop` parsing for Open With, default-app registration, XDG paths, and the second window — on this platform a window is a process, and opening one is a Linux specific like the rest. |
+| `platform` | The Linux specifics: clipboard, `.desktop` parsing for Open With, default-app registration, XDG paths, the second window — on this platform a window is a process, and opening one is a Linux specific like the rest — and handing a directory to the desktop's file manager, which is the portal's job for the same reason the picker is. |
 | `theme` | The Aubergine palette, the fonts, and nothing configurable. |
 
 Threading: the UI thread and one worker. The worker opens, lists, extracts, and rebuilds;
@@ -98,7 +98,9 @@ Five fixed zones and nine popups. Nothing else appears, ever.
 
 **Sidebar** (family style): the wordmark at top, then *Open file* `O` and *Archive* `1`; a
 rule; then *Bookmarks* `2` and *Recent files* `3`; at the bottom *New* `N`, *Settings* `,`,
-*About* `A`. Numbers and letters are bare keypresses, as in JADEITE.
+*About* `A`. Numbers and letters are bare keypresses, as in JADEITE. Every row carries a
+leading glyph in the same ink as its label, so the column can be found by shape before it is
+read; §6 says which glyphs and what they are allowed to do.
 
 The archive sits above the rule and the two lists below it because the first thing a person
 looks for is the archive they are already inside — the order used to run the other way, and a
@@ -126,12 +128,17 @@ is a button.
 
 **Status bar**: three rows, each of a fixed height, so the floor of the window never moves
 between idle and working. *What is open* — the archive's name, its format and filter, and its
-directory. *The numbers and the voice* — entry count, real → packed with ratio, the selection
-count, and whatever INDIUM is currently saying, drawn whether or not something is running.
-*Progress* — the phase, the count, the bar and its cancel during long work; a hairline when
-nothing is running, because an empty row must still say something. The bar carries no text of
-its own: `#EEEEEC` on Ubuntu Orange measures 2.4:1, so the phase and the count are read beside
-it and never on it.
+directory. **The directory is elided in the middle, never at the end**, because the end is the
+folder the archive is actually in and the start is the tree it belongs to; a path that keeps
+only one of those has kept the wrong half. The whole path is on hover, and clicking it hands
+that folder to the desktop's file manager. *The numbers and the voice* — entry count,
+real → packed with ratio, the selection count, and whatever INDIUM is currently saying, drawn
+whether or not something is running. *Progress* — the phase, the count and its cancel during
+long work; a hairline when nothing is running, because an empty row must still say something.
+**The proportion done is drawn as a 2px line along the bar's own top edge**, not as a track
+inside the row: it is the one measurement in the window that wants the whole width, and the
+edge is already there. The line carries no text of its own — `#EEEEEC` on Ubuntu Orange
+measures 2.4:1 — so the phase and the count are read beside it and never on it.
 
 Three rows of fixed height is not the same as three rows anyone can read, and the first testing
 round said the bar *"looks like a mess. Cant really track whats going on there."* It was right:
@@ -269,6 +276,17 @@ paths, the whole Inspector. Monospace is what makes a verbose pane scannable ins
 noisy, and the pane is the program, so the window wears it throughout. Chrome and values
 are told apart by weight and colour, never by family. There is no second face and no font
 setting. The face is **Fira Mono Nerd Font**, regular and bold.
+
+**Icons are glyphs of that same face**, which is what keeps the sentence above literally true
+rather than nearly true. They come from the **Font Awesome** range the Nerd Font patches in, and
+no second range is mixed with it: mixing icon families reads exactly like mixing typefaces. The
+`Mono` cut §2 names is the reason this costs nothing — every glyph is one cell, so an icon never
+widens a column or moves a number off its own. **An icon replaces a word; it never garnishes
+one.** A folder glyph beside a path that already looks like a path is decoration, and §6 has no
+room for decoration; a glyph *instead of* a label is what the sidebar and the status bar use it
+for. The one deliberate redundancy is the warning glyph before a failure: colour alone carrying
+meaning fails anyone who cannot separate `#FFD800` from grey, so there the shape and the colour
+say the same thing on purpose.
 Motion is functional only: progress moves, panels appear, and a control grows by one pixel
 under the pointer and contracts below its resting size while it is held. That last is
 function, not decoration: a control that does not answer the hand is a control that looks
@@ -276,6 +294,19 @@ broken. Nothing else moves.
 
 The icon is photorealistic PNG, supplied by the maker, installed at the hicolor sizes
 provided. No SVG.
+
+**Seven things this section has now refused, with a date on them.** A design round in P13 put
+each to the maker and each was declined, so they are written down rather than left to be
+proposed again: **no second typeface** — the sentence above is not a default, it is a decision;
+**no emoji** — they are colour bitmaps from another face and a fontconfig lookup INDIUM does not
+make, so they arrive as tofu or not at all; **no translucency, blur or OS material** — the
+grounds are opaque and there are six of them for a reason; **no motion beyond what this section
+already permits** — progress moves, panels appear, a control answers the hand, nothing else,
+and in an immediate-mode window every animation is a frame the machine cannot idle through;
+**no sixth colour** — in particular no green for success, which is the outcome that needs the
+least announcing; **`#FFD800` is not softened** — it measures 13.44:1 on the status bar's ground
+and a failure should be the loudest thing in the window; **no third line weight** — 1px inside,
+2px around, and `no_stroke_is_thicker_than_two_pixels` is the test that says so.
 
 ---
 
