@@ -1,3 +1,35 @@
+indium (1.0.0-4) unstable; urgency=medium
+
+  * Extraction no longer reports success for files it never wrote. libarchive
+    answers ARCHIVE_WARN both for a file it wrote but could not finish stamping
+    and for one it could not create at all, and INDIUM counted the second as
+    written — so extracting into a directory you cannot write said "Extracted 1
+    entry." over an empty folder. It now asks the filesystem whether the file
+    arrived, and says plainly when it did not.
+  * Every failure INDIUM reports is now yellow and carries a warning triangle.
+    Seven messages were the same grey as a confirmation, including every
+    extraction failure and every archive that could not be opened.
+  * Icons. The sidebar and the status bar carry glyphs from the typeface already
+    embedded in the binary — no new asset, no new dependency, and a test that
+    fails the build rather than let one render as an empty box.
+  * The sidebar is ordered the way a person reads it: Open file and Archive
+    above a rule, Bookmarks and Recent files below it. F1 lists every key, and a
+    test holds that list to the design document.
+  * The keyboard's place in a list is a line rather than a colour, so it can be
+    seen on a row that is also selected. Rules and separators are legible at
+    last. Buttons are capsules. The typeface is Fira Mono Nerd Font.
+  * The status bar's directory is shortened from the middle, so both the tree it
+    lives in and the folder it sits in survive; hovering shows it whole, and
+    clicking it opens that folder in your file manager.
+  * Long operations draw their progress as a line along the top edge of the
+    status bar instead of a bar inside it. Cancel has not moved.
+  * Resizing the window no longer snaps. INDIUM declared a minimum larger than
+    the window some compositors hand it, so the first pixel of a drag jumped the
+    frame; and the entry table's columns had stopped following the window
+    entirely, leaving dead space beside the last one.
+
+ -- sudo-megas <sudo-megas@users.noreply.github.com>  Mon, 10 Aug 2026 23:09:24 +0300
+
 indium (1.0.0-3) unstable; urgency=medium
 
   * Every filename is read correctly, whatever alphabet it is in. libarchive

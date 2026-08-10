@@ -15,7 +15,7 @@ const SOURCE: &str = "https://github.com/sudo-megas/INDIUM";
 /// Deliberately not a build-time timestamp: CORE §8 ships this as a package, and a binary
 /// that embeds the minute it was compiled cannot be built twice into the same bytes. A
 /// constant is deterministic and is exactly how `LICENCE` below is already embedded.
-const RELEASE_DATE: &str = "2026-08-09";
+const RELEASE_DATE: &str = "2026-08-10";
 const LICENCE: &str = include_str!("../../LICENSE");
 
 pub fn show(app: &mut Indium, ctx: &egui::Context) {
