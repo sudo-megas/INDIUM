@@ -762,11 +762,11 @@ impl Indium {
             }
         }
 
-        // Reactive mode repaints on input, and a `ProgressBar` — unlike the listing
-        // `Spinner` — asks for nothing on its own, while the worker holds no `Context` to
-        // ask with. So the drain keeps the pump alive for exactly as long as an operation
-        // is running, and stops the moment progress clears. This is what makes a progress
-        // bar move rather than jump to done when the mouse happens to twitch.
+        // Reactive mode repaints on input, and a painted progress line — unlike the
+        // listing `Spinner` — asks for nothing on its own, while the worker holds no
+        // `Context` to ask with. So the drain keeps the pump alive for exactly as long as
+        // an operation is running, and stops the moment progress clears. This is what makes
+        // the line advance rather than jump to done when the mouse happens to twitch.
         if wake || self.progress.is_some() {
             ctx.request_repaint();
         }
@@ -2569,8 +2569,13 @@ fn sb_the_numbers(app: &Indium, ui: &mut egui::Ui) {
 /// Row 3 — progress, and nothing else.
 ///
 /// The lane is laid out right-to-left so Cancel and the count take their space from the
-/// right edge first; the label and the bar then fill whatever is left, which is what lets
-/// the bar be as wide as the window rather than a fixed 160px stub.
+/// right edge first and the phase fills whatever is left.
+///
+/// **There is no track in this row any more.** P13 moved the proportion to a 2px line along
+/// the panel's top edge (CORE §4), which is drawn by `status_bar` because only `status_bar`
+/// knows where that edge is. What stays here is what a track could never carry: the phase,
+/// the count, and the Cancel that is the only user-reachable writer to `app.cancel` in the
+/// program — which is also why this row could not simply be deleted.
 fn sb_progress(app: &Indium, ui: &mut egui::Ui) {
     // Copied out before the row opens: the closure needs `app.cancel` while it holds a
     // reading of `app.progress`, and a label is three words.

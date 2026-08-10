@@ -29,8 +29,8 @@ use std::sync::Arc;
 pub const VOID: Color32 = Color32::from_rgb(0x18, 0x04, 0x12);
 /// The status bar, darker than the window so it reads as a floor.
 pub const STATUS_BAR: Color32 = Color32::from_rgb(0x24, 0x07, 0x1B);
-/// **The wells** — the entry table, every text field, the progress track. Anything you look
-/// *into* rather than *at*.
+/// **The wells** — the entry table and every text field. Anything you look *into* rather
+/// than *at*.
 ///
 /// The maker's own terminal ground, adopted at P5. It sits at hue 319° against the old
 /// value's 288°, which puts it in the same family as Canonical Aubergine (328°) — so the
@@ -186,7 +186,9 @@ pub fn edge_hot() -> Stroke {
 /// make that impossible, they suit a monospace window, and the gutter plus the 2px edge do
 /// all the floating.
 pub const R_ZONE: u8 = 0;
-/// Buttons, chips, hand-rolled rows, the progress track.
+/// Buttons, chips, hand-rolled rows. The status bar's progress track used this until P13
+/// moved the proportion to a square-ended 2px line on the panel's edge; text fields and
+/// checkboxes still draw through it.
 pub const R_CTRL: u8 = 3;
 /// Popups, menus, the modal.
 pub const R_POPUP: u8 = 10;
@@ -200,7 +202,7 @@ pub const R_POPUP: u8 = 10;
 ///
 /// It is applied **at the control**, never in [`install_visuals`]. `widgets.inactive`,
 /// `.hovered` and `.active` are also what a `TextEdit`, a checkbox and the status bar's
-/// progress track draw through; moving the constant there would turn the path field into a
+/// checkboxes draw through; moving the constant there would turn the path field into a
 /// lozenge, and §6 gives the capsule to things you press.
 pub const R_PILL: u8 = R_POPUP;
 
