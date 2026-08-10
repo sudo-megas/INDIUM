@@ -108,24 +108,30 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     // *Bookmarks* and *Recent files* ended up below the fold. A zone that
                     // only works at sizes it cannot insist on is a zone that does not work.
                     let room = ui.available_height();
-                    let (mark, wordmark, subtitle) = if room >= FULL_HEADER {
-                        (50.0, true, true)
+                    let (mark, subtitle) = if room >= FULL_HEADER {
+                        (Some(50.0), true)
                     } else if room >= COMPACT_HEADER {
-                        (30.0, true, false)
+                        (Some(40.0), false)
                     } else {
-                        (24.0, false, false)
+                        (None, false)
                     };
                     ui.vertical_centered(|ui| {
-                        ui.add(theme::mark(mark));
-                        ui.add_space(4.0);
-                        if wordmark {
-                            ui.label(
-                                egui::RichText::new("INDIUM")
-                                    .size(23.0)
-                                    .color(theme::TEXT)
-                                    .family(theme::bold()),
-                            );
+                        // **The mark is dropped, never shrunk past legibility.** CORE §6
+                        // says the icon is photorealistic PNG, and photorealism is the one
+                        // kind of image that has nothing left at 24 points — it goes to
+                        // mush, and a smudge above the rows reads as a rendering fault
+                        // rather than as a small logo. The wordmark is type and type
+                        // survives being small, so it is the part that stays.
+                        if let Some(size) = mark {
+                            ui.add(theme::mark(size));
+                            ui.add_space(4.0);
                         }
+                        ui.label(
+                            egui::RichText::new("INDIUM")
+                                .size(23.0)
+                                .color(theme::TEXT)
+                                .family(theme::bold()),
+                        );
                         if subtitle {
                             ui.label(
                                 egui::RichText::new("archive manager")
@@ -255,10 +261,10 @@ const ROW_PAD: egui::Margin = egui::Margin::symmetric(8, 3);
 /// shrink the mark and it wants **250**. Drop the wordmark as well and it wants **219**,
 /// which is what fits the 230 the compositor's 540-tall window actually leaves.
 const FULL_HEADER: f32 = 296.0;
-/// Below [`FULL_HEADER`]: the subtitle goes and the mark shrinks. Below *this*, the wordmark
-/// goes too — a sidebar that cannot show *Recent files* has failed at its job, and a
-/// wordmark is the part of it that is only decoration.
-const COMPACT_HEADER: f32 = 252.0;
+/// Below [`FULL_HEADER`]: the subtitle goes and the mark comes down to 40. Below *this* the
+/// mark goes entirely and the wordmark stands alone — a sidebar that cannot show *Recent
+/// files* has failed at its job, and the mark is the part of it that scales worst.
+const COMPACT_HEADER: f32 = 268.0;
 
 /// The contents of one sidebar line — label on the left, bare-key hint on the right —
 /// shared by the live arm and the unavailable one so the two cannot drift apart.

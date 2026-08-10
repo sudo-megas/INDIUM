@@ -103,9 +103,10 @@ leading glyph in the same ink as its label, so the column can be found by shape 
 read; §6 says which glyphs and what they are allowed to do.
 
 **Every row is visible or the header gives way.** A section a person cannot see is a section
-they do not have, so when the zone runs short it is the wordmark that goes — first the
-subtitle, then the wordmark itself, leaving the mark alone above the rows. The rows never
-scroll out. This is a rule and not an optimisation: INDIUM names a minimum window size and
+they do not have, so when the zone runs short the header stands down instead — first the
+subtitle, then **the mark**, leaving the wordmark alone above the rows. The mark is dropped
+and never shrunk to fit: it is photorealistic PNG, and photorealism is the one kind of image
+with nothing left at twenty-four points, where type still reads. The rows never scroll out. This is a rule and not an optimisation: INDIUM names a minimum window size and
 the compositor is free to ignore it, and one measurably does — asked for 1180×720 with a
 floor of 880×680, INDIUM was handed 960×540. A zone that only works at sizes it cannot
 insist on does not work.
