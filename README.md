@@ -132,7 +132,7 @@ never closes another.
 | **Open With** | Press `Enter` on a file and INDIUM offers the applications that can open it, best match first, filtered as you type. It opens a **copy** — anything you change there does not return to the archive. |
 | **Settings** `,` | A small panel: your bookmarks, and whether Extract should start out pointed into a subfolder. It is a plain `settings.toml` you may edit by hand, and INDIUM respects what you write there. |
 | **About** `A` | The version and release date, the maker, the source address, and the licence in full. The address is text you can select and copy but not click — INDIUM opens no browser and follows no link, by design. |
-| **The status bar** | Three lines at the bottom of the window. The first says which archive this window holds and where it lives; the second the entry count, the real and packed sizes, and whatever INDIUM last had to say to you; the third the progress bar and its **Cancel** while something long is running. |
+| **The status bar** | Three lines at the bottom of the window. The first says which archive this window holds and where it lives — the folder is shortened from the middle so both ends stay readable, hovering shows it whole, and clicking it opens that folder in your file manager; the second the entry count, the real and packed sizes, and whatever INDIUM last had to say to you, in yellow when something went wrong; the third the phase, the count and its **Cancel** while something long is running, with the proportion done drawn as a line along the bar's top edge. |
 
 ![The New Archive popup: four presets, every method with its one-sentence verdict, and a line at the foot stating exactly what will be built.](build/screenshot-new.png)
 

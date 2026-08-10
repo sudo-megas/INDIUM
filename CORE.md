@@ -335,6 +335,9 @@ the rule is enforced rather than remembered.
 | P8 | The second window CORE §1 always described, and the two files it was overwriting | **`v1.0`** |
 | P9 | The popup's own three grounds, and the popup that stopped outgrowing its window | **`v1.0`** |
 | P10 | `Ctrl+C` and `Ctrl+V`, which had never once worked, and the gate that would not have let them ship | **`v1.0.0-2`** |
+| P11 | The round that was actually run: a locale that can carry a name, the portal's file picker, and four defects a person found | **`v1.0.0-3`** |
+| P12 | The design round the testing asked for: the sidebar's order, `F1`, a cursor that is a line, capsules, rules that can be seen, Fira Mono | — *(built, not released)* |
+| P13 | The design round decided: icons from the face already embedded, a path elided in the middle that opens its folder, progress on the bar's edge | — |
 
 The P-table is a plan, not scripture; P-documents may split or merge steps, but scope
 only moves *out* of v1.0 by the maker's decision recorded here.
