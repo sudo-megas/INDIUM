@@ -1,4 +1,4 @@
-<img width="96" align="left" hspace="12" vspace="4" alt="" src="build/icons/indium-256.png" />
+<img width="96" align="left" hspace="12" vspace="4" alt="" src="build/icons/indium-1024.png" />
 
 <h1>INDIUM</h1>
 
