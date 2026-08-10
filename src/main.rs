@@ -91,27 +91,11 @@ fn main() -> eframe::Result<()> {
             .with_app_id("org.indium")
             .with_icon(window_icon())
             .with_inner_size([1180.0, 720.0])
-            // 480 was below the sidebar's own natural height, so the compositor would
-            // happily hand INDIUM a window its first zone could not fit inside. P11 made
-            // that survivable — the sidebar reserves its foot and scrolls the rest — but a
-            // floor the program can actually be used at is the better half of the answer,
-            // and a scrollbar over a wordmark is not a layout anyone chose.
-            //
-            // **680** is a height the sidebar fits inside with slack: its header, its four
-            // list rows and its reserved foot, above a status bar of `SB_HEIGHT`. It was
-            // raised from 600 because P13's icons made every row taller and the two list
-            // sections went below the fold. The precise figures this comment used to carry
-            // were measured before P13 trimmed 45 points of padding out of the zone and are
-            // not restated here rather than restated wrongly.
-            //
-            // **900** is the three zones' own floors added up: the sidebar is fixed at 202
-            // (166 of content + 36 of frame); the Inspector will not go under 272
-            // (`MIN_CONTENT` 236 + 36); and the entry table cannot show its four columns in
-            // less than 384 — `Name` is `at_least(120)`, Size, Packed and Method are exact
-            // at 84, 84 and 72, and `egui_extras` charges `item_spacing.x` between them, so
-            // three gaps of 8 — plus about 10 for a solid scrollbar. Over 20 of central
-            // chrome, measured: at a 960 root the sidebar took 202, the Inspector its
-            // default 342 and the table 396, and 960 − 940 is that 20.
+            // **The floor sits below what the compositor hands out, deliberately.** It read
+            // 840×600 while this machine is given a 540-point-tall window; KWin ignores the
+            // minimum when restoring a remembered geometry and enforces it the moment an
+            // edge is grabbed, so a drag snapped the frame up sixty points before it moved
+            // anywhere. `ui::MIN_W`/`MIN_H` carry the reasoning.
             .with_min_inner_size([indium::ui::MIN_W, indium::ui::MIN_H]),
         ..Default::default()
     };

@@ -2259,16 +2259,23 @@ impl Indium {
 /// The smallest window INDIUM will run in, and the one number `main.rs` hands the
 /// compositor as `with_min_inner_size`.
 ///
-/// **Low on purpose.** It used to be 900×680 — the size at which all three zones are
-/// comfortable — and that is the wrong thing for a floor to be: a person dragging the edge
-/// inward hits it and the window stops dead under their hand, which reads as the program
-/// snapping rather than as a limit. Comfort is not the floor's job. The floor's job is to
-/// refuse a window nothing can be done in, and every zone degrades on its own well before
-/// this: the sidebar scrolls, the table clips its columns, the Inspector has its own
-/// `MIN_CONTENT`. So this is small enough that ordinary resizing never meets it.
-pub const MIN_W: f32 = 840.0;
+/// **A floor must sit below what the compositor actually hands out, or it becomes a trap.**
+/// It read 840×600 and this machine is given a window **540 points tall**. KWin does not
+/// apply the minimum when it restores a remembered geometry — but it applies it the instant
+/// a person grabs an edge, so the first pixel of a drag snapped the frame up sixty points.
+/// That is the "it jumped again" this cost an evening: not layout, not a fractional scale,
+/// just a declared minimum the window was already under.
+///
+/// At a scale of 1.0 the same physical window is 675 points and clears 600 easily, which is
+/// exactly why the jump looked like a fractional-scale problem and was not.
+///
+/// So these are deliberately far below anything in use. They are not a comfortable size —
+/// comfort is not a floor's job — they are the size under which nothing can be done at all.
+/// Every zone gives way on its own long before here: the sidebar scrolls against a track
+/// that is always drawn, the table clips its columns, the Inspector has its own minimum.
+pub const MIN_W: f32 = 560.0;
 /// See [`MIN_W`].
-pub const MIN_H: f32 = 600.0;
+pub const MIN_H: f32 = 400.0;
 
 /// The whole panel, gutter included.
 ///
