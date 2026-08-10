@@ -2265,14 +2265,13 @@ impl Indium {
 /// Inspector will not go under 272, and the entry table cannot show Name, Size, Packed and
 /// Method in less than 360 plus its scrollbar, over 20 of central chrome.
 ///
-/// **680** is the height at which the sidebar can show all seven rows *and* its whole header.
+/// **680** is the height at which the sidebar shows all seven rows beneath its header.
 ///
-/// Both are only ever a **request**. This compositor declines them — measured, it hands
-/// INDIUM 960×540 whatever is asked — and P13 briefly answered that by commanding the window
-/// back up to the floor on startup. That was removed: a program that resizes the window while
-/// a person is dragging its edge is a program fighting its user, and it stopped being
-/// necessary the moment `sidebar` learned to give up its header instead of its rows. The
-/// floor is what INDIUM would like; the sidebar is what makes any smaller size survivable.
+/// Both are only a **request**, and this compositor declines them: measured on KWin, INDIUM
+/// asks for 1180×720 and is handed 960×540 whatever floor it names. Nothing here tries to
+/// force the point — a program that resizes the window out from under the hand dragging it is
+/// worse than a short window. Shorter than this and the sidebar scrolls, which is what any
+/// program does when its contents outgrow it.
 pub const MIN_W: f32 = 880.0;
 /// See [`MIN_W`].
 pub const MIN_H: f32 = 680.0;

@@ -35,21 +35,6 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
         // 2px edge — two lines a pixel apart, which is worse than either alone.
         .show_separator_line(false)
         .show(root, |ui| {
-            // **Measured here and nowhere else.** The sidebar's whole inner height, read
-            // before the foot below reserves any of it: 364 in the 540-point window the
-            // compositor keeps handing us, 504 in a 680.
-            //
-            // Choosing the tier from *here* rather than from inside the scroll lane is a
-            // change of yardstick, not of behaviour — the lane is this number less the
-            // foot's fixed 133.6, so the two sets of thresholds decide identically. It is
-            // the better one to measure against because it does not move when the foot
-            // changes, and because it is the number a person can reason about: the zone.
-            //
-            // **Everything in this file is points, not pixels.** This machine runs at a
-            // scale of 1.25, so the 540-point window measures 675 pixels in a screenshot —
-            // a distinction that cost an afternoon when a screen capture and the program
-            // disagreed by exactly that ratio and the capture was believed.
-            let inner = ui.available_height();
             // The bottom group sits at the foot of the panel, as CORE draws it — and it
             // **reserves its space before the sections above are laid out**, which is the
             // whole of P11's fix here.
@@ -110,52 +95,28 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     // mark above the wordmark, centred, with the sections left-aligned
                     // beneath it. The header block is the only centred thing in the window.
                     //
-                    // **It gives way before the rows do.** CORE §4 says every section is
-                    // reachable, and a section scrolled out of its own zone is not; the
-                    // wordmark is decoration by comparison. So the header is measured
-                    // against the room actually left and drawn at whichever of three sizes
-                    // fits — full, then without its subtitle, then the mark alone.
-                    //
-                    // This exists because asking for room does not get it. `main.rs` names a
-                    // floor of `MIN_H` and the compositor is free to ignore it: measured on
-                    // KWin, INDIUM asked for 1180×720 with a floor of 880×680 and was handed
-                    // **960×540** — 140 short of what the sidebar wants, which is exactly how
-                    // *Bookmarks* and *Recent files* ended up below the fold. A zone that
-                    // only works at sizes it cannot insist on is a zone that does not work.
-                    let header = header_tier(inner);
+                    // **It is fixed, and that is the point.** P13 spent an afternoon making
+                    // it adapt — three arrangements chosen by how much room the zone had —
+                    // and every version of it was worse than a header that simply does not
+                    // move: a first launch and a one-pixel drag could show two different
+                    // layouts, which is a worse thing to look at than any one of them. If
+                    // the window is too short to hold this and all seven rows, the rows
+                    // scroll, exactly as they did before and exactly as every other program
+                    // handles a window smaller than its contents.
                     ui.vertical_centered(|ui| {
-                        if header == Header::Inline {
-                            ui.horizontal(|ui| {
-                                ui.add(theme::mark(26.0));
-                                ui.add_space(6.0);
-                                ui.label(
-                                    egui::RichText::new("INDIUM")
-                                        .size(23.0)
-                                        .color(theme::TEXT)
-                                        .family(theme::bold()),
-                                );
-                            });
-                        } else {
-                            ui.add(theme::mark(if header == Header::Full {
-                                50.0
-                            } else {
-                                40.0
-                            }));
-                            ui.add_space(4.0);
-                            ui.label(
-                                egui::RichText::new("INDIUM")
-                                    .size(23.0)
-                                    .color(theme::TEXT)
-                                    .family(theme::bold()),
-                            );
-                            if header == Header::Full {
-                                ui.label(
-                                    egui::RichText::new("archive manager")
-                                        .size(13.0)
-                                        .color(theme::TEXT_MUTED),
-                                );
-                            }
-                        }
+                        ui.add(theme::mark(50.0));
+                        ui.add_space(4.0);
+                        ui.label(
+                            egui::RichText::new("INDIUM")
+                                .size(23.0)
+                                .color(theme::TEXT)
+                                .family(theme::bold()),
+                        );
+                        ui.label(
+                            egui::RichText::new("archive manager")
+                                .size(13.0)
+                                .color(theme::TEXT_MUTED),
+                        );
                     });
                     ui.add_space(6.0);
 
@@ -271,41 +232,6 @@ fn action_item(
 /// cannot drift apart in height.
 const ROW_PAD: egui::Margin = egui::Margin::symmetric(8, 3);
 
-/// Above this much of the sidebar's **inner height**, the header is drawn whole.
-///
-/// Every number here is measured from the running program, not estimated. The foot costs
-/// **133.6**. The scroll lane wants **294.1** with the header whole, about **266** without
-/// its subtitle and with the mark at 40, and **214.9** with no mark at all. Add the foot to
-/// each and you get what the zone needs: 427.7, 399.7, 348.5.
-///
-/// They are compared against the height read at the top of `show`, which is the zone before
-/// the foot has taken anything. Measuring the lane instead would decide the same way — it is
-/// this number less the foot — but the zone does not shift when the foot does, and a couple
-/// of points of slack are added on top so that rounding to physical pixels at a fractional
-/// display scale cannot land the comparison on the wrong side of the line.
-const FULL_HEADER: f32 = 432.0;
-/// Below [`FULL_HEADER`]: the subtitle goes and the mark comes down to 40. Below *this* the
-/// mark goes entirely and the wordmark stands alone — a sidebar that cannot show *Recent
-/// files* has failed at its job, and the mark is the part of it that scales worst.
-const COMPACT_HEADER: f32 = 404.0;
-
-/// Which header the sidebar can afford, given its whole inner height.
-///
-/// Pulled out of the drawing code so it can be *asserted* rather than screenshotted: a
-/// photograph of a window proves what one compositor did on one afternoon, and this is the
-/// rule. Returns the mark's size — `None` when there is no room for it at all — and whether
-/// the subtitle is drawn. The wordmark is never dropped: it is type, and type stays legible
-/// at any size the zone can be.
-fn header_tier(inner: f32) -> Header {
-    if inner >= FULL_HEADER {
-        Header::Full
-    } else if inner >= COMPACT_HEADER {
-        Header::Stacked
-    } else {
-        Header::Inline
-    }
-}
-
 /// How the mark and the wordmark are arranged when the zone is generous or tight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Header {
@@ -416,70 +342,4 @@ fn row(
         };
         row_body(ui, icon, label, key, ink, tag);
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// What the zone's inner height is at a given window height: the status bar takes
-    /// `SB_HEIGHT`, and the sidebar's own frame takes 40 — 14+14 of inner margin, 2+2 of
-    /// edge, 4+4 of gutter. Both measured against the running program.
-    fn inner_at(window: f32) -> f32 {
-        window - super::super::SB_HEIGHT - 40.0
-    }
-
-    /// **The mark is on screen at every size.** This is what the whole sidebar argument came
-    /// down to: the logo kept vanishing from ordinary windows, because a rule that was
-    /// correct on paper dropped it at exactly the heights this compositor hands out.
-    ///
-    /// Asserted rather than eyeballed, because the eye was wrong twice — this display scales
-    /// by 1.25, so a 540-point window photographs as 675 pixels, and a screenshot compared
-    /// against a point threshold decides the opposite of the program.
-    #[test]
-    fn the_mark_is_never_absent() {
-        for h in (240..1200).step_by(4) {
-            let t = header_tier(inner_at(h as f32));
-            assert!(
-                matches!(t, Header::Full | Header::Stacked | Header::Inline),
-                "no header at all at {h}"
-            );
-        }
-        // The window the compositor keeps handing us: the mark is beside the name, not gone.
-        assert_eq!(header_tier(inner_at(540.0)), Header::Inline);
-        assert_eq!(header_tier(inner_at(564.0)), Header::Inline);
-        // INDIUM's own floor: everything, stacked, with the subtitle.
-        assert_eq!(header_tier(inner_at(680.0)), Header::Full);
-        // The boundary, to the point.
-        let full = FULL_HEADER + super::super::SB_HEIGHT + 40.0;
-        assert_eq!(header_tier(inner_at(full)), Header::Full);
-        assert_eq!(header_tier(inner_at(full - 1.0)), Header::Stacked);
-    }
-
-    /// The three tiers are ordered: more room never buys less header.
-    #[test]
-    fn the_header_never_shrinks_as_the_window_grows() {
-        let rank = |t: Header| match t {
-            Header::Inline => 0,
-            Header::Stacked => 1,
-            Header::Full => 2,
-        };
-        let mut last = Header::Inline;
-        for h in (300..900).step_by(5) {
-            let now = header_tier(inner_at(h as f32));
-            assert!(
-                rank(now) >= rank(last),
-                "at {h} the header went backwards: {last:?} -> {now:?}"
-            );
-            last = now;
-        }
-    }
-
-    /// The subtitle is the first thing a tight zone gives up, and the only tier that keeps it
-    /// is the roomiest.
-    #[test]
-    fn the_subtitle_is_the_first_thing_given_up() {
-        assert_eq!(header_tier(inner_at(1080.0)), Header::Full);
-        assert_ne!(header_tier(inner_at(560.0)), Header::Full);
-    }
 }
