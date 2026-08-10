@@ -111,10 +111,18 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
             // is `Sense::hover()`, which is not. This one line is what switches row hover on.
             .sense(egui::Sense::click())
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            // **Only Name is resizable, and that is load-bearing.** `resizable(true)` on
+            // the *builder* makes `egui_extras` remember every column as `Size::exact` after
+            // the first frame, and `Sizing::to_lengths` then ignores the available width
+            // entirely — so the table stopped tracking the window: widen it and Name did not
+            // grow, leaving dead space to the right of Method; narrow it and the columns
+            // clipped instead of giving way. Marking the three fixed columns not-resizable
+            // leaves Name as the one that absorbs the difference, which is what
+            // `Column::remainder` said in the first place.
             .column(Column::remainder().at_least(120.0).clip(true))
-            .column(Column::exact(84.0))
-            .column(Column::exact(84.0))
-            .column(Column::exact(72.0));
+            .column(Column::exact(84.0).resizable(false))
+            .column(Column::exact(84.0).resizable(false))
+            .column(Column::exact(72.0).resizable(false));
 
         // Only when the keyboard moved it, and only for the one frame the flag is up.
         // Asking every frame would fight the wheel: scroll away to read something and the

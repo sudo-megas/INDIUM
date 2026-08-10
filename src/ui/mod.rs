@@ -273,6 +273,9 @@ pub struct Indium {
     /// is the same defect the second testing round found in extraction: work that reports
     /// success it did not have.
     reveal_rx: Option<Receiver<Result<(), String>>>,
+    /// How many columns the status bar's directory was cut to last frame; see
+    /// `sb_what_is_open`. Held so a drag does not re-cut the path on every pixel.
+    path_cells: usize,
 
     // --- Preview (P5) -----------------------------------------------------
     pub preview: Option<PreviewData>,
@@ -388,6 +391,7 @@ impl Indium {
             paste_rx: None,
             picker_rx: None,
             reveal_rx: None,
+            path_cells: 0,
             preview: None,
             preview_loading: None,
             preview_rx: None,
@@ -2325,9 +2329,16 @@ fn status_bar(app: &mut Indium, ui: &mut egui::Ui) {
             let after_2 = ui.cursor().top();
             sb_progress(app, ui);
             for y in [after_1, after_2] {
+                // **To the pixel, not to the point.** `.round()` snapped this to a whole
+                // point, and a point is only a whole pixel at a scale of 1. At 1.25 it is
+                // 1.25 pixels, so a 1px rule straddled two rows of them and its share
+                // shifted as the window moved — a shimmer that only exists on a fractional
+                // display. `round_to_pixels` is `emath`'s answer to exactly this and is the
+                // identity at 1.0.
+                use egui::emath::GuiRounding as _;
                 ui.painter().hline(
                     lane.x_range(),
-                    (y - theme::SB_GAP / 2.0).round(),
+                    (y - theme::SB_GAP / 2.0).round_to_pixels(ui.pixels_per_point()),
                     theme::hairline(),
                 );
             }
@@ -2461,8 +2472,19 @@ fn sb_what_is_open(app: &mut Indium, ui: &mut egui::Ui) {
                 // this label because the lane runs right to left. The glyph is drawn at
                 // `ICON_SCALE`, so it costs that many cells and not one.
                 let glyph = cell * theme::ICON_SCALE + gap;
-                let budget = ((ui.available_width() - glyph) / cell).floor().max(0.0) as usize;
-                let shown = crate::util::elide_middle(&dir, budget);
+                let want = ((ui.available_width() - glyph) / cell).floor().max(0.0) as usize;
+
+                // **Hysteresis, so a drag does not re-cut the path on every pixel.** The
+                // budget steps a whole column every ~9 physical pixels of resize, and a
+                // path that re-elides that often is a line of text visibly chewing itself
+                // while the window moves. Holding the previous width until it is wrong by
+                // two columns halves the number of changes and costs a `usize`; the label
+                // is `.truncate()`d anyway, so a budget one column stale can never overrun
+                // the lane.
+                if want.abs_diff(app.path_cells) >= 2 || want == 0 {
+                    app.path_cells = want;
+                }
+                let shown = crate::util::elide_middle(&dir, app.path_cells.min(want.max(1)));
 
                 let hit = ui
                     .add(

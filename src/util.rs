@@ -250,6 +250,10 @@ pub fn elide_middle(s: &str, cells: usize) -> String {
         1 => "…".to_string(),
         _ => {
             let keep = cells - 1;
+            // **The tail always takes the odd column.** `keep / 2` alternates which half
+            // absorbs it as the budget changes, so widening a window by one column used to
+            // re-partition *both* ends and the ellipsis visibly swung back and forth. Fixing
+            // the share means one more character appears at one end and nothing else moves.
             let head = keep / 2;
             let tail = keep - head;
             let mut out = String::with_capacity(s.len());
