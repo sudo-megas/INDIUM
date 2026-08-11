@@ -9,7 +9,7 @@
 </p>
 
 <p>
-  <img alt="Debian package" src="https://img.shields.io/badge/Debian%20package-6.5%20MB-772953?style=for-the-badge&logo=debian&logoColor=white">
+  <img alt="Debian package" src="https://img.shields.io/badge/Debian%20package-7.2%20MB-772953?style=for-the-badge&logo=debian&logoColor=white">
   <img alt="Platform"       src="https://img.shields.io/badge/Linux-Wayland-E95420?style=for-the-badge&logo=linux&logoColor=white">
 </p>
 
