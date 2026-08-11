@@ -603,7 +603,87 @@ fi
 
 
 echo
-echo "-- 10. the CORE §2 gate"
+echo "-- 10. the copyright names the font that ships"
+
+# The .deb is the only artefact carrying a hand-written attribution: the Arch package
+# installs LICENSES/OFL-1.1.txt verbatim and so cannot disagree with itself. This one can,
+# and did. P12 swapped the face to Fira Mono and the DEP-5 header went on naming JetBrains
+# Mono for four releases — in a file make-deb.sh concatenates with the OFL text naming the
+# other holder, so the shipped copyright contradicted itself in adjacent paragraphs.
+#
+# Checks 5 and 7 count licence files and control fields. Neither reads a word of
+# attribution, which is why this had to be found by a person. Every number in this project
+# a test can reach has been right for sixteen milestones; this is the class that has not.
+#
+# So the expectation is *derived* and never typed a second time. LICENSES/OFL-1.1.txt is
+# copied verbatim out of the font package — assets/fonts/README.md records the `cp` — so its
+# first line moves when the face does, and this check moves with it.
+hdr=build/package/deb/copyright.header
+
+# `tr -d '\r'` is load-bearing: the OFL ships CRLF and all 93 of its lines carry one.
+want=$(sed -n '1s/^Digitized data copyright (c) //p' LICENSES/OFL-1.1.txt | tr -d '\r')
+
+if [ -z "$want" ]; then
+  # Deliberately a FAIL and not a SKIP. The licence no longer opens with the line this
+  # check derives from, which means the font was swapped and nothing told the check — the
+  # exact failure it exists to catch. A gate that skips proves nothing.
+  bad "LICENSES/OFL-1.1.txt has no 'Digitized data copyright (c)' line to derive from"
+else
+  got=$(sed -n '/^Files: assets\/fonts\/\*/,/^$/{s/^Copyright: //p}' "$hdr")
+  if [ "$got" = "$want" ]; then
+    ok "the copyright header names the OFL's own holder: $want"
+  else
+    bad "copyright.header says '$got'; LICENSES/OFL-1.1.txt says '$want'"
+  fi
+fi
+
+# The face name is checked against the files actually embedded, not against a second
+# string. "Fira Mono Nerd Font Mono" -> "FiraMonoNerdFontMono" -> a real basename in
+# assets/fonts/. "JetBrains Mono NL Nerd Font" -> "JetBrainsMonoNLNerdFont" -> nothing,
+# which is the shipped defect, caught mechanically rather than by reading.
+face=$(sed -n 's/^Comment: \(.*\), regular and bold.*/\1/p' "$hdr" | tr -d ' ')
+if [ -z "$face" ]; then
+  bad "copyright.header's Comment: names no face"
+elif [ -n "$(find assets/fonts -maxdepth 1 -name "$face*" -print -quit)" ]; then
+  ok "the copyright header names the embedded face: $face"
+else
+  bad "copyright.header names '$face', which matches no file in assets/fonts/"
+fi
+
+# Tier two: the same facts in the file that actually ships. Not redundant with the above —
+# it proves make-deb.sh's concatenation and its DEP-5 sed did not mangle what the tree
+# blessed, which is a separate failure with a separate cause.
+if [ "$deb_ok" != 1 ] || [ "$data_ok" = 0 ]; then
+  nope "no extracted .deb payload — the packaged copyright cannot be checked"
+else
+  shipped=$tmp/data/usr/share/doc/indium/copyright
+  if [ ! -f "$shipped" ]; then
+    bad "no usr/share/doc/indium/copyright in the package payload"
+  else
+    sgot=$(sed -n '/^Files: assets\/fonts\/\*/,/^$/{s/^Copyright: //p}' "$shipped")
+    sofl=$(sed -n 's/^ Digitized data copyright (c) //p' "$shipped" | head -1)
+    if [ "$sgot" = "$want" ] && [ "$sofl" = "$want" ]; then
+      ok "the packaged copyright names one holder in both places: $want"
+    else
+      bad "the packaged copyright disagrees with itself — stanza '$sgot', licence '$sofl'"
+    fi
+
+    # The CRLF pair, in the artefact. A lone CR is not valid DEP-5 continuation content,
+    # and a blank licence line must be ` .` — the recipe said so for ten milestones while
+    # emitting none of them, because `^$` cannot match a line holding a carriage return.
+    if grep -qP '\r' "$shipped"; then
+      bad "the packaged copyright carries carriage returns — the CRLF strip was dropped"
+    elif [ "$(grep -cxP ' \.' "$shipped")" -lt 2 ]; then
+      bad "the packaged copyright has no DEP-5 ' .' separators — the blank-line sed missed"
+    else
+      ok "the packaged copyright is CR-free with $(grep -cxP ' \.' "$shipped") DEP-5 separators"
+    fi
+  fi
+fi
+
+
+echo
+echo "-- 11. the CORE §2 gate"
 
 # CORE §2: "No GTK. No Qt. No KF6. No portal." The gate lives in its own script and is
 # called rather than reimplemented, so there is one definition of what INDIUM may link and

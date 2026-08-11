@@ -10,7 +10,8 @@
 //! packaging is verified by the thing being packaged, which is the cheapest honest test
 //! available and the only one that needs no dependency at all.
 //!
-//! **Every test here is `#[ignore]`d.** The artefacts do not exist during an ordinary
+//! **Every test here is `#[ignore]`d, save the one exception named below.** The artefacts
+//! do not exist during an ordinary
 //! `cargo test` — they are made by a release, not by a build — and a test that silently
 //! passes when its subject is absent is worse than no test. The precedent is
 //! `src/platform/clipboard.rs`, whose `#[ignore = "needs a live Wayland session and
@@ -19,6 +20,17 @@
 //! the same thing, so nothing here can pass by absence.
 //!
 //! Run them with `cargo test --test package_path -- --ignored`.
+//!
+//! **One test here is deliberately not `#[ignore]`d**, and the exception is written down
+//! rather than left to look like an oversight. `the_copyright_header_names_the_font_that_ships`
+//! reads two files that are in the repository at all times — `LICENSES/OFL-1.1.txt` and
+//! `build/package/deb/copyright.header` — so it wants no artefact, and absence therefore
+//! cannot make it pass. The reason it is here and not elsewhere is that its subject is
+//! packaging: it is the tree half of `verify.sh`'s check 10. And the reason it is not left
+//! to `verify.sh` alone is that `verify.sh` runs in `release.yml`, at a tag, while this runs
+//! in `ci.yml` on every push — and the defect it guards against (P17: the .deb naming a font
+//! INDIUM stopped embedding in P12) survived four releases precisely because nothing looked
+//! at it until a person did.
 //!
 //! Copyright © sudo-megas. GPL-3.0-only.
 
@@ -561,4 +573,82 @@ fn neither_package_ships_a_rar_association() {
              opens one, because it will only ever answer \"RAR is not supported.\""
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// The attribution, checked against the things that move with the font.
+//
+// Not `#[ignore]`d — see this file's header for why, and why it lives here.
+// ---------------------------------------------------------------------------
+
+/// The `.deb` is the only artefact carrying a hand-written attribution: the Arch package
+/// installs `LICENSES/OFL-1.1.txt` verbatim and so cannot disagree with itself. This one
+/// can, and did — P12 swapped the embedded face to Fira Mono and the DEP-5 header went on
+/// naming JetBrains Mono through four releases, in a file `make-deb.sh` concatenates with
+/// the OFL text that names the other holder.
+///
+/// Both expectations are **derived, never typed a second time.** The holder comes off the
+/// licence's own first line, and the face is matched against the files actually embedded —
+/// so swapping the font again moves both, and a header that did not move fails here.
+#[test]
+fn the_copyright_header_names_the_font_that_ships() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let ofl = std::fs::read_to_string(root.join("LICENSES/OFL-1.1.txt")).expect("no OFL text");
+    let header = std::fs::read_to_string(root.join("build/package/deb/copyright.header"))
+        .expect("no copyright header");
+
+    // `trim_end` is load-bearing, not tidying: the OFL ships CRLF and every one of its
+    // lines carries a carriage return. Comparing without it fails on an invisible byte.
+    let want = ofl
+        .lines()
+        .next()
+        .and_then(|l| l.trim_end().strip_prefix("Digitized data copyright (c) "))
+        .expect(
+            "LICENSES/OFL-1.1.txt no longer opens with the line this test derives from. \
+             That means the font was swapped and nothing told this test — which is the \
+             failure it exists to catch, so it is an error and not a reason to skip.",
+        );
+
+    // The `Files: assets/fonts/*` stanza, and only that one — `Files: *` above it carries
+    // the maker's own copyright and matching it would make this test pass on the wrong line.
+    let stanza = header
+        .split("\n\n")
+        .find(|p| p.starts_with("Files: assets/fonts/*"))
+        .expect("copyright.header has no `Files: assets/fonts/*` stanza");
+
+    let got = stanza
+        .lines()
+        .find_map(|l| l.strip_prefix("Copyright: "))
+        .expect("that stanza names no Copyright:");
+    assert_eq!(
+        got, want,
+        "the .deb copyright names a different holder than the licence it ships beside it"
+    );
+
+    // "Fira Mono Nerd Font Mono" -> "FiraMonoNerdFontMono" -> a real basename in
+    // assets/fonts/. "JetBrains Mono NL Nerd Font" -> "JetBrainsMonoNLNerdFont" -> nothing,
+    // which is the defect P17 found, caught mechanically rather than by reading.
+    let face: String = stanza
+        .lines()
+        .find_map(|l| l.strip_prefix("Comment: "))
+        .and_then(|c| c.split(", regular and bold").next())
+        .expect("that stanza's Comment: names no face")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+
+    let embedded: Vec<String> = std::fs::read_dir(root.join("assets/fonts"))
+        .expect("no assets/fonts")
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".otf") || n.ends_with(".ttf"))
+        .collect();
+    assert!(
+        !embedded.is_empty(),
+        "no font files in assets/fonts/ — this test would pass by absence otherwise"
+    );
+    assert!(
+        embedded.iter().any(|n| n.starts_with(&face)),
+        "the .deb copyright names {face}, which is no font this binary embeds: {embedded:?}"
+    );
 }
