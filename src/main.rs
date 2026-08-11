@@ -35,18 +35,28 @@ fn main() -> eframe::Result<()> {
     // headless subcommands justify its sentence.
     let mut open: Option<PathBuf> = None;
     let mut also: Vec<PathBuf> = Vec::new();
-    for arg in std::env::args().skip(1) {
-        match arg.as_str() {
-            "-h" | "--help" => {
+    // **`args_os`, and never `args`.** `std::env::args()` panics on an argument that is
+    // not valid Unicode, and a path on Linux is bytes — which this program argues at
+    // length in `arch::path_to_cstring` and then, until P17, ignored one function later.
+    // `indium /tmp/<latin1>.zip` therefore aborted before the window opened, in every
+    // binary shipped since P1. Nobody hit it because the corpus INDIUM is tested against
+    // is Turkish in UTF-8; that is luck, not a design.
+    //
+    // Matching on `to_str()` costs nothing and needs no `OsStr` comparisons: every flag
+    // this program has is ASCII, so an argument that is not valid UTF-8 cannot be one,
+    // and falls through to the path arm exactly where it belongs.
+    for arg in std::env::args_os().skip(1) {
+        match arg.to_str() {
+            Some("-h") | Some("--help") => {
                 print!("{USAGE}");
                 return Ok(());
             }
-            "-V" | "--version" => {
+            Some("-V") | Some("--version") => {
                 println!("indium {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
             }
-            _ if arg.starts_with('-') => {
-                eprintln!("indium: unknown option {arg}\n");
+            Some(text) if text.starts_with('-') => {
+                eprintln!("indium: unknown option {text}\n");
                 print!("{USAGE}");
                 std::process::exit(2);
             }
