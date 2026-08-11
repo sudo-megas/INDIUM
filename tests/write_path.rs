@@ -167,20 +167,34 @@ fn find<'a>(entries: &'a [Entry], path: &str) -> &'a Entry {
 // Round trips
 // ---------------------------------------------------------------------------
 
-/// CORE §5's write list: "`tar`, plain or with the filters `gz`, `bz2`, `xz`, `zst`,
-/// `lz4`; `zip` (Deflate)". Every one of them must survive a write and a read.
+/// CORE §5's write list: "`tar`, plain or with the filters `gz`, `bz2`, `xz`, `zst`, `lz4`;
+/// `zip` (Deflate); `7z` (LZMA2, via `sevenz-rust2`)". Every one of them must survive a write
+/// and a read.
+///
+/// **That quotation used to stop one clause early.** It ended at `zip` (Deflate) and dropped
+/// the 7z, which is what made "every writable format" true of a list of seven — the name was
+/// kept honest by shortening the document instead of lengthening the test. 7z was covered
+/// elsewhere in this file, so nothing was unproven; what was wrong was the citation, and a
+/// doctored quotation of the authoritative document is worse than the gap it hides. P18.
+///
+/// The cases are now taken from `METHODS` through an exhaustive `match` with no `_` arm, so a
+/// ninth method does not compile until somebody round-trips it.
 #[test]
 fn every_writable_format_round_trips_its_payload() {
     let dir = TempDir::new("formats");
-    let cases = [
-        ("plain.tar", Method::Store),
-        ("out.tar.gz", Method::Gzip),
-        ("out.tar.bz2", Method::Bzip2),
-        ("out.tar.xz", Method::Xz),
-        ("out.tar.zst", Method::Zstd),
-        ("out.tar.lz4", Method::Lz4),
-        ("out.zip", Method::Deflate),
-    ];
+    let cases = indium::tasks::METHODS.map(|method| {
+        let name = match method {
+            Method::Store => "plain.tar",
+            Method::Gzip => "out.tar.gz",
+            Method::Bzip2 => "out.tar.bz2",
+            Method::Xz => "out.tar.xz",
+            Method::Zstd => "out.tar.zst",
+            Method::Lz4 => "out.tar.lz4",
+            Method::Deflate => "out.zip",
+            Method::Lzma2 => "out.7z",
+        };
+        (name, method)
+    });
 
     for (name, method) in cases {
         let path = dir.join(name);
