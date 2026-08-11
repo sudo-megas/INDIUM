@@ -1253,6 +1253,13 @@ fn stream_via_libarchive(
         }
         // A directory has no bytes, and asking for them is a caller's mistake rather than
         // an empty success — `cat` on a directory is an error everywhere else too.
+        //
+        // **This branch only.** The 7z fallback goes through `sevenz::read_entry`, whose
+        // no-data-stream path returns `Ok((vec![], false))` for a directory rather than an
+        // error — so a directory inside an *encrypted-header* 7z, the one case that reaches
+        // that fallback, is a silent empty success instead. Recorded rather than fixed:
+        // levelling it means changing `read_entry`, which the Preview and the rebuild both
+        // call, to serve a case reachable only through `cat`.
         if entry.is_dir {
             return Err(ArchiveError::Other(format!("{entry_path} is a directory")));
         }

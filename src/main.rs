@@ -7,8 +7,15 @@
 //! the command line — and every further archive gets a window of its own, which since
 //! P8 this program opens rather than asks the user to open.
 
-// The window is the product; a console window is not wanted alongside it. On Linux
-// this attribute is a no-op, but it documents the intent and costs nothing.
+// On Linux this attribute is a no-op, which is the only reason it is still here.
+//
+// **It stopped documenting an intent at P17.** It used to say a console window is not
+// wanted alongside the window, and that was true while the window was the whole product.
+// The program now has a half whose entire output is stdout — and on the platform this
+// attribute targets it detaches stdout and stderr, which would silently break `list`,
+// `cat` and `extract`. CORE §9 says no Windows support, so the attribute is inert and
+// harmless; if that ever changed, this is the line that has to go first rather than the
+// line that explains why the terminal half prints nothing.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::PathBuf;
@@ -16,10 +23,15 @@ use std::path::PathBuf;
 use indium::platform::window;
 use indium::ui::Indium;
 
-/// The help text, and the whole of the argument vocabulary, live in `cli` now — one copy,
-/// beside the code that answers to it, and pinned to `cli::SUBCOMMANDS` by a test so the
-/// two cannot drift. It used to end with a sentence promising headless subcommands in
-/// V1.3; P17 built them, so the sentence is gone rather than merely stale.
+/// The help text lives in `cli` now — one copy, beside the code that answers to it. The
+/// subcommand words are pinned to `cli::SUBCOMMANDS` by a test, though the pin is one-way:
+/// it catches a subcommand missing from `USAGE`, not a `USAGE` line naming a subcommand
+/// that does not exist.
+///
+/// `-h`, `--help`, `-V`, `--version` and the unknown-option arm are still parsed below —
+/// they belong to the window half, which is what this file is. It is only the three
+/// subcommand words that moved. `USAGE` used to end with a sentence promising headless
+/// subcommands in V1.3; P17 built them, so the sentence is gone rather than merely stale.
 use indium::cli::USAGE;
 
 fn main() -> eframe::Result<()> {

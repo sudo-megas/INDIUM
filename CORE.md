@@ -52,7 +52,8 @@ bytes, which this program argues at length about libarchive and then ignored in 
 `main` from P1 until P17 found it.
 
 **`clap` was put to the test this section named, and refused — P17.** The condition was
-that V1.3's headless subcommands justify its sentence, and they do not: the terminal half
+that the headless subcommands justify its sentence — §7 numbered them V1.3 when that
+condition was written and V1.2 when it was met — and they do not: the terminal half
 is three subcommands, one string option and two flags, which is forty lines of `match`
 beside the thirty `main` already hand-rolls. Its sentence would read *"parses six flags"*,
 and that is not a sentence — while the derive path brings `syn`, `quote`, `proc-macro2`

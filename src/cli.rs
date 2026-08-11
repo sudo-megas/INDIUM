@@ -1,7 +1,7 @@
 //! The terminal half — P17.
 //!
 //! CORE §7 named three headless subcommands, and `main.rs` has printed a promise about
-//! them in its own `--help` since P6: *"Headless subcommands (extract, list, single-file
+//! them in its own `--help` since P1: *"Headless subcommands (extract, list, single-file
 //! open) arrive in V1.3."* A promise printed by the program is a debt, which is the
 //! reasoning P16 used to build the hex view. This pays the last one.
 //!
@@ -62,10 +62,12 @@ The terminal half is entered only when the first argument is exactly `list`,
 
     list       one stored path per line, in archive order, undecorated, so the
                output feeds straight back into `cat` and `extract`
-      --long   mode, size, packed, method, time and a total — for a person to
-               read, not for a script to parse
+      --long   mode, size, packed, method, encryption, time and a total — for
+               a person to read, not for a script to parse
       -0       separate with NUL instead of newline. A member name may contain
                a newline, and a line-oriented listing of one is silently wrong
+               The two are refused together: one is for a person, one for a
+               script, and a flag silently ignored is worse than one refused
 
     extract    everything, or only the MEMBERs named
       --to     where to put it; the working directory by default
@@ -527,7 +529,17 @@ struct Termios {
 
 // The layout is checked at compile time rather than trusted. A libc whose `struct
 // termios` is not this shape would otherwise be discovered by a terminal left deaf.
+//
+// **The size alone is not enough, and the sweep said so.** Swapping `c_line` and `c_cc`
+// still sizes to 60, so a field reorder — the mistake this gate exists to catch — would
+// pass a size check untouched. The offsets are asserted too; `offset_of!` is const-usable,
+// so it costs nothing at run time.
 const _: () = assert!(std::mem::size_of::<Termios>() == 60);
+const _: () = assert!(std::mem::offset_of!(Termios, c_lflag) == 12);
+const _: () = assert!(std::mem::offset_of!(Termios, c_line) == 16);
+const _: () = assert!(std::mem::offset_of!(Termios, c_cc) == 17);
+const _: () = assert!(std::mem::offset_of!(Termios, c_ispeed) == 52);
+const _: () = assert!(std::mem::offset_of!(Termios, c_ospeed) == 56);
 
 unsafe extern "C" {
     fn tcgetattr(fd: i32, termios_p: *mut Termios) -> i32;
@@ -553,6 +565,50 @@ impl Drop for EchoOff {
     }
 }
 
+/// Zero the one-byte scratch the password passed through.
+///
+/// A plain `byte[0] = 0` is a dead store and the optimiser is free to drop it — clippy
+/// says so out loud, which is a useful reminder rather than a nuisance. `secret::wipe`
+/// reaches for `write_volatile` for exactly this reason; so does this.
+fn wipe_scratch(byte: &mut [u8; 1]) {
+    // SAFETY: `byte` is a valid, uniquely borrowed, properly aligned `u8`.
+    unsafe { std::ptr::write_volatile(byte.as_mut_ptr(), 0u8) };
+}
+
+/// Read one line off a descriptor into `out`, without allocating anywhere else.
+///
+/// The newline is consumed and not stored. `Ok(0)` means end of input before any byte
+/// arrived, which is how a closed terminal is told from an empty password.
+///
+/// The one-byte scratch is wiped before returning, because the last byte of the password
+/// would otherwise be left on the stack — a small thing, and the sort of small thing this
+/// function exists to stop being casual about.
+fn read_line_from(mut src: &std::fs::File, out: &mut Vec<u8>) -> std::io::Result<usize> {
+    use std::io::Read as _;
+
+    let mut byte = [0u8; 1];
+    let mut read = 0usize;
+    loop {
+        match src.read(&mut byte) {
+            Ok(0) => break,
+            Ok(_) => {
+                read += 1;
+                if byte[0] == b'\n' {
+                    break;
+                }
+                out.push(byte[0]);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => {
+                wipe_scratch(&mut byte);
+                return Err(e);
+            }
+        }
+    }
+    wipe_scratch(&mut byte);
+    Ok(read)
+}
+
 /// Ask the controlling terminal for a password, once.
 ///
 /// **`/dev/tty`, and neither stdin nor stdout.** That matters twice and both cases are
@@ -564,7 +620,6 @@ impl Drop for EchoOff {
 /// `setsid` child gets a sentence and an exit code rather than a process that waits
 /// forever for a keystroke nobody is there to type.
 fn ask_for_password(path: &Path, err: &mut dyn Write) -> Result<Secret, ArchiveError> {
-    use std::io::{BufRead, BufReader};
     use std::os::fd::AsRawFd;
 
     let tty = std::fs::OpenOptions::new()
@@ -610,19 +665,28 @@ fn ask_for_password(path: &Path, err: &mut dyn Write) -> Result<Secret, ArchiveE
     let _ = write!(w, "Password for {}: ", path.display());
     let _ = w.flush();
 
-    // **Bytes, not a `String`, and the capacity is reserved up front.** `Secret` zeroes its
-    // buffer with volatile writes on `Drop`, and `Secret::new` takes this `Vec` by value —
-    // so the allocation the password is read into *is* the one that gets wiped, and there
-    // is never a second plaintext copy for P2's rule to have an exception for. Reading into
-    // a `String` and handing over `from_text` would leave the original buffer freed and
-    // unwiped, which is the same mistake in a smaller place.
+    // **Bytes, not a `String`; and read straight off the descriptor, with no `BufReader`.**
     //
-    // The capacity is generous so the vector does not grow mid-read: a realloc would free
-    // a buffer holding a prefix of the password without zeroing it. A password longer than
-    // this still works and still costs one unwiped prefix, which is written down rather
-    // than pretended away.
+    // `Secret` zeroes its buffer with volatile writes on `Drop`, and `Secret::new` takes
+    // this `Vec` by value — so the allocation the password is read into is the one that
+    // gets wiped. That is only true if nothing copies it on the way, and the obvious
+    // idiom does: `BufReader::new(&tty).read_until(..)` heap-allocates eight kilobytes,
+    // the line lands *there* first and is copied out, and the reader is dropped at the end
+    // of the statement freeing that buffer **unwiped**. This round wrote it that way and
+    // the sweep caught it with a tracking allocator — one freed-but-unwiped 8192-byte
+    // block, still holding the password.
+    //
+    // `ICANON` is deliberately left on, so the kernel is already doing the line editing
+    // and hands bytes over only once Enter is pressed. Reading them one at a time off the
+    // `File` is therefore neither slow nor subtle, and it is the only shape with no
+    // intermediate buffer at all.
+    //
+    // The capacity is reserved up front so the vector does not grow mid-read: a realloc
+    // would free a buffer holding a prefix of the password without zeroing it. A password
+    // longer than this still works and still costs one unwiped prefix, which is written
+    // down rather than pretended away.
     let mut line: Vec<u8> = Vec::with_capacity(512);
-    let read = BufReader::new(&tty).read_until(b'\n', &mut line);
+    let read = read_line_from(&tty, &mut line);
 
     // The echo is off, so the Enter the user pressed left no mark. Without this the next
     // thing printed continues the prompt's own line.
@@ -638,9 +702,8 @@ fn ask_for_password(path: &Path, err: &mut dyn Write) -> Result<Secret, ArchiveE
             // Only the line terminator is stripped. A password may legitimately begin or
             // end with a space, and trimming one off would refuse a correct password while
             // reporting it as wrong.
-            if line.last() == Some(&b'\n') {
-                line.pop();
-            }
+            // `read_line_from` already dropped the newline. A CRLF terminal leaves the
+            // carriage return behind it, and that is not part of anybody's password.
             if line.last() == Some(&b'\r') {
                 line.pop();
             }

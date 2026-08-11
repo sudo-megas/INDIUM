@@ -93,7 +93,7 @@ const FOUR: [&str; 4] = ["alpha.txt", "beta.txt", "sub", "sub/gamma.txt"];
 /// The same rule, applied to `USAGE`: a fourth subcommand added without a line here fails.
 ///
 /// It also asserts the promise is *gone*. `main.rs` printed "Headless subcommands
-/// (extract, list, single-file open) arrive in V1.3." from P6 until this round, and a
+/// (extract, list, single-file open) arrive in V1.3." from P1 until this round, and a
 /// round that pays a debt while leaving its IOU in the window has not paid it.
 #[test]
 fn the_usage_text_names_every_subcommand_it_accepts() {

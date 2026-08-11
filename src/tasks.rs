@@ -1119,7 +1119,7 @@ pub fn lock_name_for(target: &Path) -> String {
     // Canonicalised first, or the guard is trivially defeated by how the archive was
     // named: `indium ./photos.7z` in one window and `indium /home/megas/photos.7z` in
     // another would take two different locks on one file, and paths come straight from
-    // `std::env::args`, so the relative form is ordinary rather than exotic. This also
+    // `std::env::args_os`, so the relative form is ordinary rather than exotic. This also
     // gives the symlink case for free. A path that cannot be canonicalised — a new
     // archive that does not exist yet — falls back to the name as given, which is
     // correct: nothing else can be holding a lock on a file that is not there.

@@ -167,7 +167,8 @@ compositor running:
 
 ```sh
 indium list    archive.zip              # one stored path per line, in archive order
-indium list    archive.zip --long       # mode, size, method, time, and a total
+indium list    archive.zip --long       # mode, size, packed, method, encryption,
+                                        #   time, and a total
 indium list    archive.zip -0           # NUL-separated, for names holding a newline
 indium extract archive.zip --to ~/out   # everything, or name the members you want
 indium extract archive.zip -- notes.txt
@@ -177,7 +178,9 @@ indium cat     archive.zip notes.txt    # one member's bytes, to standard output
 `list` prints undecorated paths on purpose — no trailing slash on a directory — so its
 output feeds straight back into `cat` and `extract`. `--long` is for you to read rather
 than for a script to parse; `-0` is the form that stays correct when a member name
-contains a newline, which an archive is perfectly able to hold.
+contains a newline, which an archive is perfectly able to hold. **The two are refused
+together** rather than one quietly winning — they are for different readers, and a flag
+you asked for and did not get is worse than one you were told you could not have.
 
 `cat` has **no size limit**. The Inspector's preview stops at eight megabytes to protect
 the window; the terminal has no such reason, so a member comes out whole however large it

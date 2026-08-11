@@ -183,7 +183,7 @@ echo "-- 3. ELF facts on the release binary"
 # release and inside makepkg's check(). The full set is here, where a release artefact is
 # what is being judged rather than a build.
 if [ "$have_bin" = 0 ]; then
-  nope "no $BIN — \`cargo build --release\` makes it (checks 3, 4 and 10)"
+  nope "no $BIN — \`cargo build --release\` makes it (checks 3, 4 and 11)"
 elif need readelf "the ELF hardening facts"; then
   etype=$(readelf -h "$BIN" 2>/dev/null | sed -n 's/^  Type:[[:space:]]*\([A-Z]*\).*/\1/p' || true)
   if [ "$etype" = "DYN" ]; then
@@ -669,7 +669,7 @@ else
     fi
 
     # The CRLF pair, in the artefact. A lone CR is not valid DEP-5 continuation content,
-    # and a blank licence line must be ` .` — the recipe said so for ten milestones while
+    # and a blank licence line must be ` .` — the recipe said so from P6 onward while
     # emitting none of them, because `^$` cannot match a line holding a carriage return.
     if grep -qP '\r' "$shipped"; then
       bad "the packaged copyright carries carriage returns — the CRLF strip was dropped"

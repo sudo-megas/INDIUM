@@ -55,7 +55,7 @@ pub enum Destination {
 /// the archive already there.
 ///
 /// Paths are compared **canonicalised**, for the reason `tasks::lock_name_for` gives for
-/// doing the same: paths arrive from `std::env::args`, a drop, and a hand-typed field,
+/// doing the same: paths arrive from `std::env::args_os`, a drop, and a hand-typed field,
 /// so `./photos.7z` and `/home/megas/photos.7z` are the ordinary case rather than the
 /// exotic one. A path that cannot be canonicalised — an archive that is not there —
 /// falls back to the name as given, which is correct: nothing that does not exist can be
