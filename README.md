@@ -3,7 +3,7 @@
 <h1>INDIUM</h1>
 
 <p>
-  <img alt="Version"      src="https://img.shields.io/badge/version-1.1.0-E95420?style=for-the-badge">
+  <img alt="Version"      src="https://img.shields.io/badge/version-1.2.0-E95420?style=for-the-badge">
   <img alt="Release date" src="https://img.shields.io/badge/released-2026--08--11-E95420?style=for-the-badge">
   <img alt="Licence"      src="https://img.shields.io/badge/licence-GPL--3.0--only-772953?style=for-the-badge">
 </p>
@@ -58,18 +58,18 @@ nothing more: *"RAR is not supported."*
 
 ### 3.A Arch Linux
 
-Download `indium-1.1.0-1-x86_64.pkg.tar.zst` from the Releases page:
+Download `indium-1.2.0-1-x86_64.pkg.tar.zst` from the Releases page:
 
 ```sh
-sudo pacman -U indium-1.1.0-1-x86_64.pkg.tar.zst
+sudo pacman -U indium-1.2.0-1-x86_64.pkg.tar.zst
 ```
 
 ### 3.B Debian / Ubuntu
 
-Download `indium_1.1.0-1_amd64.deb` from the Releases page:
+Download `indium_1.2.0-1_amd64.deb` from the Releases page:
 
 ```sh
-sudo apt install ./indium_1.1.0-1_amd64.deb
+sudo apt install ./indium_1.2.0-1_amd64.deb
 ```
 
 **The two packages do not have the same floor, and it matters more than the file extension
@@ -80,7 +80,7 @@ right for the distribution it is for and wrong everywhere else.
 
 ### 3.C Anything else
 
-`indium-1.1.0-1-x86_64.tar.gz` is the `.deb`'s binary with no packaging around it, so it carries
+`indium-1.2.0-1-x86_64.tar.gz` is the `.deb`'s binary with no packaging around it, so it carries
 the lower of the two floors — glibc 2.35. Unpack it, put `indium` wherever you keep such
 things, and satisfy `libarchive.so.13`, `libwayland-client`, `libxkbcommon` and `libEGL`
 yourself. It installs no icon and no menu entry; `./build/install-desktop.sh` from a source
@@ -159,6 +159,39 @@ never closes another.
 
 Bare letters are shortcuts, which is why they are suppressed the moment a text field has
 focus. There is no modal editing, no `hjkl` and no `:` commands, anywhere.
+
+### Without the window
+
+Three subcommands open no window at all, so they work over `ssh` and on a machine with no
+compositor running:
+
+```sh
+indium list    archive.zip              # one stored path per line, in archive order
+indium list    archive.zip --long       # mode, size, method, time, and a total
+indium list    archive.zip -0           # NUL-separated, for names holding a newline
+indium extract archive.zip --to ~/out   # everything, or name the members you want
+indium extract archive.zip -- notes.txt
+indium cat     archive.zip notes.txt    # one member's bytes, to standard output
+```
+
+`list` prints undecorated paths on purpose — no trailing slash on a directory — so its
+output feeds straight back into `cat` and `extract`. `--long` is for you to read rather
+than for a script to parse; `-0` is the form that stays correct when a member name
+contains a newline, which an archive is perfectly able to hold.
+
+`cat` has **no size limit**. The Inspector's preview stops at eight megabytes to protect
+the window; the terminal has no such reason, so a member comes out whole however large it
+is, and `indium cat big.zip huge.bin | head` is an ordinary thing to do.
+
+An encrypted archive is asked for its password **on the terminal, with the echo off, at
+the moment it is needed**. There is deliberately no `--password` and no environment
+variable: either would put your password in the process table where anyone on the machine
+can read it, and in your shell's history where it would outlive the command by years. If
+there is no terminal to ask on — a cron job, a CI runner — it says so and stops rather
+than waiting forever.
+
+The subcommand is only recognised as the very first word. An archive of your own actually
+named `list` is opened, as a window, with `indium ./list`.
 
 ### What it does with your data
 

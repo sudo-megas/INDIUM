@@ -46,8 +46,19 @@ five dependencies, and honest at fifty.
 | `ashpd` (+ `zbus`, `futures-lite`) | P11 | The desktop's own file picker, over `xdg-desktop-portal`. The only alternative was drawing a file dialog, and §6 has no vocabulary for one. It brings a D-Bus stack with it — the largest dependency INDIUM has taken since libarchive, and taken deliberately: the picker a user has already chosen beats one INDIUM invents, and it is the only kind that survives a sandbox. P13 turns on its `open_uri` feature as well, for *"show me this folder"* — the feature is `open_uri = []` upstream, so it adds no crate and no linkage, only D-Bus calls over the `zbus` already here. |
 
 Everything not in this table is the standard library or hand-written: CRC32 is a
-twenty-line table, byte formatting is ten lines, argument handling is `std::env::args`.
-`clap` arrives only if V1.3's headless subcommands justify its sentence.
+twenty-line table, byte formatting is ten lines, argument handling is **`std::env::args_os`**
+— `args` panics outright on an argument that is not valid Unicode, and a path on Linux is
+bytes, which this program argues at length about libarchive and then ignored in its own
+`main` from P1 until P17 found it.
+
+**`clap` was put to the test this section named, and refused — P17.** The condition was
+that V1.3's headless subcommands justify its sentence, and they do not: the terminal half
+is three subcommands, one string option and two flags, which is forty lines of `match`
+beside the thirty `main` already hand-rolls. Its sentence would read *"parses six flags"*,
+and that is not a sentence — while the derive path brings `syn`, `quote`, `proc-macro2`
+and a colour-negotiation stack to a program that admits one palette and no theme setting.
+The refusal carries a date for the same reason §6's seven do: so it is not reproposed as a
+discovery.
 
 ### System libraries
 
@@ -81,6 +92,7 @@ One binary crate, `indium`, with modules. No workspace, no premature abstraction
 | `tasks` | The staging engine. Every mutation — add, remove, rename, create — is a task in a queue. **Apply** builds the new archive in a temp file beside the target, verifies it by walking its entries, then atomically renames over the original. The original is never touched until the replacement is proven. |
 | `ui` | The window: sidebar, table, Inspector, tray, status bar, and every popup. |
 | `platform` | The Linux specifics: clipboard, `.desktop` parsing for Open With, default-app registration, XDG paths, the second window — on this platform a window is a process, and opening one is a Linux specific like the rest — and handing a directory to the desktop's file manager, which is the portal's job for the same reason the picker is. |
+| `cli` | The terminal half — `list`, `extract`, `cat`, their arguments, their output and their exit codes. It reads the archive through `arch` exactly as the window does, and it opens no window: the dispatch returns before `main` asks `eframe` for anything, so a subcommand on a machine with no compositor is an ordinary program reading a file. It touches nothing in `ui`, deliberately, because that is the way the previous sentence stops being true by accident. |
 | `theme` | The Aubergine palette, the fonts, and nothing configurable. |
 
 Threading: the UI thread and one worker. The worker opens, lists, extracts, and rebuilds;
@@ -349,6 +361,7 @@ the rule is enforced rather than remembered.
 | P14 | The sidebar's scrollbar threshold, and what a fractional display scale does to a window | **`v1.0.0-4`** |
 | P15 | The audit's open ledger: five defects closed, a false line in the record straightened, and V1.4's gate brought forward | **`v1.0.0-5`** |
 | P16 | The hex view, and the version number that goes with a feature rather than a fix | **`v1.1`** |
+| P17 | The terminal half, and the copyright the `.deb` had been getting wrong since P12 | **`v1.2`** |
 
 The P-table is a plan, not scripture; P-documents may split or merge steps, but scope
 only moves *out* of v1.0 by the maker's decision recorded here.
@@ -359,10 +372,24 @@ only moves *out* of v1.0 by the maker's decision recorded here.
 happened. **PDF was not taken up with it**: the condition was a pure-Rust renderer with a
 GPL-3.0-compatible licence, none was viable, and the three refusals stand unchanged — INDIUM
 will not link poppler, will not take AGPL code, and will not bundle a pdfium blob. It joins
-V1.2's plugin as a thing judged when it is reached rather than promised in advance. **V1.2** the yazi preview plugin, built only if the
-Inspector's verbosity genuinely beats a plain listing — judged then, in `contrib/`,
-versioned separately. **V1.3** headless subcommands (extract, list, single-file open)
-for terminal use without the GUI. **V1.4** CI: build, test, `check-deps.sh` as a gate —
+the yazi plugin as a thing judged when it is reached rather than promised in advance —
+named rather than numbered, because the numbers moved and a cross-reference by number
+would not have survived it.
+
+**V1.2** headless subcommands (extract, list, single-file open) for terminal use without
+the GUI — **shipped in P17**, and the line stays here for the same reason V1.1's does.
+**V1.3** the yazi preview plugin, built only if the Inspector's verbosity genuinely beats
+a plain listing — judged then, in `contrib/`, versioned separately.
+
+**Those two numbers were the other way round until P17, and the swap is recorded rather
+than quietly made.** The maker's call was that the tag sequence stays contiguous: the
+plugin is *versioned separately* and so can never take an INDIUM tag, and leaving a hole
+at `v1.2` for something that will never fill it is worse than renumbering. The cost is
+named honestly — **five published releases print *"arrive in V1.3"*** in their `--help`,
+for a thing that arrived at `v1.2`. Those tarballs cannot be edited, and a reader who
+finds that sentence in one of them is owed this paragraph rather than a puzzle.
+
+**V1.4** CI: build, test, `check-deps.sh` as a gate —
 **brought forward and shipped in P15**, by the maker's decision, because a gate that fires
 only on a tag is not a gate; it stays listed here so the road reads as what happened.
 **V2.0** the live estimator: sample the actual input, run the real candidates on the

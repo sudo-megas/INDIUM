@@ -1,3 +1,31 @@
+indium (1.2.0-1) unstable; urgency=medium
+
+  * INDIUM has a terminal half. `indium list` prints one stored path per line, `indium
+    extract` unpacks all of an archive or only the members you name, and `indium cat`
+    writes one member's bytes to standard output. They open no window at all, so they
+    work over ssh and on a machine with no compositor running.
+  * `list` prints undecorated paths in archive order, so its output feeds straight back
+    into `cat` and `extract`. `--long` adds mode, size, method and time for a person to
+    read; `-0` separates with NUL, because a member name may contain a newline and a
+    line-oriented listing of one is silently wrong.
+  * `cat` has no size limit. The Inspector's preview stops at eight megabytes to protect
+    the window; the terminal has no such reason, and a member is written whole however
+    large it is.
+  * An encrypted archive is asked for its password on the terminal, with the echo off,
+    once, at the moment it is needed. There is no --password and no environment
+    variable: either would put the secret in the process table and the shell's history.
+    With no terminal to ask on, it refuses and exits rather than waiting forever.
+  * A path that is not valid Unicode no longer crashes the program before it starts.
+    Every previous release aborted on one, on the command line, whether or not a window
+    was ever going to open.
+  * The copyright file inside this package named the wrong font. It has credited the
+    JetBrains Mono authors since version 1.0.0-4, while the font actually embedded has
+    been Fira Mono — whose own licence text, printed directly below it in the same file,
+    named the right holder all along. Corrected, and now checked by the packaging gate
+    rather than by eye.
+
+ -- sudo-megas <sudo-megas@users.noreply.github.com>  Tue, 11 Aug 2026 13:30:00 +0300
+
 indium (1.1.0-1) unstable; urgency=medium
 
   * The Inspector shows hex. Selecting a file that is neither text nor an image INDIUM
