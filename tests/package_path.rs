@@ -21,7 +21,7 @@
 //!
 //! Run them with `cargo test --test package_path -- --ignored`.
 //!
-//! **One test here is deliberately not `#[ignore]`d**, and the exception is written down
+//! **Two tests here are deliberately not `#[ignore]`d**, and the exception is written down
 //! rather than left to look like an oversight. `the_copyright_header_names_the_font_that_ships`
 //! reads two files that are in the repository at all times — `LICENSES/OFL-1.1.txt` and
 //! `build/package/deb/copyright.header` — so it wants no artefact, and absence therefore
@@ -31,6 +31,13 @@
 //! in `ci.yml` on every push — and the defect it guards against (P17: the .deb naming a font
 //! INDIUM stopped embedding in P12) survived three releases precisely because nothing looked
 //! at it until a person did.
+//!
+//! The second is `the_pkgbuild_and_cargo_toml_agree_about_the_version`, on the same terms and
+//! for the same reason: it reads `Cargo.toml` and `build/package/PKGBUILD`, both always in the
+//! tree, so absence cannot make it pass. Nothing `cargo test` runs looked at `pkgver` at all
+//! before P18 — `verify.sh` compares the two at package time, and `release.yml` derives the
+//! tag it will accept from both, so a disagreement was caught by a workflow at a tag and by
+//! nothing at all on a push. That is the shape P15 moved the toolkit gate forward to fix.
 //!
 //! Copyright © sudo-megas. GPL-3.0-only.
 
@@ -650,5 +657,58 @@ fn the_copyright_header_names_the_font_that_ships() {
     assert!(
         embedded.iter().any(|n| n.starts_with(&face)),
         "the .deb copyright names {face}, which is no font this binary embeds: {embedded:?}"
+    );
+}
+
+/// `PKGBUILD`'s `pkgver` is `Cargo.toml`'s version, and `pkgrel` is a number.
+///
+/// Not `#[ignore]`d — see the header. Both files are always in the tree, so absence cannot
+/// make this pass.
+///
+/// Together these two numbers decide the only tag `release.yml` will accept: `pkgrel` of 1
+/// gives CORE §7's two-numeral form, and anything higher gives the revision form. A drift
+/// between them therefore does not produce a wrong package — it produces a tag the workflow
+/// rejects, at the tag, which is the most expensive moment to find out. `verify.sh` has
+/// compared them since P6, and `verify.sh` runs in `release.yml`; this runs on every push.
+#[test]
+fn the_pkgbuild_and_cargo_toml_agree_about_the_version() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cargo = std::fs::read_to_string(root.join("Cargo.toml")).expect("no Cargo.toml");
+    let pkgbuild =
+        std::fs::read_to_string(root.join("build/package/PKGBUILD")).expect("no PKGBUILD");
+
+    // The first `version =` in the file is `[package]`'s. A dependency's version is indented
+    // or inline in a table, never at column 0.
+    let cargo_version = cargo
+        .lines()
+        .find_map(|l| l.strip_prefix("version = "))
+        .map(|v| v.trim().trim_matches('"'))
+        .expect("Cargo.toml has no top-level `version =` line");
+    let pkgver = pkgbuild
+        .lines()
+        .find_map(|l| l.strip_prefix("pkgver="))
+        .map(str::trim)
+        .expect("the PKGBUILD has no `pkgver=` line");
+    assert_eq!(
+        pkgver, cargo_version,
+        "the PKGBUILD says pkgver={pkgver} and Cargo.toml says {cargo_version}; \
+         release.yml derives the tag it accepts from both"
+    );
+
+    let pkgrel = pkgbuild
+        .lines()
+        .find_map(|l| l.strip_prefix("pkgrel="))
+        .map(str::trim)
+        .expect("the PKGBUILD has no `pkgrel=` line");
+    assert!(
+        !pkgrel.is_empty() && pkgrel.bytes().all(|b| b.is_ascii_digit()),
+        "pkgrel is {pkgrel:?}, which release.yml cannot compare against 1"
+    );
+
+    // The version the binary will report, from the same source About prints.
+    assert_eq!(
+        cargo_version,
+        env!("CARGO_PKG_VERSION"),
+        "the Cargo.toml on disk and the version compiled into this test disagree"
     );
 }
