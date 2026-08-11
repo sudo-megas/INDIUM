@@ -364,43 +364,58 @@ pub const FACE_BOLD: &[u8] = include_bytes!("../assets/fonts/FiraMonoNerdFontMon
 /// changing what *the archive* looks like is one edit rather than a search. Every one of
 /// these is checked against the embedded `cmap` by `every_icon_exists_in_both_faces` —
 /// which is the test that makes a missing glyph a build failure instead of a box on
-/// somebody's screen.
+/// somebody's screen — and against the block above by
+/// `every_icon_comes_from_the_font_awesome_range_and_no_second_one`, which is a separate
+/// test because the two questions have different answers: this face carries several Nerd
+/// Font ranges, so *existing* and *belonging here* are not the same thing, and until P18
+/// only the first was asked.
 ///
 /// The rule these obey is §6's: **an icon replaces a word, it never garnishes one.** The
 /// single deliberate exception is [`icon::WARNING`], which doubles the colour on purpose.
 pub mod icon {
-    /// The drawer. *The archive* — the same shape in the sidebar and the status bar, so
-    /// one glyph has one meaning wherever it appears.
-    pub const ARCHIVE: &str = "\u{f187}";
-    /// A directory on disk, as opposed to one inside an archive.
-    pub const FOLDER: &str = "\u{f07b}";
-    /// *Open file* — the folder you are about to look in, so it is the open one.
-    pub const FOLDER_OPEN: &str = "\u{f07c}";
-    pub const BOOKMARK: &str = "\u{f02e}";
-    /// A clock, for *Recent files*.
-    pub const RECENT: &str = "\u{f017}";
-    /// A plus, for *New*.
-    pub const NEW: &str = "\u{f067}";
-    /// A gear, for *Settings*.
-    pub const SETTINGS: &str = "\u{f013}";
-    /// An `i` in a circle, for *About*.
-    pub const ABOUT: &str = "\u{f05a}";
-    /// The triangle, and **only** where something has gone wrong — the same restriction
-    /// CORE §6 puts on [`super::WARNING`], the colour it is always drawn in.
-    pub const WARNING: &str = "\u{f071}";
+    /// Declare an icon and register it in [`ALL`] with the same words.
+    ///
+    /// `ALL` used to be a second hand-kept list beside the constants, so a glyph added to the
+    /// module and forgotten here compiled, drew, and was checked by nothing — the two tests
+    /// below only ever see what `ALL` names. It failed *open*, which is the worst way: the
+    /// evidence was tofu on somebody's screen. Now the only syntax that defines an icon is the
+    /// syntax that registers it. P18.
+    ///
+    /// `$(#[$meta:meta])*` carries each constant's doc comment through unchanged — a `///` is
+    /// `#[doc = "…"]` — so the prose stays with the glyph it describes.
+    macro_rules! icons {
+        ($($(#[$meta:meta])* $name:ident = $glyph:expr;)*) => {
+            $($(#[$meta])* pub const $name: &str = $glyph;)*
 
-    /// Every icon this program draws, for the test that checks they all exist.
-    pub const ALL: &[(&str, &str)] = &[
-        ("ARCHIVE", ARCHIVE),
-        ("FOLDER", FOLDER),
-        ("FOLDER_OPEN", FOLDER_OPEN),
-        ("BOOKMARK", BOOKMARK),
-        ("RECENT", RECENT),
-        ("NEW", NEW),
-        ("SETTINGS", SETTINGS),
-        ("ABOUT", ABOUT),
-        ("WARNING", WARNING),
-    ];
+            /// Every icon this program draws, generated from the declarations above.
+            ///
+            /// Consumed only by the tests; drawing code reaches the constants by name.
+            pub const ALL: &[(&str, &str)] = &[$((stringify!($name), $name)),*];
+        };
+    }
+
+    icons! {
+        /// The drawer. *The archive* — the same shape in the sidebar and the status bar, so
+        /// one glyph has one meaning wherever it appears.
+        ARCHIVE = "\u{f187}";
+        /// A directory on disk, as opposed to one inside an archive.
+        FOLDER = "\u{f07b}";
+        /// *Open file* — the folder you are about to look in, so it is the open one.
+        FOLDER_OPEN = "\u{f07c}";
+        /// The ribbon, for *Bookmarks*.
+        BOOKMARK = "\u{f02e}";
+        /// A clock, for *Recent files*.
+        RECENT = "\u{f017}";
+        /// A plus, for *New*.
+        NEW = "\u{f067}";
+        /// A gear, for *Settings*.
+        SETTINGS = "\u{f013}";
+        /// An `i` in a circle, for *About*.
+        ABOUT = "\u{f05a}";
+        /// The triangle, and **only** where something has gone wrong — the same restriction
+        /// CORE §6 puts on [`super::WARNING`], the colour it is always drawn in.
+        WARNING = "\u{f071}";
+    }
 }
 
 /// Embed the typeface and make it the only one.
@@ -1310,5 +1325,86 @@ mod tests {
                 assert_ne!(a, b, "icon::{na} and icon::{nb} are the same glyph");
             }
         }
+    }
+
+    /// CORE §6: icons "come from the **Font Awesome** range the Nerd Font patches in, and no
+    /// second range is mixed with it: mixing icon families reads exactly like mixing typefaces."
+    ///
+    /// **This bound is typed, and it is the one number in this file that could not be derived.**
+    /// The embedded face covers `U+F000`–`U+F385` as a single unbroken run of 902 codepoints —
+    /// Font Awesome's historical block and Font Logos' distro marks, with no gap between them —
+    /// so the `cmap`, the only source in the tree that moves when the face does, cannot tell the
+    /// two families apart. `every_icon_exists_in_both_faces` will happily pass a distro logo at
+    /// `U+F31A` or a Codicon at `U+EA60`, because both are genuinely in both faces. This is the
+    /// only test that will not.
+    ///
+    /// Where the boundary is honestly fuzzy: Nerd Fonts v3 patches in a *second* Font Awesome
+    /// span as well — the v6 icons, measured in this face at `U+ED00`–`U+EFCF`. §6 says
+    /// "range", singular, and every glyph in [`icon`] was chosen from the v4 block. Admitting
+    /// the newer span is a decision made by editing this constant and writing down why, not by
+    /// a glyph quietly passing.
+    #[test]
+    fn every_icon_comes_from_the_font_awesome_range_and_no_second_one() {
+        const FONT_AWESOME: std::ops::RangeInclusive<u32> = 0xF000..=0xF2E0;
+        for (name, glyph) in icon::ALL {
+            let cp = glyph
+                .chars()
+                .next()
+                .expect("an icon cannot be the empty string") as u32;
+            assert!(
+                FONT_AWESOME.contains(&cp),
+                "icon::{name} (U+{cp:04X}) is outside the Font Awesome block \
+                 U+{:04X}–U+{:04X}; CORE §6 mixes no second range",
+                FONT_AWESOME.start(),
+                FONT_AWESOME.end()
+            );
+        }
+    }
+
+    /// The `icons!` macro is the only way an icon is defined, so [`icon::ALL`] cannot go stale.
+    ///
+    /// The macro closes the drift it was written for — a constant declared through it is
+    /// registered by the same syntax — but a `pub const` typed *beside* the invocation would
+    /// still escape both other tests. Nothing but the module's own source can see that, which
+    /// is why this test reads the file it lives in. Unusual, and deliberate.
+    ///
+    /// The macro *definition* is cut out before the scan, and nothing else is: its body holds
+    /// the literal text `pub const $name` and `pub const ALL`, so a naive search finds the
+    /// machinery instead of a bypass. Everything else inside `mod icon` — including the gap
+    /// between the macro and its invocation, which is exactly where a stray constant would sit
+    /// — is scanned.
+    #[test]
+    fn the_icon_registry_is_the_only_way_an_icon_is_defined() {
+        let source = include_str!("theme.rs");
+        // `mod icon` closes with a `}` in the first column; every brace inside it is indented.
+        let module = source
+            .split_once("pub mod icon {")
+            .expect("theme.rs declares `pub mod icon`")
+            .1
+            .split_once("\n}\n")
+            .expect("`mod icon` is closed")
+            .0;
+
+        let start = module
+            .find("macro_rules! icons {")
+            .expect("`mod icon` defines the icons! macro");
+        let tail = &module[start..];
+        let end = start
+            + tail
+                .find("\n    }\n")
+                .expect("the icons! macro definition is closed")
+            + "\n    }\n".len();
+        let outside = format!("{}{}", &module[..start], &module[end..]);
+
+        assert!(
+            outside.contains("icons! {"),
+            "the icons! invocation was cut away with the definition — this test would \
+             otherwise pass by absence"
+        );
+        assert!(
+            !outside.contains("pub const"),
+            "`mod icon` declares a `pub const` outside the icons! invocation; it would be \
+             drawn but checked by nothing, because both other tests only see what ALL names"
+        );
     }
 }
