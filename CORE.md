@@ -416,8 +416,11 @@ only moves *out* of v1.0 by the maker's decision recorded here.
 
 **The `1.0` line is a beta, and this is the condition for it stopping.** Every release
 from `v1.0.0-4` onward has said so in its own notes, in these words: *"the `1.0` line stays
-one until the design work it is named for has been in real hands."* Four release bodies
-carry that sentence; `v1.0.0-3` announced the beta before it, in different words. `P15.md`
+one until the design work it is named for has been in real hands."* `v1.0.0-3` announced
+the beta before it, in different words, and every release since has carried it unchanged.
+How many bodies that is stays out of this paragraph, for the reason §2 gives about counts:
+the list grows at every release, so a number written here goes stale the first time the
+rule it describes is obeyed — including by the release that shipped the paragraph. `P15.md`
 quotes it and P16 and P17 paraphrase it in their closing steps, but until P18 wrote it here
 it appeared in **no governing document** — not CORE, not the README — so the project's own
 next state change was a condition a reader had to reconstruct from release prose and the
