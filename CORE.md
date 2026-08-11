@@ -339,6 +339,7 @@ the rule is enforced rather than remembered.
 | P12 | The design round the testing asked for: the sidebar's order, `F1`, a cursor that is a line, capsules, rules that can be seen, Fira Mono | **`v1.0.0-4`** |
 | P13 | The design round decided: icons from the face already embedded, a path elided in the middle that opens its folder, progress on the bar's edge | **`v1.0.0-4`** |
 | P14 | The sidebar's scrollbar threshold, and what a fractional display scale does to a window | **`v1.0.0-4`** |
+| P15 | The audit's open ledger: five defects closed, a false line in the record straightened, and V1.4's gate brought forward | **`v1.0.0-5`** |
 
 The P-table is a plan, not scripture; P-documents may split or merge steps, but scope
 only moves *out* of v1.0 by the maker's decision recorded here.
@@ -350,7 +351,9 @@ licence is viable by then — INDIUM will not link poppler, will not take AGPL c
 will not bundle a pdfium blob. **V1.2** the yazi preview plugin, built only if the
 Inspector's verbosity genuinely beats a plain listing — judged then, in `contrib/`,
 versioned separately. **V1.3** headless subcommands (extract, list, single-file open)
-for terminal use without the GUI. **V1.4** CI: build, test, `check-deps.sh` as a gate.
+for terminal use without the GUI. **V1.4** CI: build, test, `check-deps.sh` as a gate —
+**brought forward and shipped in P15**, by the maker's decision, because a gate that fires
+only on a tag is not a gate; it stays listed here so the road reads as what happened.
 **V2.0** the live estimator: sample the actual input, run the real candidates on the
 real CPU, report measured time and ratio instead of folklore.
 
