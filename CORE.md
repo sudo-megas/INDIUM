@@ -116,8 +116,11 @@ no type-to-jump, because bare letters are shortcuts.
 
 **Inspector** (right, permanent): two tabs, *Details* and *Preview*, toggled with `Space`.
 Details shows everything the reader can know about the selection; multi-select shows
-aggregates; no selection shows the archive-level card. Preview renders text and images
-(hex arrives at V1.1). Two honest sourcing notes, so nobody files a bug about them:
+aggregates; no selection shows the archive-level card. Preview renders text, images, and — for
+anything that is neither — **hex**, sixteen bytes to a row with the printable gutter beside them,
+which arrived at V1.1 as this line promised it would. The row count is fixed rather than fitted
+to the pane, so the same byte sits at the same offset however the Inspector is dragged, and the
+pane scrolls sideways instead. Two honest sourcing notes, so nobody files a bug about them:
 libarchive does not expose an entry's *stored* CRC, so INDIUM computes CRC32 on demand
 and labels it computed; 7z solid-block detail arrives with `sevenz-rust2` in P4, and until
 then the Inspector shows what the generic reader provides.
@@ -282,10 +285,14 @@ rather than nearly true. They come from the **Font Awesome** range the Nerd Font
 no second range is mixed with it: mixing icon families reads exactly like mixing typefaces. The
 `Mono` cut §2 names is the reason this costs nothing — every glyph is one cell, so an icon never
 widens a column or moves a number off its own. **An icon replaces a word; it never garnishes
-one.** **An icon is drawn at twice the size of the text it stands beside**, and the row grows to
-carry it rather than the glyph shrinking to fit — a Font Awesome glyph carries padding inside its
-em box, so at 1× it puts about nine points of ink next to a thirteen-point capital and reads as
-an afterthought. This is why the status bar's rows are taller than the entry table's. A folder glyph beside a path that already looks like a path is decoration, and §6 has no
+one.** **An icon is drawn half again the size of the text it stands beside — 1.4×**, and the row
+grows to carry it rather than the glyph shrinking to fit; a Font Awesome glyph carries padding
+inside its em box, so at 1× it puts about nine points of ink next to a thirteen-point capital and
+reads as an afterthought. This is why the status bar's rows are taller than the entry table's.
+This line read *twice* until P16 corrected it: the code has said 1.4 since P13, which built 2×
+for an afternoon and found that at double the text the glyph sets every row's height — it added
+thirty-six points to the status bar and about a hundred and twenty to the sidebar, and a window
+that had fitted everything for twelve milestones stopped fitting anything. A folder glyph beside a path that already looks like a path is decoration, and §6 has no
 room for decoration; a glyph *instead of* a label is what the sidebar and the status bar use it
 for. The one deliberate redundancy is the warning glyph before a failure: colour alone carrying
 meaning fails anyone who cannot separate `#FFD800` from grey, so there the shape and the colour
@@ -340,15 +347,18 @@ the rule is enforced rather than remembered.
 | P13 | The design round decided: icons from the face already embedded, a path elided in the middle that opens its folder, progress on the bar's edge | **`v1.0.0-4`** |
 | P14 | The sidebar's scrollbar threshold, and what a fractional display scale does to a window | **`v1.0.0-4`** |
 | P15 | The audit's open ledger: five defects closed, a false line in the record straightened, and V1.4's gate brought forward | **`v1.0.0-5`** |
+| P16 | The hex view, and the version number that goes with a feature rather than a fix | **`v1.1`** |
 
 The P-table is a plan, not scripture; P-documents may split or merge steps, but scope
 only moves *out* of v1.0 by the maker's decision recorded here.
 
 ### After v1.0
 
-**V1.1** hex view; PDF joins only if a pure-Rust renderer with a GPL-3.0-compatible
-licence is viable by then — INDIUM will not link poppler, will not take AGPL code, and
-will not bundle a pdfium blob. **V1.2** the yazi preview plugin, built only if the
+**V1.1** hex view — **shipped in P16**, and the line stays here so the road reads as what
+happened. **PDF was not taken up with it**: the condition was a pure-Rust renderer with a
+GPL-3.0-compatible licence, none was viable, and the three refusals stand unchanged — INDIUM
+will not link poppler, will not take AGPL code, and will not bundle a pdfium blob. It joins
+V1.2's plugin as a thing judged when it is reached rather than promised in advance. **V1.2** the yazi preview plugin, built only if the
 Inspector's verbosity genuinely beats a plain listing — judged then, in `contrib/`,
 versioned separately. **V1.3** headless subcommands (extract, list, single-file open)
 for terminal use without the GUI. **V1.4** CI: build, test, `check-deps.sh` as a gate —
