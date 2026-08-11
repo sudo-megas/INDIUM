@@ -17,7 +17,7 @@
   
 </p>
 
-*Archive manager for Linux on Wayland* · **The metadata is the main event**
+*The Most Verbose Archive manager for Linux on Wayland* · 
 
 ---
 
