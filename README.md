@@ -17,7 +17,7 @@
   
 </p>
 
-*The Most Verbose Archive manager for Linux on Wayland* · 
+*The Most Verbose Archive Manager for Linux on Wayland* · 
 
 ---
 
