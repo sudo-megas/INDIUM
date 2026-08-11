@@ -1,7 +1,15 @@
-//! The Settings panel — CORE §4.5 and P2 §3.
+//! The Settings panel — CORE §4's popup 5, and P2 §3.
 //!
 //! "Exactly three groups, nothing else, and no room grows later without a CORE edit:
 //! Extract, Bookmarks, Recent files."
+//!
+//! That sentence is P2's, and it was right about this file for seventeen rounds while
+//! CORE's own popup 5 named two of the three. The citation above used to read *"CORE
+//! §4.5"* — a subsection number CORE has not had since §4 was reorganised, so the one
+//! place carrying the correct count pointed at a section that could not confirm it.
+//! P19 corrected both ends and pinned them together;
+//! [`tests::the_settings_panel_has_the_groups_core_says_it_has`] is what now fails if
+//! either moves.
 //!
 //! CORE §9 has already decided the absent ones: no theme controls, no language
 //! controls, no anything-else.
@@ -175,5 +183,78 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
 
     if !open {
         app.popup = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// CORE §4's popup 5 and this panel are the same list of groups, in the same order.
+    ///
+    /// Same shape as `keys.rs`'s `the_popup_and_core_agree_about_the_keys`, and here for the
+    /// same reason: the document moves first in this project and the code follows, so the
+    /// document is what a test should read. What made this one necessary is the direction the
+    /// drift actually took — the *code* moved first. P2 built three groups, CORE's popup 5
+    /// described two, and it went on describing two for seventeen rounds while the third grew
+    /// a **Clear list** button that empties the recents. A destructive control existed in the
+    /// window, in the file, and in this module's own header, and in no governing document.
+    ///
+    /// The group names are read out of this file's own source rather than typed here, because
+    /// a list typed beside the thing it describes is the hand-copy P18 spent a round removing.
+    /// The scan stops at the test module so it cannot read itself.
+    #[test]
+    fn the_settings_panel_has_the_groups_core_says_it_has() {
+        const NUMBER_WORDS: &[&str] = &["no", "one", "two", "three", "four", "five", "six"];
+
+        // This file, up to the module attribute above — so the needle below, which is itself
+        // the text being searched for, is never in the searched half.
+        let src = include_str!("settings.rs");
+        let code = src
+            .split_once("#[cfg(test)]")
+            .expect("this file has a test module")
+            .0;
+
+        let needle = "theme::section(ui, \"";
+        let groups: Vec<&str> = code
+            .match_indices(needle)
+            .filter_map(|(i, _)| {
+                let rest = &code[i + needle.len()..];
+                rest.find('"').map(|end| &rest[..end])
+            })
+            .collect();
+        assert!(
+            !groups.is_empty(),
+            "no `theme::section` heading was found in this file, so this test would pass by \
+             absence — the panel's headings are no longer written that way"
+        );
+
+        // CORE §4's popup 5, from its numbered opening to the next item's.
+        let core = include_str!("../../CORE.md");
+        let item = core
+            .split_once("5. **Settings** (`,`)")
+            .expect("CORE §4 has no numbered Settings popup")
+            .1
+            .split_once("\n6.")
+            .expect("CORE §4's Settings item runs into no item 6")
+            .0;
+
+        for group in &groups {
+            assert!(
+                item.contains(group),
+                "the Settings panel draws a `{group}` group and CORE §4's popup 5 does not \
+                 name it. The panel is what a person sees; the document is what the project \
+                 is allowed to grow. CORE names: {item:?}"
+            );
+        }
+
+        let word = NUMBER_WORDS
+            .get(groups.len())
+            .unwrap_or_else(|| panic!("{} groups is past the words this test knows", groups.len()));
+        assert!(
+            item.contains(&format!("{word} groups")),
+            "the panel draws {} groups and CORE §4's popup 5 does not say \"{word} groups\". \
+             The count is written there deliberately, because the third group holds the only \
+             destructive control in the panel.",
+            groups.len()
+        );
     }
 }

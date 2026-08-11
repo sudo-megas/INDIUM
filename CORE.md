@@ -199,7 +199,11 @@ bar has a hierarchy, and it is part of this document rather than a matter of tas
    tab completion, bookmarks beneath. Enter-driven.
 4. **Open With** (`Enter` on a file, after extraction to the runtime dir). Applications
    from parsed `.desktop` files, ranked by MIME match, filter-as-you-type.
-5. **Settings** (`,`). One small panel: bookmarks, default extract behaviour. TOML behind it.
+5. **Settings** (`,`). One small panel, and **exactly three groups**: *Extract*'s default
+   destination, *Bookmarks*, and *Recent files* — the last carrying a **Clear list** that
+   empties the history, which is the only destructive control in the panel and the reason
+   the count is written here rather than left to be discovered. TOML behind it. This item
+   named two of the three from P2 until P19; §9 has already decided the absent ones.
 6. **About** (`A`). The mark, the maker, the version and date, the source address and the
    licence in full. Addresses are text you can select but not click — INDIUM opens no
    browser and follows no link, by design.
