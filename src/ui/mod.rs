@@ -2279,8 +2279,11 @@ impl Indium {
 ///
 /// So these are deliberately far below anything in use. They are not a comfortable size —
 /// comfort is not a floor's job — they are the size under which nothing can be done at all.
-/// Every zone gives way on its own long before here: the sidebar scrolls against a track
-/// that is always drawn, the table clips its columns, the Inspector has its own minimum.
+/// Every zone gives way on its own long before here: the sidebar's rows scroll under a bar
+/// that floats over them instead of displacing them, the table clips its columns, the
+/// Inspector has its own minimum. (The bar floats rather than standing in a permanent track,
+/// and `sidebar.rs` says why at the line that chooses it — this comment claimed the opposite
+/// from P14 until P15, which is the fault `b0baa52` was written to stop making.)
 pub const MIN_W: f32 = 560.0;
 /// See [`MIN_W`].
 pub const MIN_H: f32 = 400.0;
