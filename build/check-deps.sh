@@ -1,9 +1,14 @@
 #!/bin/sh
 # CORE §2: "No GTK. No Qt. No KF6. No portal." This script is the enforcement.
 #
-# It runs by hand before every release, inside the Arch package's own check() so no package
-# can be built from a binary that grew a toolkit, and inside the release workflow. What
-# V1.4 adds is the rest of it: CI on every push, with this script as a gate on a merge.
+# It runs in four places, and three of them are not a person: ci.yml on every push since
+# P15, the Arch package's own check() so no package can be built from a binary that grew a
+# toolkit, and the release workflow. It also still runs by hand before a release, which is
+# the one of the four that proves nothing on its own.
+#
+# This comment used to end "What V1.4 adds is the rest of it: CI on every push" — written
+# before P15 and left standing for three releases after P15 built exactly that. ci.yml then
+# quoted it as its own justification. P18.
 set -e
 out=$(ldd target/release/indium)
 echo "$out"

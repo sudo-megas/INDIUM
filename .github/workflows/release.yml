@@ -170,8 +170,9 @@ jobs:
         run: cargo test
 
       # CORE §2: "No GTK. No Qt. No KF6. No portal." — check-deps.sh is the enforcement,
-      # and CORE §7 schedules it into CI at V1.4. It runs here from v1.0 because the
-      # release build is precisely the build that must not have drifted.
+      # and CORE §7's V1.4 line records that CI arrived early, in P15. It runs here from
+      # v1.0 as well because the release build is precisely the build that must not have
+      # drifted.
       - name: Toolkit check
         run: ./build/check-deps.sh
 

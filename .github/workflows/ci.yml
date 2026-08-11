@@ -4,9 +4,14 @@
 # release build has been running since v1.0, lifted out of `release.yml`'s `deb` job — and
 # that is the point. Until P15 all five gates fired only on a tag or on a hand-dispatched
 # run, so an ordinary commit got no answer at all and a mistake could sit on master for a
-# day before a release found it. `check-deps.sh` has said so about itself since it was
-# written: "What V1.4 adds is the rest of it: CI on every push, with this script as a gate
-# on a merge." This is that, and nothing more than that.
+# day before a release found it. P17 proved the point on the round after: this file went red
+# on a test that was only ever true on the machine it was written on — `sh -o pipefail`, which
+# is bash on Arch and dash on Ubuntu — and three readers with the code open could not have
+# found it, because where they read it, it was true.
+#
+# This comment used to justify itself by quoting `check-deps.sh` promising CI as something a
+# later version would add. That sentence was already false when it was quoted, and the quote
+# is why it survived three more releases; `check-deps.sh` no longer says it. P18.
 #
 # What this job deliberately is NOT: it does not build a package, and it never will. The
 # packages are provenance — README §3 promises they are built in containers from the tag and

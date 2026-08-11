@@ -71,7 +71,11 @@ discovery.
 
 No GTK. No Qt. No KF6. No portal. `build/check-deps.sh` runs
 `ldd target/release/indium` and fails if the output contains `gtk`, `Qt`, `KF6`, `X11`,
-or `portal`. It runs by hand until V1.4 wires it into CI, and it runs before every release.
+or `portal`. It runs on every push in `ci.yml`, inside the Arch package's own `check()` so
+no package can be built from a binary that grew a toolkit, and in the release workflow —
+and still by hand before a release, which is the one of the four that proves nothing on its
+own. §7 lists this as V1.4's gate and records that it was brought forward to P15; this
+sentence went on saying *"until V1.4 wires it into CI"* for three releases after it had.
 
 Bundled assets, not dependencies: Fira Mono Nerd Font Mono, regular and bold, embedded in
 the binary, with the SIL Open Font Licence 1.1 alongside the GPL in `LICENSES/`. Fira Mono
@@ -455,7 +459,8 @@ This list is authored by the maker, not derived. Items enter and leave only by h
 - No zip encryption — 7z AES-256 is the only encryption.
 - **No RAR — not read, not written.**
 - No external compressor binaries, ever — all format work in-process.
-- No GTK, Qt, KF6, or portal linkage — enforced by `check-deps.sh`, and by CI from V1.4.
+- No GTK, Qt, KF6, or portal linkage — enforced by `check-deps.sh`, and by CI on every push
+  since P15.
   *Linkage* is the word and it is meant: the file picker talks to `xdg-desktop-portal` over
   D-Bus, in Rust, and links nothing. `ldd` is the test, and it stays clean.
 - No network at all: no update check, no telemetry, no analytics, no crash reporting.
