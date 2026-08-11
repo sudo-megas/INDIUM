@@ -14,9 +14,13 @@ use std::sync::Arc;
 
 // --- Base ---------------------------------------------------------------------
 //
-// Six grounds, each between 1.37 and 1.87 times the *linear* luminance of the one below,
+// Five grounds, each between 1.37 and 1.87 times the *linear* luminance of the one below,
 // all on hue 318–319° — the same family as Canonical Aubergine's 328°, which is the reason
-// CORE §6 gives for `WINDOW` in the first place.
+// CORE §6 gives for `WINDOW` in the first place. It said *six* until P18, here and in §6
+// both: it was six when P7 built the ladder, and P9 moved the popup off it and out of
+// aubergine altogether without moving the number. `GROUNDS` below still holds six, and
+// correctly — it is the list of surfaces text is drawn on, which includes the popup, and
+// that is a different question from which grounds are on the ladder.
 //
 // P7 measured the old three and found the arithmetic behind every complaint the maker made
 // about the look: adjacent grounds were **1.06–1.10:1** apart and the hairline between them
@@ -1325,6 +1329,80 @@ mod tests {
                 assert_ne!(a, b, "icon::{na} and icon::{nb} are the same glyph");
             }
         }
+    }
+
+    /// CORE §6's Base row names the aubergine ladder, and this is that ladder.
+    ///
+    /// The row said *six* and listed *five* for nine milestones: it was six when P7 built it,
+    /// and P9 took the popup off the ladder — *"a popup is not on this ladder at all"*, two
+    /// clauses further along the same row — without taking it out of the count. Both the word
+    /// and the hexes are read here, so neither can move without the other.
+    ///
+    /// `GROUNDS` above is deliberately **not** this list: it is every surface text is drawn on,
+    /// popup included, which is a different question and rightly has a different answer.
+    #[test]
+    fn the_ground_ladder_is_the_one_core_six_lists() {
+        let core = include_str!("../CORE.md");
+        let row = core
+            .lines()
+            .find(|l| l.starts_with("| Base |"))
+            .expect("CORE §6 has a Base row");
+
+        let hexes: Vec<String> = row
+            .split('`')
+            .filter(|s| s.len() == 7 && s.starts_with('#'))
+            .map(|s| s.to_ascii_uppercase())
+            .collect();
+        let ladder = [
+            ("VOID", VOID),
+            ("STATUS_BAR", STATUS_BAR),
+            ("WINDOW", WINDOW),
+            ("PANEL", PANEL),
+            ("CONTROL", CONTROL),
+        ];
+        assert_eq!(
+            hexes.len(),
+            ladder.len(),
+            "CORE §6's Base row names {} colours and the ladder has {}: {hexes:?}",
+            hexes.len(),
+            ladder.len()
+        );
+        for (i, (hex, (name, c))) in hexes.iter().zip(ladder.iter()).enumerate() {
+            let want = format!("#{:02X}{:02X}{:02X}", c.r(), c.g(), c.b());
+            assert_eq!(
+                hex, &want,
+                "rung {i}: CORE §6 says {hex}, and {name} is {want}"
+            );
+        }
+
+        // The row opens by counting itself. A number word and a list that disagree is the whole
+        // defect this test exists for, so the word is read too rather than trusted.
+        const WORDS: [(&str, usize); 8] = [
+            ("Three", 3),
+            ("Four", 4),
+            ("Five", 5),
+            ("Six", 6),
+            ("Seven", 7),
+            ("Eight", 8),
+            ("Nine", 9),
+            ("Ten", 10),
+        ];
+        let word = row
+            .trim_start_matches("| Base |")
+            .split_whitespace()
+            .next()
+            .expect("the Base row's cell is not empty");
+        let counted = WORDS
+            .iter()
+            .find(|(w, _)| *w == word)
+            .unwrap_or_else(|| panic!("the Base row opens with {word:?}, which is not a count"))
+            .1;
+        assert_eq!(
+            counted,
+            ladder.len(),
+            "CORE §6's Base row says {word} and lists {} grounds",
+            ladder.len()
+        );
     }
 
     /// CORE §6: icons "come from the **Font Awesome** range the Nerd Font patches in, and no
