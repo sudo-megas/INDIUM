@@ -581,20 +581,73 @@ fn long_and_nul_together_are_refused_rather_than_one_being_ignored() {
 /// `io::copy`, deep in `arch`, and comes back as an `ArchiveError` — so the flush had
 /// nothing left to fail on. Driven through the real binary because a `Vec<u8>` sink cannot
 /// close a pipe.
+///
+/// **No shell.** The first version of this test ran `sh -o pipefail -c '… | head -c 1'`,
+/// which passes on Arch — where `/bin/sh` is bash — and fails outright on Ubuntu, where it
+/// is dash and there is no `pipefail`. CI caught it on the first push, which is the whole
+/// argument P15 made for bringing the gate forward. Closing the pipe from Rust needs no
+/// shell and cannot depend on which one is installed.
+///
+/// The member is built large on purpose: a pipe holds 64 KiB, so a small one would be
+/// written whole and the child would exit before the read end could be dropped — the test
+/// would pass without ever creating the condition it is named for.
 #[test]
 fn cat_into_a_closed_pipe_is_success_and_says_nothing() {
+    use std::io::{Cursor, Read as _};
     use std::process::{Command, Stdio};
 
-    let sh = format!(
-        "{} cat {} alpha.txt | head -c 1 >/dev/null",
-        env!("CARGO_BIN_EXE_indium"),
-        fixture("basic.zip").display()
-    );
-    let out = Command::new("sh")
-        .args(["-o", "pipefail", "-c", &sh])
+    use indium::tasks::{Meta, Method, Recipe, Sink};
+
+    let dir = TempDir::new("pipe");
+    let path = dir.path().join("big.tar.gz");
+    const BIG: usize = 4 * 1024 * 1024;
+    {
+        let recipe = Recipe {
+            path: path.clone(),
+            method: Method::Gzip,
+            level: Method::Gzip.default_level(),
+            encrypt: false,
+        };
+        let mut writer = indium::arch::Writer::create(&path, &recipe).expect("writer");
+        let meta = Meta {
+            out_path: "big.bin".to_string(),
+            size: BIG as u64,
+            is_dir: false,
+            mode: 0o644,
+            mtime: Some(1_704_164_645),
+            atime: None,
+            ctime: None,
+            uid: 0,
+            gid: 0,
+            uname: Some("root".to_string()),
+            gname: Some("root".to_string()),
+            symlink: None,
+            hardlink: None,
+        };
+        let body: Vec<u8> = (0..BIG).map(|i| (i % 251) as u8).collect();
+        let mut cursor = Cursor::new(body);
+        writer.put(&meta, Some(&mut cursor)).expect("put");
+        writer.finish().expect("finish");
+    }
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_indium"))
+        .args(["cat", path.to_str().unwrap(), "big.bin"])
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output()
-        .expect("could not run the pipeline");
+        .spawn()
+        .expect("could not spawn indium");
+
+    {
+        // Take one byte and walk away — `head` in one line of Rust. Dropping the handle
+        // closes the read end, so the child's next write gets EPIPE.
+        let mut reader = child.stdout.take().expect("stdout was piped");
+        let mut one = [0u8; 1];
+        reader
+            .read_exact(&mut one)
+            .expect("no bytes came out at all");
+    }
+
+    let out = child.wait_with_output().expect("could not wait on indium");
 
     assert!(
         out.status.success(),
@@ -614,13 +667,16 @@ fn cat_into_a_closed_pipe_is_success_and_says_nothing() {
 fn cat_onto_a_full_disk_still_fails() {
     use std::process::{Command, Stdio};
 
-    let sh = format!(
-        "{} cat {} alpha.txt >/dev/full",
-        env!("CARGO_BIN_EXE_indium"),
-        fixture("basic.zip").display()
-    );
-    let out = Command::new("sh")
-        .args(["-c", &sh])
+    // Shell-free for the same reason as the test above: the redirect is a `File` handed
+    // straight to the child, so nothing depends on which `/bin/sh` the machine has.
+    let full = match std::fs::OpenOptions::new().write(true).open("/dev/full") {
+        Ok(f) => f,
+        // Not a skip dressed as a pass: say so, loudly, the way package_path.rs insists.
+        Err(e) => panic!("/dev/full could not be opened, so this test proved nothing: {e}"),
+    };
+    let out = Command::new(env!("CARGO_BIN_EXE_indium"))
+        .args(["cat", fixture("basic.zip").to_str().unwrap(), "alpha.txt"])
+        .stdout(Stdio::from(full))
         .stderr(Stdio::piped())
         .output()
         .expect("could not run");
