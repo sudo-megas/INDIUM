@@ -1,3 +1,18 @@
+indium (1.1.0-1) unstable; urgency=medium
+
+  * The Inspector shows hex. Selecting a file that is neither text nor an image INDIUM
+    can decode used to produce a sentence explaining that a hex view would arrive in
+    version 1.1; it now produces the hex view. Sixteen bytes to a row, the offset down
+    the left and the printable characters down the right, exactly as xxd prints them, so
+    an offset you read here is the offset you would read anywhere else.
+  * The row is sixteen bytes wide whatever the width of the pane. Dragging the Inspector
+    wider shows more of each line rather than rearranging the file, so a byte keeps its
+    offset while you look at it. The pane scrolls sideways for the rest.
+  * It stays quick on a large file. Only the rows on screen are built, so a megabyte of
+    binary costs what a handful of lines costs.
+
+ -- sudo-megas <sudo-megas@users.noreply.github.com>  Tue, 11 Aug 2026 10:55:00 +0300
+
 indium (1.0.0-5) unstable; urgency=medium
 
   * The Inspector no longer shows a file the way it used to be. Applying a

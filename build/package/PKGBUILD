@@ -1,13 +1,18 @@
 # Maintainer: sudo-megas <sudo-megas@users.noreply.github.com>
 
 pkgname=indium
-pkgver=1.0.0
+pkgver=1.1.0
 # The one place the package revision is written. make-deb.sh reads its Debian revision
 # out of this line, verify.sh builds both default artefact paths from it, and the release
 # workflow derives the tag it will accept from it — so the two packages cannot disagree
 # about which build they are, and a tag cannot be pushed over a tree that means a
 # different one. `2` is P10: the source changed, and the version did not.
-pkgrel=5
+#
+# **It resets to 1 when `pkgver` moves**, which is what P16 did after five revisions of
+# 1.0.0. The reset is not bookkeeping: the workflow reads `1` as "this tree means a whole
+# version" and will then accept only CORE §7's two-numeral tag, `v1.1`. Left at 6 it would
+# have demanded `v1.1.0-6` and quietly turned a feature into a revision.
+pkgrel=1
 pkgdesc="An archive manager for Linux on Wayland where the metadata is the main event."
 arch=('x86_64')
 url="https://github.com/sudo-megas/INDIUM"

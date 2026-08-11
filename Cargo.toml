@@ -1,6 +1,6 @@
 [package]
 name = "indium"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 license = "GPL-3.0-only"
 description = "An archive manager for Linux on Wayland where the metadata is the main event."

@@ -3,7 +3,7 @@
 <h1>INDIUM</h1>
 
 <p>
-  <img alt="Version"      src="https://img.shields.io/badge/version-1.0.0--5-E95420?style=for-the-badge">
+  <img alt="Version"      src="https://img.shields.io/badge/version-1.1.0-E95420?style=for-the-badge">
   <img alt="Release date" src="https://img.shields.io/badge/released-2026--08--11-E95420?style=for-the-badge">
   <img alt="Licence"      src="https://img.shields.io/badge/licence-GPL--3.0--only-772953?style=for-the-badge">
 </p>
@@ -58,18 +58,18 @@ nothing more: *"RAR is not supported."*
 
 ### 3.A Arch Linux
 
-Download `indium-1.0.0-5-x86_64.pkg.tar.zst` from the Releases page:
+Download `indium-1.1.0-1-x86_64.pkg.tar.zst` from the Releases page:
 
 ```sh
-sudo pacman -U indium-1.0.0-5-x86_64.pkg.tar.zst
+sudo pacman -U indium-1.1.0-1-x86_64.pkg.tar.zst
 ```
 
 ### 3.B Debian / Ubuntu
 
-Download `indium_1.0.0-5_amd64.deb` from the Releases page:
+Download `indium_1.1.0-1_amd64.deb` from the Releases page:
 
 ```sh
-sudo apt install ./indium_1.0.0-5_amd64.deb
+sudo apt install ./indium_1.1.0-1_amd64.deb
 ```
 
 **The two packages do not have the same floor, and it matters more than the file extension
@@ -80,7 +80,7 @@ right for the distribution it is for and wrong everywhere else.
 
 ### 3.C Anything else
 
-`indium-1.0.0-5-x86_64.tar.gz` is the `.deb`'s binary with no packaging around it, so it carries
+`indium-1.1.0-1-x86_64.tar.gz` is the `.deb`'s binary with no packaging around it, so it carries
 the lower of the two floors — glibc 2.35. Unpack it, put `indium` wherever you keep such
 things, and satisfy `libarchive.so.13`, `libwayland-client`, `libxkbcommon` and `libEGL`
 yourself. It installs no icon and no menu entry; `./build/install-desktop.sh` from a source
@@ -125,7 +125,7 @@ never closes another.
 | **Archive** `1` | The archive itself: one row per entry, with Name, Size, Packed and Method, and a breadcrumb path above. It handles a hundred thousand entries as smoothly as a hundred. `Enter` goes into a folder, `Backspace` comes back out, `Ctrl+F` filters. |
 | **Bookmarks** `2` | Folders you name once and reach thereafter by their name — mostly the places you extract to. They appear again inside the Extract popup, which is the point of them. |
 | **Recent files** `3` | The archives you have opened before, newest first, so returning to one is a keypress rather than a hunt through folders. `Enter` opens the highlighted entry and `Del` forgets it. |
-| **The Inspector** | The permanent pane on the right, and the reason the program exists. **Details** tells you everything knowable about what you have selected — select nothing and it describes the whole archive, select several and it adds them up. **Preview** shows text and images, judged by their bytes rather than their file extension. `Space` swaps the two. |
+| **The Inspector** | The permanent pane on the right, and the reason the program exists. **Details** tells you everything knowable about what you have selected — select nothing and it describes the whole archive, select several and it adds them up. **Preview** shows text and images, judged by their bytes rather than their file extension — and anything that is neither, it shows as **hex**: sixteen bytes to a row with the offset down one side and the printable characters down the other, the way `xxd` prints them. The row stays sixteen bytes wide however wide you drag the pane, so a byte keeps its offset while you are looking at it. `Space` swaps the two. |
 | **New Archive** `N` | Builds a new archive. Pick one of four presets — *Fastest*, *Balanced*, *Smallest*, *Encrypted* — or choose a method from the list, where **every method carries one honest sentence** about what it costs you and what it saves. A line at the foot states exactly what is about to be built before anything is. |
 | **Pending tasks** `W` | Everything you have changed but not yet committed. A strip appears above the status bar the moment you stage your first change; this is the full list behind it, one row per operation, each removable on its own, with *Discard all* and **Apply**. |
 | **Extract** `E` | Unpacks the selection, or the whole archive if nothing is selected. Offers *Extract here*, *Extract to a folder of the same name*, or any path you type, with your bookmarks underneath. |
