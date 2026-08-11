@@ -150,11 +150,19 @@ INSTALLED=$(du -ks --apparent-size "$W/data" | awk '{print $1}')
 #                        alternation covers bookworm, which still calls it libarchive13,
 #                        without two packages or two control files.
 #   libwayland-client0,  invisible to ldd. eframe reaches the compositor session through
-#   libxkbcommon0,       dlopen, so none of the three appears in the dynamic table and no
-#   libegl1              shlibs machinery could ever find them. They are named by hand
-#                        because CORE §2 names them, and a package that omits them fails
+#   libwayland-egl1,     dlopen, so none of the four appears in the dynamic table and no
+#   libxkbcommon0,       shlibs machinery could ever find them. They are named by hand
+#   libegl1              because CORE §2 names them, and a package that omits them fails
 #                        at the first window rather than at install time.
-DEPENDS="libc6 (>= $LIBC_MIN), libgcc-s1 (>= $GCC_MIN), libarchive13t64 | libarchive13, libwayland-client0, libxkbcommon0, libegl1"
+#
+#                        libwayland-egl1 was missing here through v1.2.0-2, because CORE
+#                        §2's row named three and this list was written from that row. On
+#                        Arch the omission could not show: one `wayland` package carries
+#                        libwayland-client.so.0 and libwayland-egl.so.1 together. Debian
+#                        splits them, so only the .deb could ever have been wrong, and it
+#                        was. `the_deb_declares_every_library_the_program_dlopens` now
+#                        derives this list rather than trusting it.
+DEPENDS="libc6 (>= $LIBC_MIN), libgcc-s1 (>= $GCC_MIN), libarchive13t64 | libarchive13, libwayland-client0, libwayland-egl1, libxkbcommon0, libegl1"
 
 # There is no postinst and no postrm, on purpose. Debian ships dpkg triggers for both
 # caches this package touches — desktop-file-utils declares interest in

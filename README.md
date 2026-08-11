@@ -86,9 +86,11 @@ right for the distribution it is for and wrong everywhere else.
 
 `indium-1.2.0-2-x86_64.tar.gz` is the `.deb`'s binary with no packaging around it, so it carries
 the lower of the two floors — glibc 2.35. Unpack it, put `indium` wherever you keep such
-things, and satisfy `libarchive.so.13`, `libwayland-client`, `libxkbcommon` and `libEGL`
-yourself. It installs no icon and no menu entry; `./build/install-desktop.sh` from a source
-checkout is what does that.
+things, and satisfy `libarchive.so.13`, `libwayland-client`, `libwayland-egl`, `libxkbcommon`
+and `libEGL` yourself. The last four are opened by name at runtime rather than linked, so `ldd`
+will not tell you they are missing — the program starts and fails at its first window instead.
+It installs no icon and no menu entry; `./build/install-desktop.sh` from a source checkout is
+what does that.
 
 All three artefacts are built by
 [`.github/workflows/release.yml`](.github/workflows/release.yml), in containers, from the

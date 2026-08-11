@@ -68,7 +68,7 @@ grows, and this one did.
 | Library | Its sentence |
 | --- | --- |
 | `libarchive` | Reads and writes every supported container and filter in-process. It is a hard dependency of pacman itself, so it is present on every Arch machine that can install software; on Debian the package declares `libarchive13t64 \| libarchive13`, naming both because the time64 transition renamed it in trixie and a package that spans both suites has to say so. |
-| `libwayland-client`, `libxkbcommon`, `libEGL`/GL | What the compositor session already provides; winit needs them to exist, and they do. |
+| `libwayland-client`, `libwayland-egl`, `libxkbcommon`, `libEGL`/GL | What the compositor session already provides; winit needs them to exist, and they do. **All four are `dlopen`ed by soname**, so none appears in `ldd` output and no shlibs machinery can find them — a package names them by hand or ships a program that fails at its first window. This row is the list every package is written from, and `libwayland-egl` was missing from it until P19. |
 | `glibc`, `libgcc_s`, `libm` | The floor. |
 
 No GTK. No Qt. No KF6. No portal. `build/check-deps.sh` runs

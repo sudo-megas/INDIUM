@@ -21,8 +21,12 @@
 //!
 //! Run them with `cargo test --test package_path -- --ignored`.
 //!
-//! **Two tests here are deliberately not `#[ignore]`d**, and the exception is written down
-//! rather than left to look like an oversight. `the_copyright_header_names_the_font_that_ships`
+//! **Some tests here are deliberately not `#[ignore]`d**, and each exception is written down
+//! rather than left to look like an oversight. How many there are is not stated, for the
+//! reason CORE §2 gives about counts: this opened *"Two tests here"* and P19 added a third,
+//! so the sentence describing the list was falsified by the list growing — one line above the
+//! list itself. The exceptions are named below and can be counted by reading them.
+//! `the_copyright_header_names_the_font_that_ships`
 //! reads two files that are in the repository at all times — `LICENSES/OFL-1.1.txt` and
 //! `build/package/deb/copyright.header` — so it wants no artefact, and absence therefore
 //! cannot make it pass. The reason it is here and not elsewhere is that its subject is
@@ -32,7 +36,14 @@
 //! INDIUM stopped embedding in P12) survived three releases precisely because nothing looked
 //! at it until a person did.
 //!
-//! The second is `the_pkgbuild_and_cargo_toml_agree_about_the_version`, on the same terms and
+//! `core_and_the_deb_name_the_same_dlopened_libraries` is here on the same terms — it reads
+//! `CORE.md` and `build/package/make-deb.sh`, both always in the tree. It is in this file
+//! because its subject is what a package declares, and it exists because through `v1.2.0-2`
+//! the `.deb` declared three of the four libraries the program opens by hand. Nothing could
+//! have caught that: the four are `dlopen`ed, so `ldd` is silent and `verify.sh` had nothing
+//! to compare. Two hand-written lists that must agree can at least be made to say so.
+//!
+//! Another is `the_pkgbuild_and_cargo_toml_agree_about_the_version`, on the same terms and
 //! for the same reason: it reads `Cargo.toml` and `build/package/PKGBUILD`, both always in the
 //! tree, so absence cannot make it pass. Nothing `cargo test` runs looked at `pkgver` at all
 //! before P18 — `verify.sh` compares the two at package time, and `release.yml` derives the
@@ -710,4 +721,123 @@ fn the_pkgbuild_and_cargo_toml_agree_about_the_version() {
         env!("CARGO_PKG_VERSION"),
         "the Cargo.toml on disk and the version compiled into this test disagree"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The libraries nothing can see, named in two places that have to agree.
+//
+// Not `#[ignore]`d — see this file's header for why, and why it lives here.
+// ---------------------------------------------------------------------------
+
+/// CORE §2's system-library row is the list every package is written from, and the `.deb`'s
+/// `Depends` is one of the things written from it. Neither can be checked against the binary
+/// by any ordinary means: winit and glutin open these by soname at runtime, so they appear in
+/// no `ldd` output and no shlibs machinery will ever find them. `make-deb.sh` says as much
+/// where it declares them — *"named by hand because CORE §2 names them."*
+///
+/// Named by hand from a row that was short one entry. Through `v1.2.0-2` CORE §2 listed three
+/// where the binary opens four, and the `.deb` inherited the omission: its `Depends` named
+/// `libwayland-client0`, `libxkbcommon0` and `libegl1` while the binary it wrapped opened
+/// `libwayland-egl.so.1` as well. The `PKGBUILD`'s comment carried it correctly the whole
+/// time, and on Arch it could not show — one `wayland` package ships both sonames, so only
+/// Debian, which splits them, could ever have been wrong.
+///
+/// So the two hand-written lists are pinned to each other, in both directions. **The Debian
+/// package name is matched by stem rather than typed here**: `libwayland-egl` has to be the
+/// prefix of some `Depends` entry, which `libwayland-egl1` is, and the soversion digit stays
+/// out of this test because it belongs to Debian rather than to INDIUM. A fifth library added
+/// to CORE §2 fails this until `make-deb.sh` names it; one added to `make-deb.sh` fails it
+/// until CORE does.
+///
+/// **What it cannot prove, said plainly rather than left looking covered:** if the program
+/// gains a `dlopen` that *no* document mentions, both lists agree and both are wrong. Only
+/// the running program can show that. P19 records it as the limit rather than inventing a
+/// weak gate for it, because a gate that cannot fail is worse than a note that it is absent.
+#[test]
+fn core_and_the_deb_name_the_same_dlopened_libraries() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let core = std::fs::read_to_string(root.join("CORE.md")).expect("no CORE.md");
+    let make_deb = std::fs::read_to_string(root.join("build/package/make-deb.sh"))
+        .expect("no build/package/make-deb.sh");
+
+    // The three entries Debian spells differently from CORE, and therefore the three this
+    // test cannot match by stem. They are typed, and the reason is that no derivation exists:
+    // `libc6` is CORE's `glibc`, `libgcc-s1` is its `libgcc_s`, and `libarchive13t64` is a
+    // package name carrying a soversion and a time64 suffix that appear in no document. They
+    // are the *linked* libraries — `ldd` prints all three — so they are the ones this test is
+    // not about.
+    const LINKED: &[&str] = &["libc6", "libgcc-s1", "libarchive13t64", "libarchive13"];
+
+    // CORE §2's row for what the compositor session provides. Found by the first name in it
+    // rather than by line number, so the row may move.
+    let row = core
+        .lines()
+        .find(|l| l.starts_with("| `libwayland-client`"))
+        .expect("CORE §2 has no row starting with `libwayland-client` — has the table moved?");
+    let first_cell = row
+        .trim_start_matches('|')
+        .split('|')
+        .next()
+        .expect("the row has no first cell");
+    let core_names: Vec<String> = first_cell
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .map(|n| n.trim().to_ascii_lowercase())
+        .collect();
+    assert!(
+        !core_names.is_empty(),
+        "CORE §2's dlopen row parsed to no library names at all, so this test would pass by \
+         absence — the row's backtick quoting has changed"
+    );
+
+    // `DEPENDS="libc6 (>= 2.35), …"` — one line, the only one in the file that starts that way.
+    let depends_line = make_deb
+        .lines()
+        .find_map(|l| l.strip_prefix("DEPENDS=\""))
+        .and_then(|l| l.strip_suffix('"'))
+        .expect("make-deb.sh has no single-line `DEPENDS=\"…\"` assignment");
+    // A `Depends` entry may carry a version relation or an alternation; neither is a name.
+    let deb_names: Vec<String> = depends_line
+        .split(',')
+        .map(|e| {
+            e.split('(')
+                .next()
+                .unwrap_or(e)
+                .split('|')
+                .next()
+                .unwrap_or(e)
+                .trim()
+                .to_ascii_lowercase()
+        })
+        .filter(|e| !e.is_empty())
+        .collect();
+    assert!(
+        !deb_names.is_empty(),
+        "the .deb's Depends parsed to nothing, so this test would pass by absence"
+    );
+
+    // Forward: every library CORE names as dlopen'd is declared by the package.
+    for name in &core_names {
+        assert!(
+            deb_names.iter().any(|d| d.starts_with(name.as_str())),
+            "CORE §2 names `{name}` among the libraries the program opens by hand, and the \
+             .deb's Depends declares no package beginning with it. A .deb that omits one of \
+             these installs cleanly and fails at its first window. Depends is: {deb_names:?}"
+        );
+    }
+
+    // Reverse: every declared package that is not one of the linked three is a library CORE
+    // names. This is the direction that keeps the row honest when the package grows first.
+    for dep in &deb_names {
+        if LINKED.contains(&dep.as_str()) {
+            continue;
+        }
+        assert!(
+            core_names.iter().any(|n| dep.starts_with(n.as_str())),
+            "the .deb declares `{dep}`, which is neither one of the linked libraries nor a \
+             library CORE §2's row names. Either the row is short an entry, as it was through \
+             v1.2.0-2, or this package declares something nothing has written down."
+        );
+    }
 }
