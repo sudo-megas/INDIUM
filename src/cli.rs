@@ -591,6 +591,10 @@ fn ask_for_password(path: &Path, err: &mut dyn Write) -> Result<Secret, ArchiveE
             "could not turn off the terminal's echo, so the password would be visible".into(),
         ));
     }
+    // **Declared after `tty`, and that is load-bearing.** Locals drop in reverse order of
+    // declaration, so this guard runs its `tcsetattr` while `tty` is still alive and the
+    // descriptor is still open. Declared *before* `tty` it would restore the echo through
+    // a closed file descriptor — the terminal would stay deaf and nothing would say why.
     let _guard = EchoOff { fd, saved };
 
     // The prompt goes to the terminal itself, for the reasons in the doc comment above.
@@ -598,8 +602,19 @@ fn ask_for_password(path: &Path, err: &mut dyn Write) -> Result<Secret, ArchiveE
     let _ = write!(w, "Password for {}: ", path.display());
     let _ = w.flush();
 
-    let mut line = String::new();
-    let read = BufReader::new(&tty).read_line(&mut line);
+    // **Bytes, not a `String`, and the capacity is reserved up front.** `Secret` zeroes its
+    // buffer with volatile writes on `Drop`, and `Secret::new` takes this `Vec` by value —
+    // so the allocation the password is read into *is* the one that gets wiped, and there
+    // is never a second plaintext copy for P2's rule to have an exception for. Reading into
+    // a `String` and handing over `from_text` would leave the original buffer freed and
+    // unwiped, which is the same mistake in a smaller place.
+    //
+    // The capacity is generous so the vector does not grow mid-read: a realloc would free
+    // a buffer holding a prefix of the password without zeroing it. A password longer than
+    // this still works and still costs one unwiped prefix, which is written down rather
+    // than pretended away.
+    let mut line: Vec<u8> = Vec::with_capacity(512);
+    let read = BufReader::new(&tty).read_until(b'\n', &mut line);
 
     // The echo is off, so the Enter the user pressed left no mark. Without this the next
     // thing printed continues the prompt's own line.
@@ -615,9 +630,13 @@ fn ask_for_password(path: &Path, err: &mut dyn Write) -> Result<Secret, ArchiveE
             // Only the line terminator is stripped. A password may legitimately begin or
             // end with a space, and trimming one off would refuse a correct password while
             // reporting it as wrong.
-            let text = line.strip_suffix('\n').unwrap_or(&line);
-            let text = text.strip_suffix('\r').unwrap_or(text);
-            Ok(Secret::from_text(text))
+            if line.last() == Some(&b'\n') {
+                line.pop();
+            }
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            Ok(Secret::new(line))
         }
         Err(e) => Err(ArchiveError::Other(format!(
             "could not read a password from the terminal: {e}"
