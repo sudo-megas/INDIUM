@@ -51,7 +51,8 @@ nothing more: *"RAR is not supported."*
 
 **To build it yourself:**
 
-- **Arch Linux** — `sudo pacman -S libarchive rust`. That is the whole list.
+- **Arch Linux** — `sudo pacman -S libarchive rust git`. That is the whole list, and it is the
+  same one `PKGBUILD` declares.
 - **Debian / Ubuntu** — `sudo apt install libarchive-dev pkg-config build-essential`, and
   Rust from [rustup](https://rustup.rs) rather than from `apt`, because bookworm packages
   `rustc` 1.63 and that version cannot build INDIUM.
