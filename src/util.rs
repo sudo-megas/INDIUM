@@ -121,6 +121,69 @@ pub fn format_ratio(real: u64, packed: u64) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Hex
+// ---------------------------------------------------------------------------
+
+/// Bytes on a row of the hex view, and it does not depend on how wide the pane is.
+///
+/// **Fixed, deliberately.** The obvious thing is to fit the row to the Inspector's width, and
+/// P13 spent an afternoon on exactly that idea in the sidebar's header before rolling it back:
+/// a layout chosen by how much room a zone has means a first launch and a one-pixel drag can
+/// show two different pictures of the same bytes, and here the picture is the data. Sixteen is
+/// also what `xxd`, `hexdump` and every other tool prints, so an offset read in this pane names
+/// the same byte as an offset read anywhere else. The pane scrolls sideways instead.
+pub const HEX_COLUMNS: usize = 16;
+
+/// The offset column: eight uppercase hex digits.
+///
+/// Uppercase because the Inspector already prints a CRC as `{v:08X}` and two conventions for
+/// hex in one pane is one too many. Eight digits is two more than this can ever need — the
+/// preview cap is 8 MiB, so the last row of the largest possible dump is `007FFFF0` — and it
+/// is eight anyway, because that is the width the tools a reader is comparing against use.
+pub fn hex_offset(offset: usize) -> String {
+    format!("{offset:08X}")
+}
+
+/// One row's bytes, then the same bytes as printable characters.
+///
+/// `chunk` is up to [`HEX_COLUMNS`] bytes; a short one is the last row of the dump. **The hex
+/// columns are padded to the full width when it is short**, or the gutter slides left on the
+/// final row and stops being a column — which is the whole failure this function has to avoid,
+/// and the case a naive implementation gets wrong.
+///
+/// A byte outside `0x20..=0x7E` is drawn as `.`, which means a literal full stop and an
+/// unprintable byte look the same. That is what every hex dump has always done, and the hex
+/// columns are the truth beside it: the gutter is for finding your place, not for reading.
+pub fn hex_body(chunk: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut out = String::with_capacity(HEX_COLUMNS * 4 + 8);
+    for i in 0..HEX_COLUMNS {
+        match chunk.get(i) {
+            Some(b) => {
+                out.push(HEX[(b >> 4) as usize] as char);
+                out.push(HEX[(b & 0x0F) as usize] as char);
+            }
+            None => out.push_str("  "),
+        }
+        out.push(' ');
+        // The wider gap down the middle, so an eye can count to eight without counting.
+        if i == HEX_COLUMNS / 2 - 1 {
+            out.push(' ');
+        }
+    }
+    out.push_str(" |");
+    for b in chunk {
+        out.push(if (0x20..=0x7E).contains(b) {
+            *b as char
+        } else {
+            '.'
+        });
+    }
+    out.push('|');
+    out
+}
+
+// ---------------------------------------------------------------------------
 // Mode formatting
 // ---------------------------------------------------------------------------
 
@@ -512,5 +575,84 @@ mod tests {
         assert_eq!(elide_middle(LONG, 0), "");
         assert_eq!(elide_middle(LONG, 1), "…");
         assert_eq!(elide_middle(LONG, 2).chars().count(), 2);
+    }
+
+    // --- the hex view ---------------------------------------------------
+
+    /// The whole row, written out, so a change to the shape has to be deliberate.
+    #[test]
+    fn a_full_row_reads_exactly_as_a_hex_dump_should() {
+        let bytes: Vec<u8> = (0u8..16).collect();
+        assert_eq!(
+            hex_body(&bytes),
+            "00 01 02 03 04 05 06 07  08 09 0A 0B 0C 0D 0E 0F  |................|"
+        );
+    }
+
+    /// **The case a naive implementation gets wrong.** A short last row must pad its hex
+    /// columns, or the gutter walks left and stops being a column.
+    #[test]
+    fn a_short_last_row_keeps_the_gutter_in_its_lane() {
+        let full = hex_body(&(0u8..16).collect::<Vec<u8>>());
+        let lane = full.find('|').expect("a full row has a gutter");
+        for n in 0..=HEX_COLUMNS {
+            let short = hex_body(&vec![b'A'; n]);
+            assert_eq!(
+                short.find('|'),
+                Some(lane),
+                "a row of {n} bytes puts its gutter in a different column"
+            );
+        }
+    }
+
+    /// The gutter is printable ASCII and nothing else — a stray control character in it
+    /// would move the cursor and take the column with it.
+    #[test]
+    fn the_gutter_prints_only_what_can_be_printed() {
+        let all: Vec<u8> = (0u8..=255).collect();
+        for chunk in all.chunks(HEX_COLUMNS) {
+            let row = hex_body(chunk);
+            let gutter = &row[row.find('|').unwrap() + 1..row.len() - 1];
+            for (i, ch) in gutter.chars().enumerate() {
+                let raw = chunk[i];
+                if (0x20..=0x7E).contains(&raw) {
+                    assert_eq!(ch, raw as char);
+                } else {
+                    assert_eq!(ch, '.', "byte {raw:#04X} was not substituted");
+                }
+            }
+        }
+    }
+
+    /// Every row is the same width, which is the property the whole view rests on.
+    #[test]
+    fn every_row_is_the_same_width() {
+        let full = hex_body(&(0u8..16).collect::<Vec<u8>>()).chars().count();
+        for n in 0..=HEX_COLUMNS {
+            // The gutter is shorter on a short row — that is the one part that may vary,
+            // because it has nothing to the right of it to push out of line.
+            let row = hex_body(&vec![0xFFu8; n]);
+            assert_eq!(row.chars().count(), full - (HEX_COLUMNS - n));
+        }
+    }
+
+    #[test]
+    fn an_offset_is_eight_uppercase_digits() {
+        assert_eq!(hex_offset(0), "00000000");
+        assert_eq!(hex_offset(16), "00000010");
+        assert_eq!(hex_offset(0xABCDEF), "00ABCDEF");
+        // The last row of the largest dream the preview cap allows.
+        assert_eq!(hex_offset(8 * 1024 * 1024 - HEX_COLUMNS), "007FFFF0");
+        assert!(hex_offset(0xABCDEF).chars().all(|c| !c.is_lowercase()));
+    }
+
+    /// The row count the view hands `show_rows`, including the partial one at the end.
+    #[test]
+    fn the_row_count_covers_every_byte() {
+        let cases: [(usize, usize); 7] =
+            [(0, 0), (1, 1), (15, 1), (16, 1), (17, 2), (32, 2), (33, 3)];
+        for (len, want) in cases {
+            assert_eq!(len.div_ceil(HEX_COLUMNS), want, "for {len} bytes");
+        }
     }
 }
