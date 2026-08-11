@@ -91,9 +91,18 @@ install -d -m 755 "$DOC"
 # — and inlined *from* LICENSES/OFL-1.1.txt, so the packaged copy and the repository copy
 # cannot drift apart. The sed is the whole of DEP-5's line syntax: a blank line becomes a
 # lone `.`, and every line gains one leading space.
+#
+# **The carriage return is stripped first, and that is not tidying.** LICENSES/OFL-1.1.txt
+# is CRLF — all 93 lines of it — because assets/fonts/README.md records it as copied
+# verbatim out of the font package, and that is how the OFL ships upstream. Without the
+# first substitution `^$` matches nothing, because no line is empty: eighteen of them hold
+# a lone CR. So every blank line in the licence became ` \r` instead of ` .`, and this
+# recipe emitted **zero** of the eighteen separators its own comment describes, in every
+# .deb since P6. It parses — a space followed by CR is still a continuation line, so no
+# paragraph broke — which is exactly why nobody saw it.
 {
   cat build/package/deb/copyright.header
-  sed 's/^$/./; s/^/ /' LICENSES/OFL-1.1.txt
+  sed 's/\r$//; s/^$/./; s/^/ /' LICENSES/OFL-1.1.txt
 } > "$DOC/copyright"
 chmod 644 "$DOC/copyright"
 
