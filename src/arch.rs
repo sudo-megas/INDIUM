@@ -489,6 +489,12 @@ pub enum ArchiveError {
     EncryptedHeaders,
     /// A password was supplied and rejected.
     WrongPassword,
+    /// A password was supplied whose bytes are not valid UTF-8, and 7z stores a password
+    /// as text. **Distinct from [`WrongPassword`](ArchiveError::WrongPassword) on purpose:**
+    /// nothing was tried against the archive, so the password may well be right and INDIUM
+    /// simply cannot encode it. Saying "wrong password" here would be the program knowing
+    /// more than it says, which P18 nominated and P19 fixed.
+    PasswordNotUtf8,
     /// The selection contains encrypted entries and no password was given.
     NeedPassword,
     /// An entry's stored path would write outside the destination. Carries the path
@@ -509,6 +515,11 @@ impl std::fmt::Display for ArchiveError {
                 )
             }
             ArchiveError::WrongPassword => write!(f, "Wrong password."),
+            ArchiveError::PasswordNotUtf8 => write!(
+                f,
+                "INDIUM could not use this password: 7z stores one as text, and these \
+                 bytes are not valid UTF-8. It was never tried against the archive."
+            ),
             ArchiveError::NeedPassword => {
                 write!(f, "This selection is encrypted. A password is needed.")
             }

@@ -61,15 +61,21 @@ fn mode_from_attributes(attributes: u32, has_attributes: bool) -> u32 {
 /// The crate's `Password` neither wipes on drop nor hides itself from `Debug`, and its
 /// key derivation caches the derived key in a process-global that is never cleared. P4 §4
 /// records that; this function is the exact boundary where INDIUM's own guarantee ends.
-fn password_of(secret: Option<&Secret>) -> Password {
+fn password_of(secret: Option<&Secret>) -> Result<Password, ArchiveError> {
     match secret {
-        None => Password::empty(),
+        None => Ok(Password::empty()),
         Some(s) => match std::str::from_utf8(s.as_bytes()) {
-            Ok(text) => Password::new(text),
+            Ok(text) => Ok(Password::new(text)),
             // A password that is not UTF-8 cannot be put through the crate's UTF-16
             // conversion, and inventing an encoding for it would be worse than failing
-            // to match. Empty means "no password", which fails honestly.
-            Err(_) => Password::empty(),
+            // to match.
+            //
+            // This used to return `Password::empty()`, which means *no password* — so a
+            // password INDIUM could not encode came back as "Wrong password.", the one
+            // sentence that is certainly untrue about it. Nothing was tried; the bytes
+            // may be exactly right. P18 nominated the fix and left the sentence it should
+            // say instead, which `ArchiveError::PasswordNotUtf8` now carries.
+            Err(_) => Err(ArchiveError::PasswordNotUtf8),
         },
     }
 }
@@ -84,7 +90,7 @@ fn password_of(secret: Option<&Secret>) -> Password {
 /// listing and works on an archive whose *headers* are encrypted, which libarchive
 /// refuses outright.
 pub fn list_all(path: &Path, passphrase: Option<&Secret>) -> Result<Vec<Entry>, ArchiveError> {
-    let password = password_of(passphrase);
+    let password = password_of(passphrase)?;
     let archive = Archive::open_with_password(path, &password).map_err(classify)?;
     Ok(entries_of(&archive))
 }
@@ -94,7 +100,9 @@ pub fn list_all(path: &Path, passphrase: Option<&Secret>) -> Result<Vec<Entry>, 
 /// CORE §4 promised this detail for P4. It belongs to the archive, not to an entry —
 /// which is exactly why an entry's packed size so often cannot be given.
 pub fn solid_info(path: &Path, passphrase: Option<&Secret>) -> Option<(bool, usize)> {
-    let password = password_of(passphrase);
+    // A password INDIUM cannot encode is the same answer as an archive that will not
+    // open: this function reports detail or nothing, and has no way to carry a reason.
+    let password = password_of(passphrase).ok()?;
     let archive = Archive::open_with_password(path, &password).ok()?;
     Some((archive.is_solid, archive.blocks.len()))
 }
@@ -272,7 +280,8 @@ impl Writer {
                 "an encrypted archive needs a password, and none was given".to_string()
             })?;
             vec![
-                AesEncoderOptions::new(password_of(Some(secret))).into(),
+                AesEncoderOptions::new(password_of(Some(secret)).map_err(|e| e.to_string())?)
+                    .into(),
                 Lzma2Options::from_level(level).into(),
             ]
         } else {
@@ -388,7 +397,7 @@ pub fn read_entry(
 ) -> Result<(Vec<u8>, bool), ArchiveError> {
     use std::io::Read as _;
 
-    let password = password_of(passphrase);
+    let password = password_of(passphrase)?;
     let mut source = std::fs::File::open(path)
         .map_err(|e| ArchiveError::Other(format!("could not open the archive: {e}")))?;
     let archive = Archive::read(&mut source, &password).map_err(classify)?;
@@ -489,6 +498,47 @@ mod tests {
             method_label(&[]),
             "—",
             "a directory has no coders, and an empty column is a dash"
+        );
+    }
+
+    /// A password INDIUM cannot encode is not a wrong password, and must not be reported
+    /// as one.
+    ///
+    /// The path is reachable, which is why P18 nominated it rather than filing it as
+    /// theory: the terminal prompt reads the password as **bytes** off `/dev/tty` and
+    /// builds `Secret::new(line)` from them (`cli.rs`), so any byte sequence a keyboard
+    /// and a locale can produce arrives here. Through v1.2.0-2 a non-UTF-8 one became
+    /// `Password::empty()` — *no password* — and the operation came back "Wrong
+    /// password.", which is the one thing known to be untrue about it: nothing had been
+    /// tried against the archive at all.
+    ///
+    /// `0xFF` is the assertion's whole point. It is not valid UTF-8 in any position, and
+    /// it is a byte a Latin-1 keyboard produces without anybody doing anything strange.
+    #[test]
+    fn a_password_that_is_not_text_is_refused_as_itself_and_not_as_a_wrong_password() {
+        let not_text = Secret::new(vec![b'h', b'i', 0xFF]);
+        let err = password_of(Some(&not_text)).expect_err("0xFF is not valid UTF-8");
+        assert!(
+            matches!(err, ArchiveError::PasswordNotUtf8),
+            "a password that cannot be encoded came back as {err:?}, and the only wrong \
+             answer here is WrongPassword — it says the archive rejected something it was \
+             never shown"
+        );
+        assert!(
+            err.to_string().contains("never tried"),
+            "the message has to say the password was not tried, or it reads as a rejection: \
+             {err}"
+        );
+
+        // The two neighbours, so the arm cannot start swallowing what it should pass.
+        assert!(
+            password_of(None).is_ok(),
+            "no password at all is not an error; it is how an unencrypted 7z is opened"
+        );
+        assert!(
+            password_of(Some(&Secret::from_text("hünde"))).is_ok(),
+            "non-ASCII is not the test — non-UTF-8 is. A perfectly ordinary password with \
+             an umlaut in it must still go through"
         );
     }
 }
