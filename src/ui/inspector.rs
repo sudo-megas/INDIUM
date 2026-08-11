@@ -161,7 +161,17 @@ fn entry_card(app: &mut Indium, ui: &mut egui::Ui, e: &Entry) {
                 ),
             );
             match e.packed {
-                Some(p) => field(ui, "Packed", &util::format_bytes(p)),
+                Some(p) => {
+                    field(ui, "Packed", &util::format_bytes(p));
+                    // The aggregate card and the whole-archive card have both shown a ratio
+                    // since P1; the single entry — the card a person reaches first — made
+                    // them do the division themselves, while the README promised it among
+                    // what the Inspector states about a selection. Only where a packed size
+                    // is known: a 7z member sharing a compression block has none of its own,
+                    // and a ratio computed from a number that was never reported would be an
+                    // invention rather than a fact.
+                    field(ui, "Ratio", &util::format_ratio(e.size, p));
+                }
                 None => field_muted(ui, "Packed", "— not reported"),
             }
         }
