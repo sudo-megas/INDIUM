@@ -1,0 +1,86 @@
+# INDIUM — the gate. CORE §7: "**V1.4** CI: build, test, `check-deps.sh` as a gate."
+#
+# This file adds no assertion that did not already exist. Every step below is one the
+# release build has been running since v1.0, lifted out of `release.yml`'s `deb` job — and
+# that is the point. Until P15 all five gates fired only on a tag or on a hand-dispatched
+# run, so an ordinary commit got no answer at all and a mistake could sit on master for a
+# day before a release found it. `check-deps.sh` has said so about itself since it was
+# written: "What V1.4 adds is the rest of it: CI on every push, with this script as a gate
+# on a merge." This is that, and nothing more than that.
+#
+# What this job deliberately is NOT: it does not build a package, and it never will. The
+# packages are provenance — README §3 promises they are built in containers from the tag and
+# nowhere else — so a gate that produced one would be producing an artefact nobody may ship,
+# from a PKGBUILD whose `source=` still names an older tag. Packaging is proven by
+# `release.yml`'s `verify` job, on artefacts that job built. This one proves the source.
+name: ci
+
+on:
+  # Branches only, and spelled out rather than left bare. A bare `push` also fires on tags,
+  # and a tag already starts `release.yml`, which runs every one of these steps itself —
+  # two builds of the same commit, one of them pointless, racing for the same runner.
+  push:
+    branches:
+      - '**'
+  pull_request:
+
+# A gate does not write anything, so it is given nothing to write with.
+permissions:
+  contents: read
+
+# A second push onto a branch makes the first push's answer worthless before it arrives.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      # No container here, and that is a deliberate difference from `release.yml`. That
+      # workflow runs inside `debian:bookworm` because the .deb's glibc floor has to be
+      # made true by construction; this job ships nothing, so the runner's own image is
+      # the honest choice — it already carries a current Rust, rustfmt, clippy and
+      # binutils, and every minute not spent installing them is a minute the answer
+      # arrives sooner.
+      #
+      # `libarchive-dev` is not optional in any image: `build.rs` emits
+      # `cargo:rustc-link-lib=dylib=archive`, so without it nothing compiles at all rather
+      # than compiling and failing later. `pkg-config` is how it is found.
+      - name: Install the one system library
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libarchive-dev pkg-config
+
+      - uses: actions/checkout@v4
+
+      # No cargo cache. A cache is a variable, and this file exists to remove variables:
+      # the failure it would eventually produce — a green gate on a stale artefact, or a
+      # red one nobody can reproduce — costs more than the few minutes it saves on a
+      # project this size. If a build here ever gets slow enough to be ignored, that is
+      # the moment to reconsider, and it is worth writing down as a decision rather than
+      # discovering as an omission.
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      # Release rather than debug, because `check-deps.sh` reads `target/release/indium`
+      # by a hardcoded relative path and judges the binary the packages are cut from.
+      - name: Build
+        run: cargo build --release
+
+      # The default set only. `cargo test -- --ignored` would reach the Wayland clipboard
+      # test, which wants a live compositor and `wl-paste`, and the eight package tests,
+      # which want two packages this job is never going to build. `release.yml` runs those
+      # eight by name, in the job that has the artefacts. A gate that fails for want of a
+      # thing it was never given is a gate people learn to ignore.
+      - name: Test
+        run: cargo test
+
+      # CORE §2: "No GTK. No Qt. No KF6. No portal." — and CORE §9 adds X11 to the list.
+      # `ldd` is the test, and from here it is the test on every push.
+      - name: Toolkit check
+        run: ./build/check-deps.sh
