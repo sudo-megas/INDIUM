@@ -29,7 +29,7 @@
 //! packaging: it is the tree half of `verify.sh`'s check 10. And the reason it is not left
 //! to `verify.sh` alone is that `verify.sh` runs in `release.yml`, at a tag, while this runs
 //! in `ci.yml` on every push — and the defect it guards against (P17: the .deb naming a font
-//! INDIUM stopped embedding in P12) survived four releases precisely because nothing looked
+//! INDIUM stopped embedding in P12) survived three releases precisely because nothing looked
 //! at it until a person did.
 //!
 //! Copyright © sudo-megas. GPL-3.0-only.
@@ -584,7 +584,7 @@ fn neither_package_ships_a_rar_association() {
 /// The `.deb` is the only artefact carrying a hand-written attribution: the Arch package
 /// installs `LICENSES/OFL-1.1.txt` verbatim and so cannot disagree with itself. This one
 /// can, and did — P12 swapped the embedded face to Fira Mono and the DEP-5 header went on
-/// naming JetBrains Mono through four releases, in a file `make-deb.sh` concatenates with
+/// naming JetBrains Mono through three releases, in a file `make-deb.sh` concatenates with
 /// the OFL text that names the other holder.
 ///
 /// Both expectations are **derived, never typed a second time.** The holder comes off the

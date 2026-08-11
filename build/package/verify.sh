@@ -608,7 +608,7 @@ echo "-- 10. the copyright names the font that ships"
 # The .deb is the only artefact carrying a hand-written attribution: the Arch package
 # installs LICENSES/OFL-1.1.txt verbatim and so cannot disagree with itself. This one can,
 # and did. P12 swapped the face to Fira Mono and the DEP-5 header went on naming JetBrains
-# Mono for four releases — in a file make-deb.sh concatenates with the OFL text naming the
+# Mono for three releases — in a file make-deb.sh concatenates with the OFL text naming the
 # other holder, so the shipped copyright contradicted itself in adjacent paragraphs.
 #
 # Checks 5 and 7 count licence files and control fields. Neither reads a word of

@@ -385,7 +385,7 @@ a plain listing — judged then, in `contrib/`, versioned separately.
 than quietly made.** The maker's call was that the tag sequence stays contiguous: the
 plugin is *versioned separately* and so can never take an INDIUM tag, and leaving a hole
 at `v1.2` for something that will never fill it is worse than renumbering. The cost is
-named honestly — **five published releases print *"arrive in V1.3"*** in their `--help`,
+named honestly — **eight published releases print *"arrive in V1.3"*** in their `--help`,
 for a thing that arrived at `v1.2`. Those tarballs cannot be edited, and a reader who
 finds that sentence in one of them is owed this paragraph rather than a puzzle.
 
