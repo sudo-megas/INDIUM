@@ -326,7 +326,29 @@ broken. Nothing else moves.
 The icon is photorealistic PNG, supplied by the maker, installed at the hicolor sizes
 provided. No SVG.
 
-**Seven things this section has now refused, with a date on them.** A design round in P13 put
+**Per-file-type icons in the entry table are refused — P18.** Nominated by P13, repeated by
+P15, and left *"still nominated and still undecided"* by both P16 and P17: the most-repeated
+open item in the whole record, and the reason it never moved is that it was never a build
+task. This section already answers it. *An icon replaces a word; it never garnishes one* —
+and a type glyph beside `photo.png` is a glyph beside a name that already says `png`, which
+is very nearly the example this section gives against itself two sentences later. The entry
+table has said the same thing in code since P1 and re-affirmed it after the face gained the
+glyph: a directory is marked by a trailing slash, *"the face carries one now, and the answer
+is still the slash."* A row would end up carrying four directory signals — slash, bold face,
+ink, glyph.
+
+Three costs were measured before ruling, so this is a decision and not a preference. The
+glyphs exist: the whole Font Awesome file-type family ships in both faces already, so
+availability was never the constraint. The row is: at `ICON_SCALE` a 13pt glyph does not fit
+a 20px row — P13 measured exactly this when the status bar grew from 20 to 24 to carry one —
+and the entry table is full-height and virtualised, so the same growth costs about a sixth of
+every screenful. And the Name column would pay for it, being the only `remainder()` beside
+three `exact` columns, with no slack anywhere. Last, the only affordable classifier decides by
+**extension**, in a program whose Inspector deliberately decides by **bytes**, on the stated
+ground that a PNG named `notes.txt` is a PNG. Putting a name-trusting glyph in the main table
+of *this* program is the contradiction that settles it.
+
+**Eight things this section has now refused, with a date on them.** A design round in P13 put
 each to the maker and each was declined, so they are written down rather than left to be
 proposed again: **no second typeface** — the sentence above is not a default, it is a decision;
 **no emoji** — they are colour bitmaps from another face and a fontconfig lookup INDIUM does not
@@ -472,6 +494,10 @@ This list is authored by the maker, not derived. Items enter and leave only by h
 - No AppImage, Flatpak, or Snap — only `.pkg.tar.zst` and `.deb`.
 - No Windows support.
 - Passwords are never stored or remembered — typed per use, wiped after.
+- No signal handlers — not one, anywhere, and the first would be a decision rather than a
+  detail. The cost is named and accepted: `Ctrl-C` at the terminal password prompt skips the
+  restore-on-drop guard and leaves the echo off until `stty sane`. P17 found it, P18 refused
+  the fix.
 - No X11 — Wayland only.
 - Allowed, for the record: a small Settings panel; a Recent Files list; running as root.
 - No commits from any account other than **sudo-megas**; no AI attribution anywhere.

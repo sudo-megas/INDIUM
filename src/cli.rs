@@ -691,6 +691,12 @@ unsafe extern "C" {
 ///
 /// A panic between turning the echo off and turning it back on would otherwise leave the
 /// user's shell silently swallowing every keystroke.
+///
+/// **`Ctrl-C` is the route this does not cover**, and it is refused rather than open: a
+/// signal unwinds nothing, so the echo stays off until `stty sane`. The repair is a
+/// `sigaction` handler for the prompt's duration — legitimate, since `tcsetattr` is on
+/// POSIX's async-signal-safe list — but CORE §9 now says this program installs no signal
+/// handler anywhere, and the cost is carried in the README instead. P17 found it, P18 ruled.
 struct EchoOff {
     fd: i32,
     saved: Termios,

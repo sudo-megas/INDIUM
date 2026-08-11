@@ -193,6 +193,13 @@ can read it, and in your shell's history where it would outlive the command by y
 there is no terminal to ask on — a cron job, a CI runner — it says so and stops rather
 than waiting forever.
 
+One rough edge, stated rather than hidden: **`Ctrl-C` at that prompt leaves your terminal's
+echo off**, and `stty sane` puts it back. INDIUM restores the echo when the prompt is left
+by any ordinary route, including a panic, but a signal is not an ordinary route — and the
+repair is a signal handler, which this program does not have anywhere and will not take one
+for this. It is written down in CORE §9 as a refusal with its cost, which is the honest half
+of choosing not to fix something.
+
 The subcommand is only recognised as the very first word. An archive of your own actually
 named `list` is opened, as a window, with `indium ./list`.
 
