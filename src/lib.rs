@@ -6,6 +6,7 @@
 //! Copyright © sudo-megas. GPL-3.0-only.
 
 pub mod arch;
+pub mod cli;
 pub mod model;
 pub mod platform;
 pub mod secret;

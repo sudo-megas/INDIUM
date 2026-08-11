@@ -16,23 +16,36 @@ use std::path::PathBuf;
 use indium::platform::window;
 use indium::ui::Indium;
 
-const USAGE: &str = "\
-INDIUM — an archive manager for Linux on Wayland.
-
-    indium [ARCHIVE]...
-
-    ARCHIVE    an archive to open on launch; each one after the first
-               opens in a window of its own
-
-    -h, --help       this text
-    -V, --version    the version
-
-Headless subcommands (extract, list, single-file open) arrive in V1.3.
-";
+/// The help text, and the whole of the argument vocabulary, live in `cli` now — one copy,
+/// beside the code that answers to it, and pinned to `cli::SUBCOMMANDS` by a test so the
+/// two cannot drift. It used to end with a sentence promising headless subcommands in
+/// V1.3; P17 built them, so the sentence is gone rather than merely stale.
+use indium::cli::USAGE;
 
 fn main() -> eframe::Result<()> {
-    // CORE §2: "argument handling is `std::env::args`". `clap` arrives only if V1.3's
-    // headless subcommands justify its sentence.
+    // ---- The terminal half, before anything asks for a window. ----
+    //
+    // This is above `NativeOptions` and above `window_icon()` deliberately: `indium list`
+    // on a machine with no compositor must be an ordinary program reading a file, so no
+    // GL context is created and no `ui` item is touched on the way. Proven rather than
+    // asserted — `tests/cli_path.rs` runs every subcommand under CI, where there is no
+    // WAYLAND_DISPLAY at all.
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if indium::cli::takes_the_terminal(&args) {
+        let mut out = std::io::BufWriter::new(std::io::stdout().lock());
+        let mut err = std::io::stderr().lock();
+        let code = indium::cli::run(&args, &mut out, &mut err);
+        // `run` has already flushed `out` and folded any failure into `code`, which is
+        // what makes `exit` safe here: it runs no destructors, so a flush left to
+        // `BufWriter::drop` would be a truncated file reported as success.
+        std::process::exit(code);
+    }
+
+    // CORE §2: "argument handling is `std::env::args_os`". **`clap` was refused at P17**,
+    // which is the round §2 said would decide it: three subcommands, one string option and
+    // two flags is forty lines of `match`, and the derive path would bring a
+    // colour-negotiation stack to a program with one palette and no theme setting. The
+    // refusal is dated in §2 so it is not reproposed as a discovery.
     let mut open: Option<PathBuf> = None;
     let mut also: Vec<PathBuf> = Vec::new();
     // **`args_os`, and never `args`.** `std::env::args()` panics on an argument that is
