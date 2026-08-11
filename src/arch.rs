@@ -1195,6 +1195,83 @@ fn head_via_libarchive(
     Err(ArchiveError::Other(format!("no such entry: {entry_path}")))
 }
 
+/// Write one entry's bytes to `out`, streamed, with no cap at all.
+///
+/// P17 §2. This is what `indium cat` is built on, and it is deliberately **not**
+/// [`head_of`]. `head_of` caps because the Preview must not be able to make the window
+/// disappear, and 8 MiB is the number it caps at; a `cat` that silently stopped there
+/// would be the same class of lie as a hex view that reflowed — the reader would have no
+/// way to know the file continued. Calling `head_of` with `usize::MAX` is not the fix
+/// either: it does `take(cap as u64 + 1)`, which overflows, and it buffers the member in
+/// a `Vec` besides.
+///
+/// The routing is `head_of`'s, line for line — libarchive first, and the 7z reader only
+/// where libarchive refuses an encrypted-header archive — so the two cannot drift about
+/// which reader owns which archive.
+///
+/// Returns the number of bytes written, which the caller may compare against the entry's
+/// stated size.
+///
+/// **The 7z branch does not stream.** `sevenz::read_entry` reads the member into a `Vec`
+/// before a byte reaches `out`, so `cat` of a four-gigabyte 7z member wants four gigabytes
+/// of memory where the libarchive branch wants none. That is not a new compromise: it is
+/// what [`extract`] and [`crc32_of`] already do for 7z, because `sevenz-rust2` decodes a
+/// solid block at a time and there is no smaller unit to hand out. It is written here
+/// rather than left for whoever first cats a large 7z.
+pub fn stream_entry(
+    path: &Path,
+    entry_path: &str,
+    passphrase: Option<&Secret>,
+    out: &mut dyn std::io::Write,
+) -> Result<u64, ArchiveError> {
+    match stream_via_libarchive(path, entry_path, passphrase, out) {
+        Err(ArchiveError::EncryptedHeaders) if looks_like_7z(path) => {
+            // `usize::MAX` is safe here and was checked rather than assumed: `read_entry`
+            // uses `take(cap as u64)` with no `+ 1`, so nothing overflows, and its
+            // `out.len() >= cap` can only be true for a member no machine could hold.
+            let (bytes, _truncated) =
+                crate::sevenz::read_entry(path, entry_path, usize::MAX, passphrase)?;
+            out.write_all(&bytes)
+                .map_err(|e| ArchiveError::Other(e.to_string()))?;
+            Ok(bytes.len() as u64)
+        }
+        other => other,
+    }
+}
+
+fn stream_via_libarchive(
+    path: &Path,
+    entry_path: &str,
+    passphrase: Option<&Secret>,
+    out: &mut dyn std::io::Write,
+) -> Result<u64, ArchiveError> {
+    let mut reader = Reader::open(path, passphrase)?;
+    while let Some(entry) = reader.next_entry()? {
+        if entry.path != entry_path {
+            reader.skip_data();
+            continue;
+        }
+        // A directory has no bytes, and asking for them is a caller's mistake rather than
+        // an empty success — `cat` on a directory is an error everywhere else too.
+        if entry.is_dir {
+            return Err(ArchiveError::Other(format!("{entry_path} is a directory")));
+        }
+        let mut data = EntryData::new(&mut reader);
+        // `io::copy` and not `read_to_end`: the whole point is that no member is ever
+        // held whole. A wrong password surfaces here, as it does in `head_of`, because
+        // libarchive reports it when the data is asked for and not when the header was.
+        return std::io::copy(&mut data, out).map_err(|e| {
+            let msg = e.to_string();
+            if mentions_passphrase(&msg) {
+                ArchiveError::WrongPassword
+            } else {
+                ArchiveError::Other(msg)
+            }
+        });
+    }
+    Err(ArchiveError::Other(format!("no such entry: {entry_path}")))
+}
+
 /// Stream one entry through the hand-written CRC32.
 ///
 /// CORE §4: libarchive does not expose an entry's *stored* CRC, so INDIUM computes it

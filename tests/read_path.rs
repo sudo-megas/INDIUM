@@ -701,3 +701,146 @@ fn selecting_a_directory_outside_ascii_takes_what_is_under_it() {
         "nothing outside the selection may be written"
     );
 }
+
+// ---------------------------------------------------------------------------
+// `stream_entry` — P17 §2. The uncapped read `indium cat` is built on.
+// ---------------------------------------------------------------------------
+
+/// Below the cap the two readers must be indistinguishable, or `cat` and Preview are
+/// showing different files and only one of them can be right.
+///
+/// Every basic fixture, so the libarchive branch is exercised through zip, 7z and two
+/// tar filters rather than through whichever one happened to be tried.
+#[test]
+fn stream_entry_writes_the_bytes_head_of_reads() {
+    for name in ["basic.zip", "basic.7z", "basic.tar.gz", "basic.tar.zst"] {
+        let path = fixture(name);
+        for entry in arch::list_all(&path, None).expect("could not list") {
+            if entry.is_dir {
+                continue;
+            }
+            let (head, truncated) =
+                arch::head_of(&path, &entry.path, 8 * 1024 * 1024, None).expect("head_of failed");
+            assert!(
+                !truncated,
+                "{name}: a fixture member should not reach the cap"
+            );
+
+            let mut streamed = Vec::new();
+            let n = arch::stream_entry(&path, &entry.path, None, &mut streamed)
+                .unwrap_or_else(|e| panic!("{name}: stream_entry failed on {}: {e}", entry.path));
+
+            assert_eq!(
+                streamed, head,
+                "{name}: stream_entry and head_of disagree about {}",
+                entry.path
+            );
+            assert_eq!(
+                n,
+                streamed.len() as u64,
+                "{name}: the returned count is not what was written for {}",
+                entry.path
+            );
+        }
+    }
+}
+
+/// **The test that catches the obvious wrong build.** `cat` implemented as
+/// `head_of(.., PREVIEW_CAP, ..)` returns exactly 8 MiB and looks entirely correct on
+/// every committed fixture, because none of them is anywhere near that size. So the
+/// oversized member is built here rather than taken — a fixture cannot prove this.
+///
+/// Gzip, so nine megabytes of compressible bytes cost a few kilobytes on disk; and the
+/// content is a counter rather than zeros, so a reader that silently produced a hole of
+/// the right length would still fail.
+#[test]
+fn stream_entry_does_not_stop_where_the_preview_stops() {
+    use std::io::Cursor;
+
+    // `Sink` is the trait carrying `put` and `finish`; the writer is useless without it.
+    use indium::tasks::{Meta, Method, Recipe, Sink};
+
+    const BIG: usize = 9 * 1024 * 1024;
+    let dir = TempDir::new("stream-big");
+    let path = dir.path().join("big.tar.gz");
+
+    let body: Vec<u8> = (0..BIG).map(|i| (i % 251) as u8).collect();
+    let recipe = Recipe {
+        path: path.clone(),
+        method: Method::Gzip,
+        level: Method::Gzip.default_level(),
+        encrypt: false,
+    };
+    {
+        let mut writer = arch::Writer::create(&path, &recipe).expect("could not open the writer");
+        let meta = Meta {
+            out_path: "big.bin".to_string(),
+            size: BIG as u64,
+            is_dir: false,
+            mode: 0o644,
+            mtime: Some(1_704_164_645),
+            atime: None,
+            ctime: None,
+            uid: 0,
+            gid: 0,
+            uname: Some("root".to_string()),
+            gname: Some("root".to_string()),
+            symlink: None,
+            hardlink: None,
+        };
+        let mut cursor = Cursor::new(body.clone());
+        writer.put(&meta, Some(&mut cursor)).expect("could not put");
+        writer.finish().expect("could not finish");
+    }
+
+    // The cap this must not inherit, named here so the test says what it is about.
+    const PREVIEW_CAP: usize = 8 * 1024 * 1024;
+    let (head, truncated) = arch::head_of(&path, "big.bin", PREVIEW_CAP, None).expect("head_of");
+    assert_eq!(head.len(), PREVIEW_CAP, "head_of should stop at its cap");
+    assert!(truncated, "head_of should report the member as truncated");
+
+    let mut out = Vec::new();
+    let n = arch::stream_entry(&path, "big.bin", None, &mut out).expect("stream_entry");
+
+    assert_eq!(
+        out.len(),
+        BIG,
+        "stream_entry stopped at {} bytes — a cat built on head_of returns {PREVIEW_CAP}",
+        out.len()
+    );
+    assert_eq!(
+        n, BIG as u64,
+        "the returned count disagrees with what was written"
+    );
+    assert_eq!(
+        indium::util::crc32(&out),
+        indium::util::crc32(&body),
+        "the bytes came back changed, not merely complete"
+    );
+}
+
+/// A directory is an error rather than an empty success: `cat` on one is a mistake
+/// everywhere else too, and returning `Ok(0)` would let a script mistake it for a file.
+#[test]
+fn stream_entry_refuses_a_directory_rather_than_writing_nothing() {
+    let mut out = Vec::new();
+    let err = arch::stream_entry(&fixture("basic.zip"), "sub", None, &mut out)
+        .expect_err("a directory has no bytes to write");
+    assert!(
+        err.to_string().contains("directory"),
+        "the refusal should say what sub is: {err}"
+    );
+    assert!(out.is_empty(), "nothing may be written for a directory");
+}
+
+/// RAR is refused by this path too, with CORE §5's exact sentence — not by accident but
+/// because `stream_entry` goes through `Reader::open`, where the gate lives. A future
+/// variant that opened the file another way would pass every other test and fail here.
+#[test]
+fn stream_entry_refuses_rar_with_the_exact_sentence() {
+    let mut out = Vec::new();
+    let err = arch::stream_entry(&fixture("notrar.rar"), "anything", None, &mut out)
+        .expect_err("RAR must be refused");
+    assert_eq!(err.to_string(), arch::RAR_REFUSAL);
+    assert!(out.is_empty());
+}
