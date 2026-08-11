@@ -1126,16 +1126,30 @@ pub fn lock_name_for(target: &Path) -> String {
     let resolved = target
         .canonicalize()
         .unwrap_or_else(|_| target.to_path_buf());
+    // Escaped, not folded. Until P15 every character outside the set below became a bare
+    // `%`, which threw away what it was escaping: `açık.zip` and `aşık.zip` in one directory
+    // both came out `a%%k.zip.lock`, so one window told the other it was already rebuilding
+    // an archive it had never opened. Writing the byte in hex costs two characters and makes
+    // the mapping injective, which is the whole property a lock name needs. `%` is itself
+    // outside the set and so becomes `%25`, or the escape would be ambiguous with a literal.
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let full = resolved.to_string_lossy();
     let mut name = String::with_capacity(full.len() + 5);
-    for ch in full.chars() {
-        match ch {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '.' | '-' | '_' => name.push(ch),
-            _ => name.push('%'),
+    for b in full.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'-' | b'_' => name.push(b as char),
+            _ => {
+                name.push('%');
+                name.push(HEX[(b >> 4) as usize] as char);
+                name.push(HEX[(b & 0x0F) as usize] as char);
+            }
         }
     }
     // A very deep path would make a filename no filesystem accepts. Keeping the tail
-    // keeps the part that differs between neighbours.
+    // keeps the part that differs between neighbours. The cut is by byte and the name is
+    // pure ASCII by construction, so it cannot land inside a character; it can land inside
+    // an escape, which costs nothing — two paths alike for everything but their first bytes
+    // shared a lock under the old scheme too, and the tail is still what tells them apart.
     if name.len() > 180 {
         name = name.split_off(name.len() - 180);
     }
@@ -2039,5 +2053,46 @@ mod tests {
             plan(&source, &tasks, &[]).unwrap_err(),
             Conflict::NothingToCreateInto
         );
+    }
+
+    /// The defect P11 recorded and P15 closed: folding every non-ASCII character to one `%`
+    /// made two ordinary Turkish filenames share a lock, and the second window to open one
+    /// was told the first was rebuilding it.
+    #[test]
+    fn two_names_alike_only_outside_ascii_take_different_locks() {
+        let one = lock_name_for(Path::new("/tmp/açık.zip"));
+        let two = lock_name_for(Path::new("/tmp/aşık.zip"));
+        assert_ne!(one, two, "{one} and {two} must not be the same lock");
+    }
+
+    /// A lock name is one flat filename: nothing in it may still read as a path.
+    #[test]
+    fn a_lock_name_keeps_no_separator_and_stays_ascii() {
+        let name = lock_name_for(Path::new("/tmp/a b/c.zip"));
+        assert!(!name.contains('/'), "{name} still holds a separator");
+        assert!(name.is_ascii(), "{name} is not pure ASCII");
+        assert!(name.ends_with(".lock"), "{name} does not end in .lock");
+    }
+
+    /// The escape is unambiguous, which is what makes the mapping injective: a literal `%`
+    /// in a name cannot be mistaken for one INDIUM wrote.
+    #[test]
+    fn a_literal_percent_is_escaped_like_any_other_byte() {
+        let literal = lock_name_for(Path::new("/tmp/%41.zip"));
+        let escaped = lock_name_for(Path::new("/tmp/A.zip"));
+        assert!(
+            literal.contains("%2541"),
+            "{literal} lost its literal percent"
+        );
+        assert_ne!(literal, escaped);
+    }
+
+    /// Distinct directories keep distinct locks — the reason the whole path is folded in
+    /// rather than just the filename.
+    #[test]
+    fn the_same_name_in_two_directories_takes_two_locks() {
+        let here = lock_name_for(Path::new("/tmp/one/photos.7z"));
+        let there = lock_name_for(Path::new("/tmp/two/photos.7z"));
+        assert_ne!(here, there);
     }
 }
