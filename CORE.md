@@ -414,6 +414,7 @@ repair to it.
 | P16 | The hex view, and the version number that goes with a feature rather than a fix | **`v1.1`** |
 | P17 | The terminal half, and the copyright the `.deb` had been getting wrong since P12 | **`v1.2`** |
 | P18 | The record round: the claims nothing could check, and the gates that now read them | **`v1.2.0-2`** |
+| P19 | The front page read against the tree: a library three of four packages never declared, a panel's third group, and a password refused as the wrong one | **`v1.2.0-3`** |
 
 The P-table is a plan, not scripture; P-documents may split or merge steps, but scope
 only moves *out* of v1.0 by the maker's decision recorded here.
@@ -481,8 +482,17 @@ Second language: shelved for an undefined time. English is the language of v1.
   release notes.
 - Licence: **GPL-3.0-only**, full text in `LICENSE`, readable inside the app from About.
   Font licence (OFL-1.1) in `LICENSES/`.
-- Every P-document ends with the full ritual spelled out: test, commit, push, tag, build
-  `--release`, run `check-deps.sh`, package, upload. Nothing implicit.
+- Every P-document ends with the full ritual spelled out: **bump the version or `pkgrel`,
+  write the `changelog.Debian` stanza and move `RELEASE_DATE` to its date**, test, commit,
+  push, tag, build `--release`, run `check-deps.sh`, package, upload. Nothing implicit.
+  **The two that now open the list were added at P19, and they are not paperwork.**
+  `release.yml` derives which tag form it will accept from `pkgrel` — two-numeral at 1, a
+  revision above it — so that number decides the tag's name rather than following it. And
+  since P18 a test reads About's date back out of the changelog's top stanza, which makes
+  writing the stanza a *build* prerequisite: a tag that moves the version without one fails
+  `cargo test` rather than shipping a window stating the wrong date, as three consecutive
+  tags did. §8 listed neither for eighteen rounds, because until that test existed neither
+  was load-bearing enough to be forgotten expensively.
 
 ---
 
