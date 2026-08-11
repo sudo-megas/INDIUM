@@ -54,8 +54,14 @@ impl Method {
     ///
     /// CORE §5: "This copy ships in the New Archive popup, one honest sentence each,
     /// static in v1.x — the live estimator that measures *your* data on *your* CPU is
-    /// V2.0." Copied by hand from the table there and pinned by a test, so a future
-    /// edit to CORE cannot drift away from the window without someone noticing.
+    /// V2.0." Typed here and read back out of `CORE.md` itself by
+    /// `every_method_verdict_is_core_section_five_verbatim`, so an edit to the document
+    /// that this window does not follow fails the build.
+    ///
+    /// That sentence used to claim as much and was not true: until P18 the test compared
+    /// this `match` against a second hand-copy of the same eight sentences **in this file**,
+    /// so editing CORE §5 left `cargo test` green. A comment describing a gate that does not
+    /// exist is worse than no gate, because it stops anyone building one.
     pub fn verdict(self) -> &'static str {
         match self {
             Method::Store => "No compression — instant, and as large as the input.",
@@ -1823,48 +1829,61 @@ mod tests {
             .contains("99 bytes instead of 10"));
     }
 
-    /// CORE §5's verdicts ship in the New Archive popup. Pinned against a second
-    /// hand-copy so an edit to one and not the other cannot pass unnoticed.
+    /// CORE §5's verdicts ship in the New Archive popup, and this reads them out of the
+    /// document rather than out of a second hand-copy.
+    ///
+    /// Until P18 the copy is what it compared against — eight sentences typed twice in this
+    /// one file — so an edit to CORE §5 left the suite green while the window went on saying
+    /// something the document no longer said. `keys.rs` had the right shape since P12 and was
+    /// the only test in the tree using it.
+    ///
+    /// The comparison is `assert_eq!` and not `starts_with`, unlike `keys.rs`: that popup
+    /// draws an abbreviation of CORE's cell, and this one draws the sentence, which is what
+    /// `verdict()`'s own doc means by **verbatim**.
     #[test]
     fn every_method_verdict_is_core_section_five_verbatim() {
-        let core: [(Method, &str); 8] = [
-            (
-                Method::Store,
-                "No compression — instant, and as large as the input.",
-            ),
-            (
-                Method::Lz4,
-                "The fastest real compression there is, and the largest result.",
-            ),
-            (
-                Method::Gzip,
-                "Fast, everywhere, and beaten in both speed and size by zstd.",
-            ),
-            (
-                Method::Zstd,
-                "Very fast with a small archive — the sane default.",
-            ),
-            (
-                Method::Bzip2,
-                "Slower than gzip for a somewhat smaller file; kept for compatibility.",
-            ),
-            (
-                Method::Xz,
-                "Among the smallest archives, built slowly; extraction is quick enough.",
-            ),
-            (
-                Method::Lzma2,
-                "Smallest for mixed content, slow to build — and the only road to AES-256.",
-            ),
-            (
-                Method::Deflate,
-                "Not the smallest or fastest, but opens absolutely anywhere.",
-            ),
-        ];
-        for (method, sentence) in core {
-            assert_eq!(method.verdict(), sentence, "{}", method.label());
+        let core = include_str!("../CORE.md");
+        let after = core
+            .split_once("### The method verdicts")
+            .expect("CORE §5 has a 'The method verdicts' heading")
+            .1;
+        let rows: Vec<(String, String)> = after
+            .lines()
+            .skip_while(|l| !l.starts_with('|'))
+            .take_while(|l| l.starts_with('|'))
+            .filter(|l| !l.contains("---"))
+            .map(|l| {
+                let cells: Vec<&str> = l.trim().trim_matches('|').split('|').collect();
+                // CORE names two of these by container *and* codec — "7z / LZMA2", "zip /
+                // Deflate" — where `label()` gives only the codec. A cell without a slash is
+                // itself, so the six single-token rows pass through untouched.
+                let method = cells[0].rsplit('/').next().unwrap_or("").trim().to_string();
+                (method, cells[1].trim().to_string())
+            })
+            .filter(|(m, _)| m != "Method")
+            .collect();
+
+        assert_eq!(
+            rows.len(),
+            METHODS.len(),
+            "CORE §5 lists {} methods and the popup offers {}",
+            rows.len(),
+            METHODS.len()
+        );
+        for (i, ((cm, cs), method)) in rows.iter().zip(METHODS.iter()).enumerate() {
+            assert_eq!(
+                cm,
+                method.label(),
+                "row {i}: CORE §5 names {cm:?}, and METHODS has {:?} in that place",
+                method.label()
+            );
+            assert_eq!(
+                cs,
+                method.verdict(),
+                "row {i} ({cm}): CORE §5 says {cs:?}, and the window says {:?}",
+                method.verdict()
+            );
         }
-        assert_eq!(METHODS.len(), 8, "CORE §5 lists eight methods");
     }
 
     /// CORE §4.1: "a live sentence states exactly what will be built".
