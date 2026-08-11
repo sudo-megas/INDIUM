@@ -81,8 +81,14 @@ fn main() -> eframe::Result<()> {
                 return Ok(());
             }
             Some(text) if text.starts_with('-') => {
+                // **On stderr, both lines.** `-h` asked for the help and gets stdout; a
+                // usage *error* did not ask for it, and `cli::usage_error` has always put
+                // it on stderr — `cli_path.rs` asserts so. The same binary answered "which
+                // stream does usage go on?" two different ways depending on which half
+                // fielded the mistake, which the sweep found while P17 was adding the
+                // stricter of the two rules beside the looser one.
                 eprintln!("indium: unknown option {text}\n");
-                print!("{USAGE}");
+                eprint!("{USAGE}");
                 std::process::exit(2);
             }
             _ => {

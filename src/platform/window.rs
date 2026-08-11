@@ -85,12 +85,30 @@ fn resolve(path: &Path) -> PathBuf {
 /// line is world-readable in `/proc`. The two callers that hold a secret are the two
 /// that re-open the archive already open, so they never reach this function — and
 /// `open_archive` drops the secret rather than carry it here if that ever changes.
+/// A path the child cannot mistake for a subcommand.
+///
+/// **P17 broke a P8 feature and the sweep caught it.** The terminal half claims `argv[1]`
+/// when it is byte-exactly `list`, `extract` or `cat` — and this function hands the child a
+/// bare path. So `indium photos.zip list`, with a real archive named `list` beside it,
+/// spawned a child that printed a usage error onto the terminal they share and opened no
+/// window at all. The archive was fine; its *name* was the whole defect.
+///
+/// `./list` is what a person is told to type for the same reason, and it is what the child
+/// is handed here. Only a relative path with no directory part can collide, so only that
+/// case is touched — an absolute path or anything holding a `/` already reads as a path.
+fn unambiguous(path: &Path) -> std::path::PathBuf {
+    if crate::cli::takes_the_terminal(&[path.as_os_str().to_os_string()]) {
+        return std::path::PathBuf::from(".").join(path);
+    }
+    path.to_path_buf()
+}
+
 pub fn open_new(path: &Path) -> Result<(), String> {
     let exe = std::env::current_exe()
         .map_err(|e| format!("Could not find INDIUM's own program to open a window with: {e}"))?;
 
     let child = std::process::Command::new(exe)
-        .arg(path)
+        .arg(unambiguous(path))
         .spawn()
         .map_err(|e| format!("Could not open a second window: {e}"))?;
 
@@ -114,6 +132,49 @@ fn reap(mut child: std::process::Child) {
 
 #[cfg(test)]
 mod tests {
+    /// P17 broke P8's second window for any archive whose bare name is a subcommand: the
+    /// child claims `argv[1]` when it is byte-exactly `list`, `extract` or `cat`, and this
+    /// function used to hand it one. The archive was fine; its *name* was the whole defect.
+    ///
+    /// Asserted against `cli::takes_the_terminal` rather than against a literal, so the day
+    /// a fourth subcommand is added this test starts covering it without being edited.
+    #[test]
+    fn a_second_window_is_never_handed_a_path_its_child_would_read_as_a_subcommand() {
+        use std::ffi::OsString;
+
+        for word in crate::cli::SUBCOMMANDS {
+            let given = std::path::Path::new(word);
+            let passed = super::unambiguous(given);
+            assert!(
+                !crate::cli::takes_the_terminal(&[passed.as_os_str().to_os_string()]),
+                "a child handed {passed:?} would print a usage error instead of opening a window"
+            );
+            assert_eq!(
+                passed,
+                std::path::PathBuf::from(format!("./{word}")),
+                "the escape should be the one USAGE tells a person to type"
+            );
+        }
+
+        // Everything else is passed through untouched — no path is rewritten for its own
+        // sake, only the handful that would be misread.
+        for ordinary in [
+            "photos.zip",
+            "./list",
+            "/tmp/list",
+            "sub/cat",
+            "listing.zip",
+        ] {
+            let p = std::path::Path::new(ordinary);
+            assert_eq!(
+                super::unambiguous(p),
+                p.to_path_buf(),
+                "{ordinary} was rewritten"
+            );
+        }
+        let _ = OsString::new();
+    }
+
     use super::*;
 
     #[test]

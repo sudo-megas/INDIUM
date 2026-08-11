@@ -23,6 +23,7 @@
 use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -128,6 +129,45 @@ pub fn run(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     }
 }
 
+/// Wraps `cat`'s output so a reader that walked away is told apart from a write that
+/// failed.
+///
+/// **`run`'s flush guard cannot see this case, and the sweep proved it.** For `cat` the
+/// pipe error surfaces *inside* `std::io::copy`, down in `arch::stream_via_libarchive`,
+/// which wraps it as an `ArchiveError` — so by the time `run` flushes there is nothing
+/// left to fail on, and the guard was dead code for the one case it was written for.
+/// `indium cat big.zip x | head` exited 1 and printed `Broken pipe (os error 32)`, which
+/// is exactly what this module's own comment says must never happen.
+///
+/// The error is still returned, so the copy stops rather than spinning; the flag is what
+/// `cat` reads afterwards to decide the difference.
+struct PipeAware<'a> {
+    inner: &'a mut dyn Write,
+    broken: bool,
+}
+
+impl Write for PipeAware<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self.inner.write(buf) {
+            Err(e) if broken_pipe(&e) => {
+                self.broken = true;
+                Err(e)
+            }
+            other => other,
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self.inner.flush() {
+            Err(e) if broken_pipe(&e) => {
+                self.broken = true;
+                Err(e)
+            }
+            other => other,
+        }
+    }
+}
+
 /// `indium cat big.zip x | head` is correct behaviour, not an error.
 ///
 /// Rust sets `SIGPIPE` to `SIG_IGN` before `main`, so the write fails rather than the
@@ -158,6 +198,13 @@ fn failure(err: &mut dyn Write, e: &ArchiveError) -> i32 {
 // and §2's standard is that a dependency must do genuine work for the program.
 // ---------------------------------------------------------------------------
 
+/// One name as a selection set, for asking `selection_matches` about a single member.
+fn one(member: &str) -> HashSet<String> {
+    let mut set = HashSet::new();
+    set.insert(member.to_string());
+    set
+}
+
 /// A path argument, kept as bytes. `PathBuf::from(OsString)` never fails and never
 /// lossily decodes, which is the whole reason `main` reads `args_os`.
 fn as_path(arg: &OsString) -> PathBuf {
@@ -173,10 +220,21 @@ fn list(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let mut long = false;
     let mut nul = false;
 
+    let mut flags_done = false;
     for arg in args {
+        if flags_done {
+            if archive.is_some() {
+                return usage_error(err, "list: one archive at a time");
+            }
+            archive = Some(as_path(arg));
+            continue;
+        }
         match arg.to_str() {
             Some("--long") => long = true,
             Some("-0") => nul = true,
+            // An archive whose own name begins with `-` is reachable this way, as it is
+            // for `extract`. `./name` works too; both are cheaper than the surprise.
+            Some("--") => flags_done = true,
             Some(text) if text.starts_with('-') => {
                 return usage_error(err, &format!("list: unknown option {text}"));
             }
@@ -324,8 +382,22 @@ fn extract(args: &[OsString], _out: &mut dyn Write, err: &mut dyn Write) -> i32 
                     expecting_dest = true;
                     continue;
                 }
-                Some(t) if t.starts_with("--to=") => {
-                    dest = Some(PathBuf::from(&t["--to=".len()..]));
+                _ if arg.as_bytes().starts_with(b"--to=") => {
+                    // **Bytes, not `to_str`.** Reached through `arg.to_str()` this arm was
+                    // skipped entirely for a directory that is not valid UTF-8, and the
+                    // whole token fell through to the positional arm — so
+                    // `indium extract --to=out<0xE9> a.zip` took the *flag* as the archive
+                    // path. In the round that adopted `args_os` precisely to stop losing
+                    // bytes, this was the one place they were still lost.
+                    let value = OsStr::from_bytes(&arg.as_bytes()["--to=".len()..]);
+                    if value.is_empty() {
+                        // `create_dir_all("")` returns `Ok(())` by std's own empty-path
+                        // case, so this would otherwise extract into the working directory
+                        // and say nothing — a typo'd `--to=$UNSET_VAR` emptying an archive
+                        // over whatever you were standing in.
+                        return usage_error(err, "extract: --to needs a directory");
+                    }
+                    dest = Some(PathBuf::from(value));
                     continue;
                 }
                 Some(t) if t.starts_with('-') => {
@@ -370,11 +442,36 @@ fn extract(args: &[OsString], _out: &mut dyn Write, err: &mut dyn Write) -> i32 
     // nothing at all and returns `Ok(0)`, which reads as a clean success. "No member named"
     // means "everything", so everything has to be named. `arch::extract`'s semantics are
     // not touched: the window depends on them.
+    let members_named: Vec<String> = members.clone();
     let wanted: HashSet<String> = if members.is_empty() {
         entries.iter().map(|e| e.path.clone()).collect()
     } else {
         members.into_iter().collect()
     };
+
+    // **A named member that matches nothing is a failure.** Without this, `indium extract
+    // a.zip nosuchfile` — or a typo'd second archive name, or a wrong-case member — writes
+    // nothing, reports "Extracted 0 entries." and exits 0. That is the same lie as the
+    // empty selection above wearing a different hat: the round guarded the empty case and
+    // left the unmatched one, and the sweep found it. `list` already refuses a second
+    // archive with "one archive at a time"; there is no reason `extract` should call the
+    // identical typo a success.
+    if !members_named.is_empty() {
+        let unmatched: Vec<&String> = members_named
+            .iter()
+            .filter(|m| {
+                !entries
+                    .iter()
+                    .any(|e| arch::selection_matches(&e.path, &one(m)))
+            })
+            .collect();
+        if !unmatched.is_empty() {
+            for m in &unmatched {
+                let _ = writeln!(err, "indium: no such entry: {m}");
+            }
+            return FAILED;
+        }
+    }
 
     let cancel: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     match with_password(&path, err, |secret| {
@@ -394,9 +491,20 @@ fn extract(args: &[OsString], _out: &mut dyn Write, err: &mut dyn Write) -> i32 
 // ---------------------------------------------------------------------------
 
 fn cat(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+    // **`--` matters more here than anywhere else.** `list` prints stored names, and
+    // `USAGE` promises that output feeds straight back into `cat` — but an archive may hold
+    // a member called `-0` or `--long`, and without a flag terminator `cat` refused the very
+    // name it had just printed. The round-trip test covered `extract` only, which is exactly
+    // how this got through.
     let mut positional: Vec<&OsString> = Vec::new();
+    let mut flags_done = false;
     for arg in args {
+        if flags_done {
+            positional.push(arg);
+            continue;
+        }
         match arg.to_str() {
+            Some("--") => flags_done = true,
             Some(t) if t.starts_with('-') && t != "-" => {
                 return usage_error(err, &format!("cat: unknown option {t}"));
             }
@@ -411,15 +519,28 @@ fn cat(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         return usage_error(err, "cat: a member name must be text");
     };
     let member = util::normalize_archive_path(member);
+    if member.is_empty() {
+        return usage_error(err, "cat: no member named");
+    }
+    if let Err(code) = must_exist(&path, err) {
+        return code;
+    }
 
     // No `isatty` guard. `cat(1)` writes binary to a terminal and this is called `cat`;
     // the name is the promise. Recorded as a deviation rather than fixed, because the
     // terminal check exists in this module for the password prompt and somebody would
     // otherwise propose reusing it here as a discovery.
-    match with_password(&path, err, |secret| {
-        arch::stream_entry(&path, &member, secret, out)
-    }) {
+    let mut sink = PipeAware {
+        inner: out,
+        broken: false,
+    };
+    let outcome = with_password(&path, err, |secret| {
+        arch::stream_entry(&path, &member, secret, &mut sink)
+    });
+    match outcome {
         Ok(_) => OK,
+        // A reader that walked away is not a failure of ours. See `PipeAware`.
+        Err(_) if sink.broken => OK,
         Err(e) => failure(err, &e),
     }
 }
@@ -428,9 +549,29 @@ fn cat(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
 // Shared
 // ---------------------------------------------------------------------------
 
+/// The archive must be a file that exists.
+///
+/// `main` has checked this for the window half since P8 (`does not exist`, exit 1) and the
+/// terminal half had no equivalent — so `indium list ""` reached libarchive, which maps an
+/// empty name to **stdin**, and reported a clean empty listing for an archive that is not
+/// there. An undocumented stdin mode is a curiosity; a missing archive reported as
+/// successfully listed with zero entries is a defect, and it is the one a script believes.
+fn must_exist(path: &Path, err: &mut dyn Write) -> Result<(), i32> {
+    if path.as_os_str().is_empty() {
+        let _ = writeln!(err, "indium: no archive named");
+        return Err(FAILED);
+    }
+    if !path.is_file() {
+        let _ = writeln!(err, "indium: {} does not exist", path.display());
+        return Err(FAILED);
+    }
+    Ok(())
+}
+
 /// List an archive, reporting a failure in the program's voice, with the password prompt
 /// wired in for an archive whose headers are encrypted.
 fn read_listing(path: &Path, err: &mut dyn Write) -> Result<Vec<Entry>, i32> {
+    must_exist(path, err)?;
     match with_password(path, err, |secret| arch::list_all(path, secret)) {
         Ok(entries) => Ok(entries),
         Err(e) => Err(failure(err, &e)),

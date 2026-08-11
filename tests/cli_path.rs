@@ -571,3 +571,201 @@ fn long_and_nul_together_are_refused_rather_than_one_being_ignored() {
     );
     assert!(r.out.is_empty(), "the archive was read before the refusal");
 }
+
+// ---------------------------------------------------------------------------
+// What P17's own sweep found. Each of these passed nothing before the fix.
+// ---------------------------------------------------------------------------
+
+/// **`cat … | head` is correct behaviour, and used to exit 1 saying "Broken pipe".**
+/// The guard in `run`'s flush could never fire for `cat`: the error surfaces inside
+/// `io::copy`, deep in `arch`, and comes back as an `ArchiveError` — so the flush had
+/// nothing left to fail on. Driven through the real binary because a `Vec<u8>` sink cannot
+/// close a pipe.
+#[test]
+fn cat_into_a_closed_pipe_is_success_and_says_nothing() {
+    use std::process::{Command, Stdio};
+
+    let sh = format!(
+        "{} cat {} alpha.txt | head -c 1 >/dev/null",
+        env!("CARGO_BIN_EXE_indium"),
+        fixture("basic.zip").display()
+    );
+    let out = Command::new("sh")
+        .args(["-o", "pipefail", "-c", &sh])
+        .stderr(Stdio::piped())
+        .output()
+        .expect("could not run the pipeline");
+
+    assert!(
+        out.status.success(),
+        "a reader that walked away was reported as a failure: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.stderr.is_empty(),
+        "nothing should be said about a closed pipe: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// A genuine write failure must still fail — the other half of the same rule, so the fix
+/// above cannot have been "treat every write error as fine".
+#[test]
+fn cat_onto_a_full_disk_still_fails() {
+    use std::process::{Command, Stdio};
+
+    let sh = format!(
+        "{} cat {} alpha.txt >/dev/full",
+        env!("CARGO_BIN_EXE_indium"),
+        fixture("basic.zip").display()
+    );
+    let out = Command::new("sh")
+        .args(["-c", &sh])
+        .stderr(Stdio::piped())
+        .output()
+        .expect("could not run");
+    assert_eq!(out.status.code(), Some(1), "ENOSPC must be a failure");
+    assert!(!out.stderr.is_empty(), "and it must say so");
+}
+
+/// **A named member that matches nothing used to exit 0 saying "Extracted 0 entries."**
+/// The round guarded the *empty* selection and left the *unmatched* one, which is the same
+/// lie in different clothes — and the sharpest form is a typo'd second archive, which
+/// `list` already refuses outright.
+#[test]
+fn a_member_that_matches_nothing_is_a_failure_not_an_empty_success() {
+    let dir = TempDir::new("unmatched");
+    let archive = fixture("basic.zip");
+    let cases = [
+        "nosuchfile.txt",
+        "ALPHA.TXT",               // wrong case
+        "tests/fixtures/utf8.zip", // the typo'd second archive
+        "",                        // normalises to nothing, matches nothing
+        "/",                       // so does this
+    ];
+    for member in cases {
+        let r = run(&[
+            "extract",
+            archive.to_str().unwrap(),
+            "--to",
+            dir.path().to_str().unwrap(),
+            "--",
+            member,
+        ]);
+        assert_ne!(
+            r.code, 0,
+            "extract reported success for a member that matches nothing: {member:?}"
+        );
+    }
+}
+
+/// **An empty archive path used to read stdin and report a clean empty listing.**
+/// libarchive maps `""` to standard input; the window half has checked `exists()` since P8
+/// and the terminal half had no equivalent, so a missing archive came back successful.
+#[test]
+fn an_archive_that_is_not_there_is_a_failure_on_every_subcommand() {
+    for args in [
+        vec!["list", ""],
+        vec!["cat", "", "alpha.txt"],
+        vec!["extract", ""],
+        vec!["list", "/nonexistent/nowhere.zip"],
+    ] {
+        let r = run(&args);
+        assert_ne!(r.code, 0, "{args:?} should have failed");
+        assert!(r.out.is_empty(), "{args:?} wrote to stdout");
+    }
+}
+
+/// **`list` promises its output feeds back into `cat`, and a member named `-0` broke it.**
+/// `extract` had `--` from the start; `cat` did not, so it refused the very name `list`
+/// had just printed. The round-trip test covered `extract` only, which is how it got past.
+#[test]
+fn a_member_named_like_a_flag_is_reachable_through_cat() {
+    use std::io::Cursor;
+
+    use indium::tasks::{Meta, Method, Recipe, Sink};
+
+    let dir = TempDir::new("flagnames");
+    let path = dir.path().join("names.tar");
+    let names = ["-0", "--long", "--to", "--", "-"];
+    {
+        let recipe = Recipe {
+            path: path.clone(),
+            method: Method::Store,
+            level: Method::Store.default_level(),
+            encrypt: false,
+        };
+        let mut writer = indium::arch::Writer::create(&path, &recipe).expect("writer");
+        for name in names {
+            let meta = Meta {
+                out_path: name.to_string(),
+                size: 2,
+                is_dir: false,
+                mode: 0o644,
+                mtime: Some(1_704_164_645),
+                atime: None,
+                ctime: None,
+                uid: 0,
+                gid: 0,
+                uname: Some("root".to_string()),
+                gname: Some("root".to_string()),
+                symlink: None,
+                hardlink: None,
+            };
+            let mut cursor = Cursor::new(b"x\n".to_vec());
+            writer.put(&meta, Some(&mut cursor)).expect("put");
+        }
+        writer.finish().expect("finish");
+    }
+
+    let p = path.to_str().unwrap();
+    for name in names {
+        let r = run(&["cat", p, "--", name]);
+        assert_eq!(r.code, 0, "cat could not reach {name:?}: {}", r.err);
+        assert_eq!(r.out, b"x\n", "wrong bytes for {name:?}");
+    }
+}
+
+/// **`--to=` lost bytes.** The arm was reached through `to_str()`, so a directory that is
+/// not valid UTF-8 skipped it and the whole token fell through to the positional arm —
+/// making the *flag* the archive path. In the round that adopted `args_os` to stop losing
+/// bytes, this was the one place they were still lost.
+#[test]
+fn a_destination_outside_utf8_is_still_a_destination() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let dir = TempDir::new("nonutf8");
+    let mut raw = dir.path().as_os_str().to_os_string().into_vec();
+    raw.extend_from_slice(b"/out\xe9");
+    let dest = OsString::from_vec(raw);
+
+    let mut flag = OsString::from("--to=");
+    flag.push(&dest);
+
+    let args = vec![
+        OsString::from("extract"),
+        fixture("basic.zip").into_os_string(),
+        flag,
+    ];
+    let mut out: Vec<u8> = Vec::new();
+    let mut err: Vec<u8> = Vec::new();
+    let code = cli::run(&args, &mut out, &mut err);
+    assert_eq!(code, 0, "{}", String::from_utf8_lossy(&err));
+    assert!(
+        Path::new(&dest).join("alpha.txt").is_file(),
+        "nothing landed in the non-UTF-8 destination"
+    );
+}
+
+/// **`--to=` with nothing after it emptied the archive into the working directory.**
+/// `create_dir_all("")` is `Ok(())` by std's own empty-path case, so the guard never fired.
+/// The bare `--to` at the end of the line was already refused; these must agree.
+#[test]
+fn an_empty_destination_is_a_usage_error_like_a_missing_one() {
+    let archive = fixture("basic.zip");
+    let empty = run(&["extract", archive.to_str().unwrap(), "--to="]);
+    let missing = run(&["extract", archive.to_str().unwrap(), "--to"]);
+    assert_eq!(empty.code, 2, "--to= should be a usage error");
+    assert_eq!(missing.code, 2, "--to at the end should be a usage error");
+}
