@@ -474,12 +474,153 @@ fn plural(n: usize, one: &'static str, many: &'static str) -> &'static str {
     }
 }
 
-/// Ask the terminal for a password. Replaced with a real prompt in the commit that
-/// carries the termios FFI; until then an encrypted archive is refused rather than
-/// silently mis-read.
-fn ask_for_password(_path: &Path, _err: &mut dyn Write) -> Result<Secret, ArchiveError> {
-    Err(ArchiveError::Other(
-        "this archive is encrypted, and the terminal half cannot yet ask for a password"
-            .to_string(),
-    ))
+// ---------------------------------------------------------------------------
+// The password prompt
+//
+// CORE §3: "Passwords are requested at the moment of use, passed down, and zeroed when
+// the operation ends." CORE §9: "never stored or remembered — typed per use, wiped
+// after." That rules out `--password` and an environment variable together, and not on a
+// technicality: a flag lands in /proc/<pid>/cmdline where any user on the machine can
+// read it, and in the shell's history file where it outlives the process by years.
+// Neither is *typed per use*.
+//
+// So the terminal is asked, with the echo off. The FFI is hand-written, as arch.rs's
+// setlocale/nl_langinfo block already is and for the same stated reason — "No `-sys`
+// crate and no bindgen: the declarations below are exactly what INDIUM uses". Every
+// number below was printed by a C program compiled against the installed headers, which
+// is what arch.rs did for CODESET rather than counting an enum by eye:
+//
+//     sizeof(struct termios)=60  NCCS=32  ECHO=010  TCSAFLUSH=2
+//     offsets: c_iflag 0, c_oflag 4, c_cflag 8, c_lflag 12, c_line 16,
+//              c_cc 17, c_ispeed 52, c_ospeed 56
+// ---------------------------------------------------------------------------
+
+const NCCS: usize = 32;
+/// `ECHO` in `c_lflag`. Turning off this one bit and nothing else is deliberate: `ICANON`
+/// stays on, so the line can be edited and ends at Enter, which is what `getpass` has
+/// always done and what a person expects of a password field.
+const ECHO: u32 = 0o10;
+/// `TCSAFLUSH` rather than `TCSANOW`, so anything typed ahead of the prompt is discarded
+/// instead of being echoed by the old settings and then read as part of the password.
+const TCSAFLUSH: i32 = 2;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Termios {
+    c_iflag: u32,
+    c_oflag: u32,
+    c_cflag: u32,
+    c_lflag: u32,
+    c_line: u8,
+    c_cc: [u8; NCCS],
+    c_ispeed: u32,
+    c_ospeed: u32,
+}
+
+// The layout is checked at compile time rather than trusted. A libc whose `struct
+// termios` is not this shape would otherwise be discovered by a terminal left deaf.
+const _: () = assert!(std::mem::size_of::<Termios>() == 60);
+
+unsafe extern "C" {
+    fn tcgetattr(fd: i32, termios_p: *mut Termios) -> i32;
+    fn tcsetattr(fd: i32, optional_actions: i32, termios_p: *const Termios) -> i32;
+}
+
+/// Puts the terminal back however this scope is left.
+///
+/// A panic between turning the echo off and turning it back on would otherwise leave the
+/// user's shell silently swallowing every keystroke.
+struct EchoOff {
+    fd: i32,
+    saved: Termios,
+}
+
+impl Drop for EchoOff {
+    fn drop(&mut self) {
+        // SAFETY: `fd` is open for the lifetime of this guard, and `saved` is the
+        // structure `tcgetattr` filled for that same descriptor.
+        unsafe {
+            tcsetattr(self.fd, TCSAFLUSH, &self.saved);
+        }
+    }
+}
+
+/// Ask the controlling terminal for a password, once.
+///
+/// **`/dev/tty`, and neither stdin nor stdout.** That matters twice and both cases are
+/// real: `indium cat a.7z x > out.bin` has stdout as the data channel, so a prompt written
+/// there lands inside the file; and `indium extract a.7z < /dev/null`, or anything in a
+/// pipeline, must not have the prompt eaten by whatever is feeding stdin.
+///
+/// **No controlling terminal means refuse, and never block.** A cron job, a CI runner or a
+/// `setsid` child gets a sentence and an exit code rather than a process that waits
+/// forever for a keystroke nobody is there to type.
+fn ask_for_password(path: &Path, err: &mut dyn Write) -> Result<Secret, ArchiveError> {
+    use std::io::{BufRead, BufReader};
+    use std::os::fd::AsRawFd;
+
+    let tty = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .map_err(|_| {
+            ArchiveError::Other(format!(
+                "{} is encrypted, and there is no terminal to ask for a password on",
+                path.display()
+            ))
+        })?;
+    let fd = tty.as_raw_fd();
+
+    let mut saved = std::mem::MaybeUninit::<Termios>::uninit();
+    // SAFETY: `fd` is an open descriptor and the pointer is to owned, correctly aligned
+    // storage of exactly the size the C declaration expects.
+    if unsafe { tcgetattr(fd, saved.as_mut_ptr()) } != 0 {
+        return Err(ArchiveError::Other(format!(
+            "{} is encrypted, and /dev/tty is not a terminal this program can quieten",
+            path.display()
+        )));
+    }
+    // SAFETY: `tcgetattr` returned success, so the structure is initialised.
+    let saved = unsafe { saved.assume_init() };
+
+    let mut quiet = saved;
+    quiet.c_lflag &= !ECHO;
+    // SAFETY: same descriptor, and a structure derived from the one just read off it.
+    if unsafe { tcsetattr(fd, TCSAFLUSH, &quiet) } != 0 {
+        return Err(ArchiveError::Other(
+            "could not turn off the terminal's echo, so the password would be visible".into(),
+        ));
+    }
+    let _guard = EchoOff { fd, saved };
+
+    // The prompt goes to the terminal itself, for the reasons in the doc comment above.
+    let mut w = &tty;
+    let _ = write!(w, "Password for {}: ", path.display());
+    let _ = w.flush();
+
+    let mut line = String::new();
+    let read = BufReader::new(&tty).read_line(&mut line);
+
+    // The echo is off, so the Enter the user pressed left no mark. Without this the next
+    // thing printed continues the prompt's own line.
+    let _ = writeln!(w);
+    let _ = w.flush();
+
+    match read {
+        Ok(0) => {
+            let _ = writeln!(err, "indium: no password given");
+            Err(ArchiveError::Other("no password given".into()))
+        }
+        Ok(_) => {
+            // Only the line terminator is stripped. A password may legitimately begin or
+            // end with a space, and trimming one off would refuse a correct password while
+            // reporting it as wrong.
+            let text = line.strip_suffix('\n').unwrap_or(&line);
+            let text = text.strip_suffix('\r').unwrap_or(text);
+            Ok(Secret::from_text(text))
+        }
+        Err(e) => Err(ArchiveError::Other(format!(
+            "could not read a password from the terminal: {e}"
+        ))),
+    }
 }
