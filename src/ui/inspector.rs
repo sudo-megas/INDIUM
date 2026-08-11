@@ -546,17 +546,68 @@ fn preview(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                     );
                 });
         }
-        util::Content::Binary => {
-            // CORE §4 puts hex at V1.1, so the honest answer is a sentence and not a
-            // half-built hex view.
-            note(
-                ui,
-                "Neither text nor an image INDIUM decodes. A hex view arrives in V1.1; \
-                 until then there is nothing truthful to show here.",
-            );
-        }
+        util::Content::Binary => hex(ui, data),
         util::Content::Empty => note(ui, "Nothing was read for this entry."),
     }
+}
+
+/// The hex view CORE §4 has promised since P5, and the reader since P5's own copy.
+///
+/// **Virtualised, and it has to be.** The preview cap is 8 MiB, which at
+/// [`util::HEX_COLUMNS`] bytes a row is 524,288 rows — so the text arm's idiom above, one
+/// `Label` holding the whole blob, is exactly the thing that must not be copied here.
+/// `show_rows` builds only the rows on screen and needs a row height it can trust, which is
+/// why that height is asked of the font rather than written down: a literal that disagreed
+/// with what is painted would drift a row out of place for every row scrolled.
+///
+/// **It scrolls sideways rather than reflowing.** A row is about 78 cells and the Inspector's
+/// content is 306 at rest, so the line does not fit and is not made to: [`util::HEX_COLUMNS`]
+/// says at length why the count is fixed, and the pane is resizable for a reader who wants
+/// the whole width. `ScrollArea::both` is the image arm's idiom, one zone over.
+fn hex(ui: &mut egui::Ui, data: &super::PreviewData) {
+    let font = egui::FontId::new(13.0, theme::MONO);
+    // `fonts_mut` for the reason the status bar's lane gives: measuring can populate the
+    // atlas, so the accessor that admits it is the correct one.
+    let row_h = ui.ctx().fonts_mut(|f| f.row_height(&font));
+
+    // Zeroed before `show_rows`, not inside it: the scroll area works out which rows are
+    // visible from this spacing, so setting it in the closure would be a frame too late.
+    // A dump is a grid, and a grid with gaps in it is not one.
+    ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+
+    let rows = data.bytes.len().div_ceil(util::HEX_COLUMNS);
+    egui::ScrollArea::both()
+        .auto_shrink([false, false])
+        .show_rows(ui, row_h, rows, |ui, range| {
+            for row in range {
+                let start = row * util::HEX_COLUMNS;
+                let end = (start + util::HEX_COLUMNS).min(data.bytes.len());
+                ui.horizontal(|ui| {
+                    // The offset is chrome and the bytes are the value, which §6 tells
+                    // apart by colour. Two labels rather than one, for that alone.
+                    ui.label(
+                        egui::RichText::new(util::hex_offset(start))
+                            .family(theme::MONO)
+                            .size(13.0)
+                            .color(theme::TEXT_MUTED),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(format!(
+                                "  {}",
+                                util::hex_body(&data.bytes[start..end])
+                            ))
+                            .family(theme::MONO)
+                            .size(13.0)
+                            .color(theme::TEXT_SECONDARY),
+                        )
+                        // As the text arm is. A selection cannot run past the rows that
+                        // exist, which is the price of virtualising half a million of them.
+                        .selectable(true),
+                    );
+                });
+            }
+        });
 }
 
 /// What Preview is looking at, in one line.
