@@ -89,12 +89,15 @@ One binary crate, `indium`, with modules. No workspace, no premature abstraction
 | Module | Owns |
 | --- | --- |
 | `arch` | Hand-written FFI over system libarchive (~15 functions) and the safe wrapper around it. Listing streams entries over a channel from a worker thread; extraction runs with libarchive's secure flags (`SECURE_SYMLINKS`, `SECURE_NODOTDOT`) so a hostile archive cannot write outside its target. |
+| `sevenz` | The 7z half, over `sevenz-rust2`: AES-256 writing, which libarchive cannot do, and the detail the generic reader does not expose — solid blocks, the per-entry method, and headers that are themselves encrypted. It sits beside `arch` rather than inside it because `arch`'s own first sentence is hand-written FFI over the system libarchive, and a crate-backed backend does not belong inside that sentence. |
 | `model` | Archive state: entries, selection, the open archive's identity. |
 | `tasks` | The staging engine. Every mutation — add, remove, rename, create — is a task in a queue. **Apply** builds the new archive in a temp file beside the target, verifies it by walking its entries, then atomically renames over the original. The original is never touched until the replacement is proven. |
 | `ui` | The window: sidebar, table, Inspector, tray, status bar, and every popup. |
 | `platform` | The Linux specifics: clipboard, `.desktop` parsing for Open With, default-app registration, XDG paths, the second window — on this platform a window is a process, and opening one is a Linux specific like the rest — and handing a directory to the desktop's file manager, which is the portal's job for the same reason the picker is. |
 | `cli` | The terminal half — `list`, `extract`, `cat`, their arguments, their output and their exit codes. It reads the archive through `arch` exactly as the window does, and it opens no window: the dispatch returns before `main` asks `eframe` for anything, so a subcommand on a machine with no compositor is an ordinary program reading a file. It touches nothing in `ui`, deliberately, because that is the way the previous sentence stops being true by accident. |
 | `theme` | The Aubergine palette, the fonts, and nothing configurable. |
+| `secret` | The password buffer, and the only thing in the program that holds one. It overwrites its bytes on drop through `write_volatile` behind a compiler fence, so the optimiser cannot decide the wipe is dead; it refuses to print itself; and the one copy it cannot follow — the NUL-terminated string libarchive keeps for the reader's lifetime — is written down in the module rather than papered over. |
+| `util` | The hand-written helpers §2 refuses a crate for: the CRC32 table and its streaming form, byte and ratio formatting, the hex view's row arithmetic, the mode string, a civil date from a unix timestamp, and the path normalisation every stored name passes through before it is shown. Nothing here may grow a dependency. |
 
 Threading: the UI thread and one worker. The worker opens, lists, extracts, and rebuilds;
 it reports progress over a channel and honours a cancellation flag. egui runs in reactive
