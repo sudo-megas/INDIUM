@@ -273,6 +273,7 @@ fn row_body(
     label: &str,
     key: &str,
     ink: egui::Color32,
+    dim: egui::Color32,
     tag: Option<&str>,
 ) {
     ui.style_mut().interaction.selectable_labels = false;
@@ -297,14 +298,14 @@ fn row_body(
                     egui::RichText::new(t)
                         .size(12.0)
                         .family(theme::MONO)
-                        .color(theme::TEXT_MUTED),
+                        .color(dim),
                 );
             } else {
                 ui.label(
                     egui::RichText::new(key)
                         .family(theme::MONO)
                         .size(13.0)
-                        .color(theme::TEXT_MUTED),
+                        .color(dim),
                 );
             }
         });
@@ -330,7 +331,15 @@ fn row(
             .inner_margin(ROW_PAD)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                row_body(ui, icon, label, key, theme::TEXT_MUTED, tag);
+                row_body(
+                    ui,
+                    icon,
+                    label,
+                    key,
+                    theme::TEXT_MUTED,
+                    theme::TEXT_MUTED,
+                    tag,
+                );
             })
             .response;
     }
@@ -346,6 +355,16 @@ fn row(
         } else {
             theme::TEXT_SECONDARY
         };
-        row_body(ui, icon, label, key, ink, tag);
+        // The tag and the key hint are the row's quiet half, and on an active row the ground
+        // under them is Aubergine, where TEXT_MUTED measures 3.30:1 — under AA, and nothing
+        // measured it until P18 because AUBERGINE was not in `GROUNDS`. One tier up is 5.01:1
+        // and still reads as the quiet half. The resting row keeps TEXT_MUTED at 4.67:1 or
+        // better, so the ladder is unchanged where it was already legible.
+        let dim = if active {
+            theme::TEXT_SECONDARY
+        } else {
+            theme::TEXT_MUTED
+        };
+        row_body(ui, icon, label, key, ink, dim, tag);
     })
 }

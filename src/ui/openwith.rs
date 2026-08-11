@@ -129,6 +129,13 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                         // `Enter` would open. The default application keeps its own chip;
                         // being the default and being under the cursor are different facts.
                         let on_cursor = i == app.openwith_cursor;
+                        // Under the cursor the ground is Aubergine, where TEXT_MUTED measures
+                        // 3.30:1 — under AA, and unmeasured until P18. One tier up is 5.01:1.
+                        let dim = if on_cursor {
+                            theme::TEXT_SECONDARY
+                        } else {
+                            theme::TEXT_MUTED
+                        };
                         let r = theme::row(ui, on_cursor, egui::Margin::symmetric(8, 5), |ui| {
                             ui.horizontal(|ui| {
                                 ui.label(egui::RichText::new(&c.app.name).color(theme::TEXT));
@@ -141,11 +148,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                                     );
                                 }
                                 if c.app.terminal {
-                                    ui.label(
-                                        egui::RichText::new("terminal")
-                                            .size(12.0)
-                                            .color(theme::TEXT_MUTED),
-                                    );
+                                    ui.label(egui::RichText::new("terminal").size(12.0).color(dim));
                                 }
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
@@ -154,7 +157,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                                             egui::RichText::new(&c.app.id)
                                                 .size(12.0)
                                                 .family(theme::MONO)
-                                                .color(theme::TEXT_MUTED),
+                                                .color(dim),
                                         );
                                     },
                                 );

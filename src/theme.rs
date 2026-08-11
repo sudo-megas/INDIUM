@@ -1056,19 +1056,74 @@ mod tests {
     }
 
     #[test]
-    fn text_is_legible_on_every_ground() {
-        for (name, g) in GROUNDS {
-            assert!(
-                contrast(TEXT, g) >= 7.0,
-                "TEXT on {name} is {:.2}:1",
-                contrast(TEXT, g)
-            );
-            assert!(
-                contrast(TEXT_MUTED, g) >= 4.5,
-                "TEXT_MUTED on {name} is {:.2}:1",
-                contrast(TEXT_MUTED, g)
-            );
+    fn every_ink_is_legible_on_every_ground_it_is_allowed_on() {
+        // AUBERGINE is `selection.bg_fill` and `widgets.hovered.bg_fill`: it is the ground of
+        // every row a person has just selected or is pointing at, and it was not in GROUNDS,
+        // so nothing measured any ink on it. `a_rule_can_be_seen` below chains it in by hand
+        // and calls it "the lightest ground any line in this program meets" — the file knew.
+        let grounds: Vec<(&str, Color32)> = GROUNDS
+            .iter()
+            .copied()
+            .chain([("AUBERGINE", AUBERGINE), ("AUBERGINE_LIT", AUBERGINE_LIT)])
+            .collect();
+        let inks = [
+            ("TEXT", TEXT),
+            ("TEXT_SECONDARY", TEXT_SECONDARY),
+            ("TEXT_MUTED", TEXT_MUTED),
+        ];
+
+        // Pairs the program must never paint. AUBERGINE_LIT is a control being held down —
+        // CORE §6, "alive only for as long as a control is held" — and holding it to the same
+        // floor means the ink has to follow the press, which needs the `Response` inside
+        // `theme::row`'s closure and all seven of its callers. Excluded deliberately, not
+        // overlooked. TEXT_MUTED on AUBERGINE was painted in five places until P18; the rows
+        // that persist in that state now step one tier up, and the pair stays listed here
+        // because the palette still permits it and no test can see a call site.
+        //
+        // **What P18 did not reach, and it is the same obstacle:** `theme::row` gives
+        // `widgets.hovered.bg_fill` the same Aubergine, so a row merely under the pointer has
+        // the ground too — and in an immediate-mode frame the row is drawn before its own
+        // `Response` exists, so a call site cannot know it is hovered in time to choose an
+        // ink. What is fixed is every state that *persists*: active, focused, selected, on the
+        // cursor. A hover is transient and still paints the quiet half at 3.30:1.
+        const FORBIDDEN: [(&str, &str); 3] = [
+            ("TEXT_MUTED", "AUBERGINE"),
+            ("TEXT_MUTED", "AUBERGINE_LIT"),
+            ("TEXT_SECONDARY", "AUBERGINE_LIT"),
+        ];
+
+        for (gn, g) in &grounds {
+            let resting = GROUNDS.iter().any(|(n, _)| n == gn);
+            for (inn, ink) in inks {
+                // TEXT is the subject of a line and is held higher than AA on the grounds a
+                // window rests at; on a lit row it only has to be read.
+                let floor = if inn == "TEXT" && resting { 7.0 } else { 4.5 };
+                let seen = contrast(ink, *g);
+                let forbidden = FORBIDDEN.contains(&(inn, gn));
+                if forbidden {
+                    // The list is checked in both directions so it cannot rot. If a palette
+                    // change ever made one of these legible, this fires and says to take it
+                    // off — an exclusion nobody rechecks is how the original hole was dug.
+                    assert!(
+                        seen < floor,
+                        "{inn} on {gn} measures {seen:.2}:1 and clears {floor:.1} — it is no \
+                         longer forbidden, so take it off the list"
+                    );
+                } else {
+                    assert!(
+                        seen >= floor,
+                        "{inn} on {gn} is {seen:.2}:1, under the {floor:.1} this ground asks for"
+                    );
+                }
+            }
         }
+
+        // Measured minima, so the numbers are in the record and not only in the floors:
+        // TEXT 11.46, TEXT_SECONDARY 7.08, TEXT_MUTED 4.67 — all three on CONTROL, the
+        // lightest of the six. On AUBERGINE: 8.12, 5.01, 3.30. On AUBERGINE_LIT: 6.48, 4.00,
+        // 2.64. TEXT_MUTED cannot reach 4.5 on AUBERGINE and stay muted: it would have to be
+        // about #B3B3B1, which is TEXT_SECONDARY in all but name, and the ink ladder would
+        // collapse from three tiers to two. So the call sites moved, not the palette.
     }
 
     /// "clicks doesnt feel anything" — the four states must actually differ.
@@ -1126,6 +1181,13 @@ mod tests {
                 contrast(TEXT, g) >= 7.0,
                 "TEXT on {name} is {:.2}:1",
                 contrast(TEXT, g)
+            );
+            // The middle tier, checked here from P18. It was the omission one test over as
+            // well, and it passes comfortably — 7.82 to 9.67 across the three bands.
+            assert!(
+                contrast(TEXT_SECONDARY, g) >= 4.5,
+                "TEXT_SECONDARY on {name} is {:.2}:1",
+                contrast(TEXT_SECONDARY, g)
             );
             assert!(
                 contrast(TEXT_MUTED, g) >= 4.5,

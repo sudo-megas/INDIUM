@@ -264,11 +264,17 @@ fn method_row(ui: &mut egui::Ui, app: &mut Indium, method: Method) {
                         .color(theme::TEXT),
                 );
                 if method == Method::Lzma2 {
+                    // The selected row's ground is Aubergine, where TEXT_MUTED measures
+                    // 3.30:1 — under AA, and unmeasured until P18. One tier up is 5.01:1.
                     ui.label(
                         egui::RichText::new("AES-256")
                             .family(theme::MONO)
                             .size(11.0)
-                            .color(theme::TEXT_MUTED),
+                            .color(if selected {
+                                theme::TEXT_SECONDARY
+                            } else {
+                                theme::TEXT_MUTED
+                            }),
                     );
                 }
             });

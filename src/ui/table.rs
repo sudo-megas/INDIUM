@@ -492,6 +492,15 @@ fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
                     // registered beneath it, so clicking a filename would do nothing. See
                     // `sidebar::row_body` for the mechanism.
                     ui.style_mut().interaction.selectable_labels = false;
+                    // On the focused row the ground is Aubergine, where TEXT_MUTED measures
+                    // 3.30:1 — under AA, and unmeasured until P18 because AUBERGINE was not
+                    // in theme's `GROUNDS`. One tier up is 5.01:1 and still reads as the
+                    // quiet half; a row that is not focused keeps the muted ink it always had.
+                    let dim = if focused {
+                        theme::TEXT_SECONDARY
+                    } else {
+                        theme::TEXT_MUTED
+                    };
                     ui.vertical(|ui| {
                         let name = std::path::Path::new(path)
                             .file_name()
@@ -500,28 +509,24 @@ fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
                         ui.label(egui::RichText::new(name).color(if exists {
                             theme::TEXT
                         } else {
-                            theme::TEXT_MUTED
+                            dim
                         }));
                         ui.horizontal(|ui| {
                             ui.label(
                                 egui::RichText::new(path)
                                     .family(theme::MONO)
                                     .size(13.0)
-                                    .color(theme::TEXT_MUTED),
+                                    .color(dim),
                             );
                             if !exists {
-                                ui.label(
-                                    egui::RichText::new("missing")
-                                        .size(12.0)
-                                        .color(theme::TEXT_MUTED),
-                                );
+                                ui.label(egui::RichText::new("missing").size(12.0).color(dim));
                             }
                         });
                         ui.label(
                             egui::RichText::new(util::format_timestamp(*opened))
                                 .family(theme::MONO)
                                 .size(12.0)
-                                .color(theme::TEXT_MUTED),
+                                .color(dim),
                         );
                     });
                 });
@@ -606,27 +611,30 @@ fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
                     // there read exactly like one that was. Same word, same dimming, same
                     // rule — the row stays until the user's own hand removes it.
                     let exists = std::path::Path::new(&b.path).is_dir();
+                    // The focused row's ground is Aubergine; see the recents list above for
+                    // the measurement and the reason nothing caught it until P18.
+                    let dim = if focused {
+                        theme::TEXT_SECONDARY
+                    } else {
+                        theme::TEXT_MUTED
+                    };
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             ui.horizontal(|ui| {
                                 ui.label(egui::RichText::new(&b.name).color(if exists {
                                     theme::TEXT
                                 } else {
-                                    theme::TEXT_MUTED
+                                    dim
                                 }));
                                 if !exists {
-                                    ui.label(
-                                        egui::RichText::new("missing")
-                                            .size(12.0)
-                                            .color(theme::TEXT_MUTED),
-                                    );
+                                    ui.label(egui::RichText::new("missing").size(12.0).color(dim));
                                 }
                             });
                             ui.label(
                                 egui::RichText::new(&b.path)
                                     .family(theme::MONO)
                                     .size(13.0)
-                                    .color(theme::TEXT_MUTED),
+                                    .color(dim),
                             );
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
