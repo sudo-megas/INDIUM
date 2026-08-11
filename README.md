@@ -1,16 +1,20 @@
-<img width="96" align="left" hspace="12" vspace="4" alt="" src="build/icons/indium-1024.png" />
+<p align="center" width="100%">
+    <img width="33%" src="build/icons/indium-512.png">
+</p>
 
 <h1>INDIUM</h1>
 
 <p>
+  <img alt="Display Server"     src="https://img.shields.io/badge/Display Server-Wayland-E95420?style=for-the-badge&logo=linux&logoColor=white">
   <img alt="Version"      src="https://img.shields.io/badge/version-1.2.0-E95420?style=for-the-badge">
   <img alt="Release date" src="https://img.shields.io/badge/released-2026--08--11-E95420?style=for-the-badge">
   <img alt="Licence"      src="https://img.shields.io/badge/licence-GPL--3.0--only-772953?style=for-the-badge">
 </p>
 
 <p>
-  <img alt="Debian package" src="https://img.shields.io/badge/Debian%20package-7.2%20MB-772953?style=for-the-badge&logo=debian&logoColor=white">
-  <img alt="Platform"       src="https://img.shields.io/badge/Linux-Wayland-E95420?style=for-the-badge&logo=linux&logoColor=white">
+  <img alt="Arch Linux package" src="https://img.shields.io/badge/Arch%20Linux-9.81%20MB-1793D1?style=for-the-badge&logo=archlinux&logoColor=white">
+  <img alt="Debian package" src="https://img.shields.io/badge/Debian%20-6.91%20MB-772953?style=for-the-badge&logo=debian&logoColor=white">
+  
 </p>
 
 *Archive manager for Linux on Wayland* · **The metadata is the main event**
