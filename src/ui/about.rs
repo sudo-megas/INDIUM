@@ -10,12 +10,20 @@ use super::{Indium, Popup};
 use crate::theme;
 
 const SOURCE: &str = "https://github.com/sudo-megas/INDIUM";
-/// Updated by the maker at each tag, by hand, in the same commit as the version bump.
+/// Typed once, and read back out of `changelog.Debian`'s newest stanza by
+/// [`the_date_about_prints_is_the_one_the_changelog_stamped`], so it cannot drift: the
+/// release that moves the changelog and forgets this line fails the build instead of
+/// shipping a date from a previous tag. **It was stale across three of them** — this popup
+/// printed `2026-08-10` beside a version reading `1.2.0`, because nothing in the repository
+/// named the constant and the comment that used to sit here said it was updated at each tag
+/// by hand, which the history flatly contradicts.
 ///
 /// Deliberately not a build-time timestamp: CORE §8 ships this as a package, and a binary
 /// that embeds the minute it was compiled cannot be built twice into the same bytes. A
 /// constant is deterministic and is exactly how `LICENCE` below is already embedded.
-const RELEASE_DATE: &str = "2026-08-10";
+///
+/// [`the_date_about_prints_is_the_one_the_changelog_stamped`]: tests::the_date_about_prints_is_the_one_the_changelog_stamped
+const RELEASE_DATE: &str = "2026-08-11";
 const LICENCE: &str = include_str!("../../LICENSE");
 
 pub fn show(app: &mut Indium, ctx: &egui::Context) {
@@ -142,4 +150,114 @@ fn field(ui: &mut egui::Ui, label: &str, value: &str) {
             .color(theme::TEXT),
     );
     ui.end_row();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RELEASE_DATE;
+
+    /// The packaging changelog, which the release ritual writes a stanza into at every tag.
+    ///
+    /// Read here rather than in `build/`, and behind `#[cfg(test)]` so none of it reaches the
+    /// shipped binary — the same arrangement `keys.rs` uses for `CORE.md`.
+    const CHANGELOG: &str = include_str!("../../build/package/deb/changelog.Debian");
+
+    /// The newest stanza, and only that one.
+    ///
+    /// Stanzas begin at column 0 with `indium (`; a body bullet is indented. Splitting on the
+    /// *second* occurrence rather than scanning for a prefix means nothing further down the file
+    /// can ever be matched by accident — the version this asserts against is the top one or the
+    /// parse fails.
+    fn top_stanza() -> &'static str {
+        let rest = CHANGELOG
+            .strip_prefix("indium (")
+            .expect("changelog.Debian begins with an `indium (` stanza");
+        match rest.split_once("\nindium (") {
+            Some((first, _)) => first,
+            None => rest,
+        }
+    }
+
+    /// `1.2.0-1` → `("1.2.0", "1")`.
+    fn top_version() -> (&'static str, &'static str) {
+        let full = top_stanza()
+            .split_once(')')
+            .expect("the top stanza's version is parenthesised")
+            .0;
+        full.rsplit_once('-')
+            .unwrap_or_else(|| panic!("the top stanza's version {full:?} carries no -revision"))
+    }
+
+    /// CORE §4.6 asks About for "the version and date". Both come from the stanza the release
+    /// ritual writes, so the two fields cannot disagree with the package they ship inside.
+    ///
+    /// It was stale across three tags before P18 read it: About said 2026-08-10 beside a version
+    /// that read 1.2.0, and nothing in the repository named the constant at all.
+    #[test]
+    fn the_date_about_prints_is_the_one_the_changelog_stamped() {
+        let trailer = top_stanza()
+            .lines()
+            .find(|l| l.starts_with(" -- "))
+            .expect("the top stanza ends with a ` -- maintainer  date` trailer");
+
+        // Debian policy separates the maintainer from the date by exactly two spaces, which is
+        // the only reliable split: the address contains one space, the date contains four.
+        let stamp = trailer
+            .rsplit_once("  ")
+            .expect("the trailer separates maintainer and date by two spaces")
+            .1;
+
+        let parts: Vec<&str> = stamp.split_whitespace().collect();
+        assert!(
+            parts.len() == 6,
+            "the trailer's date {stamp:?} is not `Day, DD Mon YYYY HH:MM:SS +ZZZZ`"
+        );
+        let (day, month, year) = (parts[1], parts[2], parts[3]);
+
+        // A month this table does not know is a FAIL and never a skip: it means the trailer has
+        // stopped being the shape this test reads, which is exactly when it must speak up.
+        const MONTHS: [(&str, &str); 12] = [
+            ("Jan", "01"),
+            ("Feb", "02"),
+            ("Mar", "03"),
+            ("Apr", "04"),
+            ("May", "05"),
+            ("Jun", "06"),
+            ("Jul", "07"),
+            ("Aug", "08"),
+            ("Sep", "09"),
+            ("Oct", "10"),
+            ("Nov", "11"),
+            ("Dec", "12"),
+        ];
+        let num = MONTHS
+            .iter()
+            .find(|(name, _)| *name == month)
+            .unwrap_or_else(|| {
+                panic!("the changelog names a month this test does not know: {month:?}")
+            })
+            .1;
+
+        let want = format!("{year}-{num}-{day:0>2}");
+        assert_eq!(
+            RELEASE_DATE, want,
+            "About prints {RELEASE_DATE}, and the changelog's newest stanza is stamped {want}"
+        );
+    }
+
+    /// The other half of the same grid. `verify.sh` asserts this at package time; asserting it
+    /// here puts it in front of every push, which is the lesson P15 and P17 both paid for.
+    #[test]
+    fn the_version_about_prints_is_the_one_the_changelog_declares() {
+        let (upstream, revision) = top_version();
+        assert_eq!(
+            env!("CARGO_PKG_VERSION"),
+            upstream,
+            "About prints the Cargo version and the changelog's newest stanza declares {upstream}"
+        );
+        assert!(
+            !revision.is_empty() && revision.bytes().all(|b| b.is_ascii_digit()),
+            "the top stanza's package revision {revision:?} is not a number"
+        );
+    }
 }
