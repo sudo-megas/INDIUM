@@ -58,8 +58,10 @@ is three subcommands, one string option and two flags, which is forty lines of `
 beside the thirty `main` already hand-rolls. Its sentence would read *"parses six flags"*,
 and that is not a sentence — while the derive path brings `syn`, `quote`, `proc-macro2`
 and a colour-negotiation stack to a program that admits one palette and no theme setting.
-The refusal carries a date for the same reason §6's seven do: so it is not reproposed as a
-discovery.
+The refusal carries a date for the same reason §6's dated refusals do: so it is not
+reproposed as a discovery. The count is deliberately not repeated here — a number in one
+section describing a list in another is a sentence that goes stale the next time the list
+grows, and this one did.
 
 ### System libraries
 
@@ -100,8 +102,8 @@ One binary crate, `indium`, with modules. No workspace, no premature abstraction
 | `platform` | The Linux specifics: clipboard, `.desktop` parsing for Open With, default-app registration, XDG paths, the second window — on this platform a window is a process, and opening one is a Linux specific like the rest — and handing a directory to the desktop's file manager, which is the portal's job for the same reason the picker is. |
 | `cli` | The terminal half — `list`, `extract`, `cat`, their arguments, their output and their exit codes. It reads the archive through `arch` exactly as the window does, and it opens no window: the dispatch returns before `main` asks `eframe` for anything, so a subcommand on a machine with no compositor is an ordinary program reading a file. It touches nothing in `ui`, deliberately, because that is the way the previous sentence stops being true by accident. |
 | `theme` | The Aubergine palette, the fonts, and nothing configurable. |
-| `secret` | The password buffer, and the only thing in the program that holds one. It overwrites its bytes on drop through `write_volatile` behind a compiler fence, so the optimiser cannot decide the wipe is dead; it refuses to print itself; and the one copy it cannot follow — the NUL-terminated string libarchive keeps for the reader's lifetime — is written down in the module rather than papered over. |
-| `util` | The hand-written helpers §2 refuses a crate for: the CRC32 table and its streaming form, byte and ratio formatting, the hex view's row arithmetic, the mode string, a civil date from a unix timestamp, and the path normalisation every stored name passes through before it is shown. Nothing here may grow a dependency. |
+| `secret` | The password buffer: the only thing in the program that *carries* one, because every path that takes a password takes a `Secret`. It overwrites its bytes on drop through `write_volatile` behind a compiler fence, so the optimiser cannot decide the wipe is dead; it refuses to print itself; and the two copies it cannot follow are written down rather than papered over — the NUL-terminated string libarchive keeps for the reader's lifetime, and the plain `String` the prompt's text field must type into before the value can become a `Secret` at all, which is cleared on submit and on cancel but not overwritten. |
+| `util` | The hand-written helpers §2 refuses a crate for: the CRC32 table and its streaming form, byte and ratio formatting, the hex view's row arithmetic, the mode string, a civil date from a unix timestamp, the path normalisation every stored name passes through before it is shown, the middle elision §4 requires of a path, and the byte sniffer the Inspector decides content with — which is the classifier §6 means above when it refuses a glyph that would decide by extension instead. Nothing here may grow a dependency. |
 
 Threading: the UI thread and one worker. The worker opens, lists, extracts, and rebuilds;
 it reports progress over a channel and honours a cancellation flag. egui runs in reactive
@@ -348,12 +350,14 @@ three `exact` columns, with no slack anywhere. Last, the only affordable classif
 ground that a PNG named `notes.txt` is a PNG. Putting a name-trusting glyph in the main table
 of *this* program is the contradiction that settles it.
 
-**Eight things this section has now refused, with a date on them.** A design round in P13 put
-each to the maker and each was declined, so they are written down rather than left to be
-proposed again: **no second typeface** — the sentence above is not a default, it is a decision;
+**Eight things this section has now refused, with a date on them.** The eighth is the
+entry-table icon ruled on immediately above, put to the maker at P18 after four rounds of
+standing nominated. The other seven a design round in P13 put to him, and each was declined,
+so they are written down rather than left to be proposed again: **no second typeface** — the sentence above is not a default, it is a decision;
 **no emoji** — they are colour bitmaps from another face and a fontconfig lookup INDIUM does not
 make, so they arrive as tofu or not at all; **no translucency, blur or OS material** — the
-grounds are opaque and there are six of them for a reason; **no motion beyond what this section
+grounds are opaque, the ladder's five and the popup's own three alike, and each is a flat
+colour for a reason; **no motion beyond what this section
 already permits** — progress moves, panels appear, a control answers the hand, nothing else,
 and in an immediate-mode window every animation is a frame the machine cannot idle through;
 **no sixth colour** — in particular no green for success, which is the outcome that needs the
@@ -373,10 +377,13 @@ not the version. The release workflow derives which of the two forms it will acc
 
 **The sequence begins at `v0.2`, and the hole below it is real.** `P1.md` asked for a
 `v0.1` in its done-when block and it was never cut — not here, not on origin — so P1
-shipped without one and the box is the only one in the ledger that was genuinely never
-done. This rule used to open by naming `v0.1` among the examples, which was the sole place
-in the project that asserted the tag existed; P18 stopped it doing that. The tag is **not**
-cut retroactively: P17's argument against a hole in the sequence was about a slot a future
+shipped without one and the box has stayed open ever since. It is not the only open box in
+the ledger, but it is the only one that cannot be closed by doing the work, for the reason
+below. This rule used to open by naming `v0.1` among its examples, and the road table
+carried it in P1's Tag column as though it had been cut; P18 stopped both. Two P-documents
+still speak of it as a release point that happened — `P6.md:368` and `P7.md:521` — and they
+are left standing, because a P-document records what its round believed and is annotated,
+never rewritten. The tag is **not** cut retroactively: P17's argument against a hole in the sequence was about a slot a future
 thing would never fill, and a tag dated two years after the work, with no artefacts to
 attach to it, would be a claim about the past rather than a repair to it.
 
@@ -384,7 +391,7 @@ attach to it, would be a claim about the past rather than a repair to it.
 
 | P | Ships | Tag |
 | --- | --- | --- |
-| P1 | Window skeleton, open/list/inspect/extract, fixtures and tests, palette and fonts | `v0.1` |
+| P1 | Window skeleton, open/list/inspect/extract, fixtures and tests, palette and fonts | — *(asked for, never cut)* |
 | P2 | Recent files, bookmarks, Settings panel (TOML), `Ctrl+F` filter, encrypted-read prompts | `v0.2` |
 | P3 | Clipboard copy-out, Open With picker, default-app registration | `v0.3` |
 | P4 | Staging engine, `W` popup, Apply rebuild, New Archive popup, 7z AES-256 | `v0.4` |
@@ -407,11 +414,13 @@ The P-table is a plan, not scripture; P-documents may split or merge steps, but 
 only moves *out* of v1.0 by the maker's decision recorded here.
 
 **The `1.0` line is a beta, and this is the condition for it stopping.** Every release
-from `v1.0.0-3` onward has said so in its own notes, in these words: *"the `1.0` line stays
-one until the design work it is named for has been in real hands."* That sentence lived in
-four GitHub release bodies and **in no file in this repository** until P18 wrote it here —
-which made the project's own next state change the one claim a reader of the source could
-not find. The design work it names is P12's and P13's, shipped at `v1.0.0-4`; the gate is a
+from `v1.0.0-4` onward has said so in its own notes, in these words: *"the `1.0` line stays
+one until the design work it is named for has been in real hands."* Four release bodies
+carry that sentence; `v1.0.0-3` announced the beta before it, in different words. `P15.md`
+quotes it and P16 and P17 paraphrase it in their closing steps, but until P18 wrote it here
+it appeared in **no governing document** — not CORE, not the README — so the project's own
+next state change was a condition a reader had to reconstruct from release prose and the
+rounds that happened to repeat it. The design work it names is P12's and P13's, shipped at `v1.0.0-4`; the gate is a
 testing round against a released build carrying it, and no such round has been run. **What
 "real hands" means is deliberately left undefined**: it is a decision the maker has not
 made, and recording the sentence is not the place to make it for him.
@@ -494,10 +503,9 @@ This list is authored by the maker, not derived. Items enter and leave only by h
 - No AppImage, Flatpak, or Snap — only `.pkg.tar.zst` and `.deb`.
 - No Windows support.
 - Passwords are never stored or remembered — typed per use, wiped after.
-- No signal handlers — not one, anywhere, and the first would be a decision rather than a
-  detail. The cost is named and accepted: `Ctrl-C` at the terminal password prompt skips the
-  restore-on-drop guard and leaves the echo off until `stty sane`. P17 found it, P18 refused
-  the fix.
+- No signal handlers — not one, anywhere; refused at P18 rather than left undecided. *The
+  cost is accepted and named*: `Ctrl-C` at the terminal password prompt skips the
+  restore-on-drop guard and leaves the echo off until `stty sane`.
 - No X11 — Wayland only.
 - Allowed, for the record: a small Settings panel; a Recent Files list; running as root.
 - No commits from any account other than **sudo-megas**; no AI attribution anywhere.
