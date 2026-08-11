@@ -1,3 +1,27 @@
+indium (1.2.0-3) unstable; urgency=medium
+
+  * The Debian package did not declare every library INDIUM needs. The program opens
+    four of its libraries by name at runtime rather than linking them, so no automatic
+    tool can find them and they are named by hand -- and the list they were named from
+    held three. libwayland-egl1 was missing from this package's dependencies from the
+    first .deb onward. It installs on any machine already running a Wayland session,
+    which is why nothing caught it; on one without that library it would install
+    cleanly and fail when the window opened. Two lists that must agree now have a test
+    saying so.
+  * A password INDIUM could not read was reported as the wrong password. A passphrase
+    typed at the terminal arrives as raw bytes, and one that is not valid text was
+    turned into no password at all, so 7z refused it and the message said "Wrong
+    password." Nothing had been tried against the archive and the password may have
+    been right. It now says so, and says it was never tried.
+  * The Inspector states a ratio for a single selected entry, as it already did for a
+    selection of several and for the whole archive.
+  * Corrections to what the program says about itself: the Settings panel has three
+    groups and the front page described two, omitting the one holding the button that
+    clears your recent files; the Arch build instructions left out git; and the
+    long listing prints a column its own help did not name.
+
+ -- sudo-megas <sudo-megas@users.noreply.github.com>  Wed, 12 Aug 2026 02:02:22 +0300
+
 indium (1.2.0-2) unstable; urgency=medium
 
   * The About window printed the wrong date. It has said 2026-08-10 since version
