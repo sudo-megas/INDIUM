@@ -155,6 +155,22 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                     let focused = i == app.cursor;
                     tr.set_selected(selected);
 
+                    // The quiet ink steps up a tier on a selected row, for the same reason it
+                    // does in the sidebar and the two lists — except that this table's
+                    // selected ground is not Aubergine. `set_selected` paints
+                    // `selection.bg_fill`, and the scope above overrides only the *hover*
+                    // fill, so the ground here is the global orange wash — `#712422` once
+                    // mixed. `TEXT_MUTED` on it measures 3.72:1, under AA, where
+                    // `TEXT_SECONDARY` measures 5.64:1.
+                    // Found by the sweep, after the five Aubergine sites were already fixed —
+                    // the ground nobody had looked at, because the file that names the
+                    // selected ground names the wrong one.
+                    let dim = if selected {
+                        theme::TEXT_SECONDARY
+                    } else {
+                        theme::TEXT_MUTED
+                    };
+
                     // Copied out rather than borrowed: the Name cell needs `&mut` access to
                     // the rename field, and a live `&Entry` would hold `app` immutably
                     // across it.
@@ -218,11 +234,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                             ui.add(egui::Label::new(text).truncate());
                         }
                         if entry.as_ref().map(|e| e.0).unwrap_or(false) {
-                            ui.label(
-                                egui::RichText::new("enc")
-                                    .size(12.0)
-                                    .color(theme::TEXT_MUTED),
-                            );
+                            ui.label(egui::RichText::new("enc").size(12.0).color(dim));
                         }
                     });
 
@@ -244,7 +256,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                             Some(p) => util::format_bytes(p),
                             None => "—".to_string(),
                         };
-                        mono_right(ui, &text, theme::TEXT_MUTED);
+                        mono_right(ui, &text, dim);
                     });
 
                     tr.col(|ui| {
@@ -256,7 +268,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                             egui::RichText::new(text)
                                 .family(theme::MONO)
                                 .size(13.0)
-                                .color(theme::TEXT_MUTED),
+                                .color(dim),
                         );
                     });
 

@@ -4,7 +4,12 @@
 //! anywhere, value carried as `Secret` end to end."
 //!
 //! CORE §9: "Passwords are never stored or remembered — typed per use, wiped after."
-//! Nothing in this file writes the value anywhere but into a `Secret`.
+//! Nothing in this file writes the value anywhere but into a `Secret` — with one copy it
+//! cannot avoid. An egui text field types into a `String`, so `Indium::password_input` and
+//! `password_confirm` hold the characters themselves until submit or cancel clears them, and
+//! `String::clear` sets the length to zero and leaves the bytes in the allocation where
+//! `Secret`'s `write_volatile` would have overwritten them. Written down rather than papered
+//! over, and recorded in CORE §3's `secret` row as the second copy the type cannot follow.
 
 use eframe::egui;
 

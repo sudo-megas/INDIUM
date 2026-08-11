@@ -1,8 +1,9 @@
 //! The write path — P4 §7.
 //!
-//! These tests drive `arch::Writer` and the `tasks` fold against real archives on a real
-//! filesystem, and they exist to prove one sentence from CORE §3: *"The original is never
-//! touched until the replacement is proven."*
+//! These tests drive both write backends — `arch::Writer` and, for 7z, `sevenz::Writer` —
+//! and the `tasks` fold against real archives on a real filesystem, and they exist to prove
+//! one sentence from CORE §3: *"The original is never touched until the replacement is
+//! proven."* The routing is `write_payload`'s, which is `tasks`' own two-arm match.
 //!
 //! Copyright © sudo-megas. GPL-3.0-only.
 
@@ -114,8 +115,8 @@ fn payload() -> Vec<(Meta, Option<Vec<u8>>)> {
     ]
 }
 
-/// Write the payload into `path` under `recipe`, through the real `Sink`.
-/// Write the standard payload through whichever backend the recipe's container names.
+/// Write the standard payload into `path` through whichever backend the recipe's container
+/// names, using the real `Sink`.
 ///
 /// It reached `arch::Writer` unconditionally until P18, which is why every test built on it
 /// silently excluded 7z — the one writable container libarchive does not handle. The routing

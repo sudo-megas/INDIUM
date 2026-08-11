@@ -11,7 +11,7 @@ use crate::theme;
 
 const SOURCE: &str = "https://github.com/sudo-megas/INDIUM";
 /// Typed once, and read back out of `changelog.Debian`'s newest stanza by
-/// [`the_date_about_prints_is_the_one_the_changelog_stamped`], so it cannot drift: the
+/// `the_date_about_prints_is_the_one_the_changelog_stamped`, so it cannot drift: the
 /// release that moves the changelog and forgets this line fails the build instead of
 /// shipping a date from a previous tag. **It was stale across three of them** — this popup
 /// printed `2026-08-10` beside a version reading `1.2.0`, because nothing in the repository
@@ -22,7 +22,9 @@ const SOURCE: &str = "https://github.com/sudo-megas/INDIUM";
 /// that embeds the minute it was compiled cannot be built twice into the same bytes. A
 /// constant is deterministic and is exactly how `LICENCE` below is already embedded.
 ///
-/// [`the_date_about_prints_is_the_one_the_changelog_stamped`]: tests::the_date_about_prints_is_the_one_the_changelog_stamped
+/// The test is named in prose rather than linked: it lives in this file's `#[cfg(test)]`
+/// module, which `cargo doc` does not compile, so an intra-doc link to it resolves to
+/// nothing the first time a docs job is added.
 const RELEASE_DATE: &str = "2026-08-11";
 const LICENCE: &str = include_str!("../../LICENSE");
 
@@ -202,7 +204,11 @@ mod tests {
 
         // Debian policy separates the maintainer from the date by exactly two spaces, which is
         // the only reliable split: the address contains one space, the date contains four.
+        // Trailing whitespace is stripped first — `rsplit_once` takes the *last* double space,
+        // so two spaces left at the end of the line would otherwise hand back an empty date and
+        // blame the format for what is a stray keystroke.
         let stamp = trailer
+            .trim_end()
             .rsplit_once("  ")
             .expect("the trailer separates maintainer and date by two spaces")
             .1;

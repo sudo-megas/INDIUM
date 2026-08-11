@@ -1852,11 +1852,22 @@ mod tests {
             .1;
         let rows: Vec<(String, String)> = after
             .lines()
+            // Bounded at the next heading first. Without it, deleting §5's table walks the
+            // parse into §6's and reports a mismatch about §5 having read something else
+            // entirely — the "did not parse" guard below would never fire for the case it is
+            // worded for.
+            .take_while(|l| !l.starts_with('#'))
             .skip_while(|l| !l.starts_with('|'))
             .take_while(|l| l.starts_with('|'))
-            .filter(|l| !l.contains("---"))
+            // Not `contains("---")`: a re-centred column writes `| :-: |`, which has no run
+            // of three and would be parsed as a row.
+            .filter(|l| !l.chars().all(|c| matches!(c, '|' | '-' | ':' | ' ')))
             .map(|l| {
                 let cells: Vec<&str> = l.trim().trim_matches('|').split('|').collect();
+                assert!(
+                    cells.len() >= 2,
+                    "CORE §5's verdict table has a row with fewer than two cells: {l:?}"
+                );
                 // CORE names two of these by container *and* codec — "7z / LZMA2", "zip /
                 // Deflate" — where `label()` gives only the codec. A cell without a slash is
                 // itself, so the six single-token rows pass through untouched.

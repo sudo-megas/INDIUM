@@ -54,10 +54,14 @@ mod tests {
             .map(|e| e.expect("a readable entry in src/").path())
             .filter_map(|p| {
                 let stem = p.file_stem()?.to_str()?.to_string();
-                // A directory is a module; a `.rs` file is a module unless it is one of the
-                // two crate roots, which declare rather than are declared.
-                let is_module = p.is_dir()
+                // A directory is a module only if it holds a `mod.rs`. Cargo gives `src/bin/`
+                // a meaning of its own and tools write directories here too, and neither is
+                // something CORE §3 should have a row for. A `.rs` file is a module unless it
+                // is one of the two crate roots, which declare rather than are declared, or a
+                // dotfile — an editor's lock file is `.#theme.rs`, whose stem ends in `.rs`.
+                let is_module = (p.is_dir() && p.join("mod.rs").is_file())
                     || (p.extension().is_some_and(|e| e == "rs")
+                        && !stem.starts_with('.')
                         && stem != "lib"
                         && stem != "main");
                 is_module.then_some(stem)
@@ -75,9 +79,16 @@ mod tests {
             .1;
         let tabled: BTreeSet<String> = after
             .lines()
+            // Bounded at the next heading before anything else. Without it, bullet-ising §3's
+            // table walks the parse into §4's keyboard table and the guard below never fires:
+            // it finds fifteen non-empty "modules" named `Key`, `Enter` / `Backspace` and so
+            // on, and reports the wrong thing confidently.
+            .take_while(|l| !l.starts_with('#'))
             .skip_while(|l| !l.starts_with('|'))
             .take_while(|l| l.starts_with('|'))
-            .filter(|l| !l.contains("---"))
+            // Not `contains("---")`: a re-centred column writes `| :-: |`, which has no run
+            // of three and would be parsed as a module named `:-:`.
+            .filter(|l| !l.chars().all(|c| matches!(c, '|' | '-' | ':' | ' ')))
             .filter_map(|l| {
                 let cell = l.trim().trim_matches('|').split('|').next()?;
                 let name = cell.trim().trim_matches('`').to_string();

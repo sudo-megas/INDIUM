@@ -10,7 +10,7 @@
 //! packaging is verified by the thing being packaged, which is the cheapest honest test
 //! available and the only one that needs no dependency at all.
 //!
-//! **Every test here is `#[ignore]`d, save the one exception named below.** The artefacts
+//! **Every test here is `#[ignore]`d, save the two exceptions named below.** The artefacts
 //! do not exist during an ordinary
 //! `cargo test` — they are made by a release, not by a build — and a test that silently
 //! passes when its subject is absent is worse than no test. The precedent is
@@ -695,14 +695,13 @@ fn the_pkgbuild_and_cargo_toml_agree_about_the_version() {
          release.yml derives the tag it accepts from both"
     );
 
-    let pkgrel = pkgbuild
-        .lines()
-        .find_map(|l| l.strip_prefix("pkgrel="))
-        .map(str::trim)
-        .expect("the PKGBUILD has no `pkgrel=` line");
+    // Through `pkgrel()`, which the artefact paths above already read the number with. A
+    // second inline copy of the same three lines is the shape this round exists to remove,
+    // and it would be a copy that cannot disagree in value but can in strictness.
+    let rel = pkgrel();
     assert!(
-        !pkgrel.is_empty() && pkgrel.bytes().all(|b| b.is_ascii_digit()),
-        "pkgrel is {pkgrel:?}, which release.yml cannot compare against 1"
+        !rel.is_empty() && rel.bytes().all(|b| b.is_ascii_digit()),
+        "pkgrel is {rel:?}, which release.yml cannot compare against 1"
     );
 
     // The version the binary will report, from the same source About prints.

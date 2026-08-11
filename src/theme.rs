@@ -19,8 +19,11 @@ use std::sync::Arc;
 // CORE §6 gives for `WINDOW` in the first place. It said *six* until P18, here and in §6
 // both: it was six when P7 built the ladder, and P9 moved the popup off it and out of
 // aubergine altogether without moving the number. `GROUNDS` below still holds six, and
-// correctly — it is the list of surfaces text is drawn on, which includes the popup, and
-// that is a different question from which grounds are on the ladder.
+// correctly — it is the list of *resting* surfaces, the ones a zone sits on when nothing is
+// happening to it, which includes the popup and is a different question from which grounds
+// are on the ladder. It is deliberately not every surface text is drawn on: a row under the
+// pointer or inside the selection is painted on a fill mixed at that moment from a colour
+// that is not a ground at all, and those are named where they are measured, not here.
 //
 // P7 measured the old three and found the arithmetic behind every complaint the maker made
 // about the look: adjacent grounds were **1.06–1.10:1** apart and the hairline between them
@@ -962,10 +965,17 @@ mod tests {
         ("CONTROL", CONTROL),
     ];
 
-    /// Composite a premultiplied translucent white over an opaque ground.
+    /// Composite a premultiplied translucent colour over an opaque ground.
     ///
     /// The palette's lines are translucent, so their declared byte value means nothing on
     /// its own — what a person sees is this, and it is what the figures are measured on.
+    /// The entry table's selected fill is the same problem in another colour: it is `ORANGE`
+    /// at 35%, and the ground a selected row's text sits on is only ever this mixture.
+    ///
+    /// The mixing is done in gamma space because that is where egui does it. Linear
+    /// compositing gives a slightly kinder figure — for the selected row, 4.42:1 against
+    /// 3.72:1 — so measuring here is the conservative of the two readings, not the flattering
+    /// one.
     fn composite(over: Color32, ground: Color32) -> Color32 {
         let a = over.a() as f32 / 255.0;
         let mix = |o: u8, g: u8| (o as f32 + g as f32 * (1.0 - a)).round() as u8;
@@ -1057,14 +1067,36 @@ mod tests {
 
     #[test]
     fn every_ink_is_legible_on_every_ground_it_is_allowed_on() {
-        // AUBERGINE is `selection.bg_fill` and `widgets.hovered.bg_fill`: it is the ground of
-        // every row a person has just selected or is pointing at, and it was not in GROUNDS,
-        // so nothing measured any ink on it. `a_rule_can_be_seen` below chains it in by hand
-        // and calls it "the lightest ground any line in this program meets" — the file knew.
+        // AUBERGINE is `widgets.hovered.bg_fill` everywhere, and `selection.bg_fill` only
+        // inside [`active_fill`]'s scope — the Inspector tabs, the Settings toggles and the
+        // New Archive presets. It is the ground of every row `theme::row` draws active or
+        // under the pointer, and it was not in GROUNDS, so nothing measured any ink on it.
+        // `a_rule_can_be_seen` below chains it in by hand and calls it "the lightest ground
+        // any line in this program meets" — the file knew.
+        //
+        // SELECTION_WASH is the ground the *entry table* selects onto, and it is a different
+        // colour: `ui/table.rs` overrides the hover fill in its scope and leaves
+        // `selection.bg_fill` global, which is `ORANGE` at 35% over the well beneath. It is
+        // mixed at paint time rather than named in the palette, which is precisely why no
+        // test reached it until P18's sweep did — the round fixed five Aubergine call sites
+        // believing that was the selected ground, and the largest selected surface in the
+        // program was somewhere else.
+        //
+        // egui composites this in gamma space, so that is what `over` reproduces. The linear
+        // reading is the kinder one — 9.14/5.64/3.72 here against 10.85/6.70/4.42 — and the
+        // verdict is the same in both: TEXT and TEXT_SECONDARY clear AA, TEXT_MUTED does not.
+        // The floor is asserted against the gamma figure because it is the lower of the two.
         let grounds: Vec<(&str, Color32)> = GROUNDS
             .iter()
             .copied()
-            .chain([("AUBERGINE", AUBERGINE), ("AUBERGINE_LIT", AUBERGINE_LIT)])
+            .chain([
+                ("AUBERGINE", AUBERGINE),
+                ("AUBERGINE_LIT", AUBERGINE_LIT),
+                (
+                    "SELECTION_WASH",
+                    composite(ORANGE.linear_multiply(0.35), WINDOW),
+                ),
+            ])
             .collect();
         let inks = [
             ("TEXT", TEXT),
@@ -1076,20 +1108,24 @@ mod tests {
         // CORE §6, "alive only for as long as a control is held" — and holding it to the same
         // floor means the ink has to follow the press, which needs the `Response` inside
         // `theme::row`'s closure and all seven of its callers. Excluded deliberately, not
-        // overlooked. TEXT_MUTED on AUBERGINE was painted in five places until P18; the rows
-        // that persist in that state now step one tier up, and the pair stays listed here
-        // because the palette still permits it and no test can see a call site.
+        // overlooked. TEXT_MUTED on AUBERGINE was painted in five places until P18, and on
+        // SELECTION_WASH in three more the sweep found afterwards; the rows that persist in
+        // either state now step one tier up, and both pairs stay listed here because the
+        // palette still permits them and no test can see a call site.
         //
         // **What P18 did not reach, and it is the same obstacle:** `theme::row` gives
         // `widgets.hovered.bg_fill` the same Aubergine, so a row merely under the pointer has
         // the ground too — and in an immediate-mode frame the row is drawn before its own
         // `Response` exists, so a call site cannot know it is hovered in time to choose an
-        // ink. What is fixed is every state that *persists*: active, focused, selected, on the
-        // cursor. A hover is transient and still paints the quiet half at 3.30:1.
-        const FORBIDDEN: [(&str, &str); 3] = [
+        // ink. What is fixed is every state that *persists* and that a call site can read
+        // before it draws: active, focused, selected, on the cursor. A hover is transient and
+        // still paints the quiet half at 3.30:1. The entry table's own hover is not affected
+        // — it overrides the fill to ROW_HOVER, where TEXT_MUTED measures 5.20:1.
+        const FORBIDDEN: [(&str, &str); 4] = [
             ("TEXT_MUTED", "AUBERGINE"),
             ("TEXT_MUTED", "AUBERGINE_LIT"),
             ("TEXT_SECONDARY", "AUBERGINE_LIT"),
+            ("TEXT_MUTED", "SELECTION_WASH"),
         ];
 
         for (gn, g) in &grounds {
@@ -1365,6 +1401,9 @@ mod tests {
     /// one-weight assumption showed up.
     #[test]
     fn every_icon_exists_in_both_faces() {
+        // Every test that consumes the generated list needs this floor: `icons! {}` with an
+        // empty body expands to an empty `ALL`, and a loop over nothing passes.
+        assert!(!icon::ALL.is_empty(), "icon::ALL is empty");
         for (name, glyph) in icon::ALL {
             let mut chars = glyph.chars();
             let cp = chars.next().expect("an icon cannot be the empty string") as u32;
@@ -1386,6 +1425,7 @@ mod tests {
     /// codepoint is a copy-paste slip that reads as a deliberate choice on screen.
     #[test]
     fn no_two_icons_are_the_same_glyph() {
+        assert!(!icon::ALL.is_empty(), "icon::ALL is empty");
         for (i, (na, a)) in icon::ALL.iter().enumerate() {
             for (nb, b) in &icon::ALL[i + 1..] {
                 assert_ne!(a, b, "icon::{na} and icon::{nb} are the same glyph");
@@ -1405,7 +1445,14 @@ mod tests {
     #[test]
     fn the_ground_ladder_is_the_one_core_six_lists() {
         let core = include_str!("../CORE.md");
-        let row = core
+        // Anchored to §6 rather than swept for across the whole document. `| Base |` is
+        // unique in CORE today, but the row is quoted in two P-documents already, and nothing
+        // stops a later section opening a table whose first cell reads the same.
+        let section = core
+            .split_once("## 6. LOOK")
+            .expect("CORE has a section 6 heading")
+            .1;
+        let row = section
             .lines()
             .find(|l| l.starts_with("| Base |"))
             .expect("CORE §6 has a Base row");
@@ -1486,6 +1533,7 @@ mod tests {
     #[test]
     fn every_icon_comes_from_the_font_awesome_range_and_no_second_one() {
         const FONT_AWESOME: std::ops::RangeInclusive<u32> = 0xF000..=0xF2E0;
+        assert!(!icon::ALL.is_empty(), "icon::ALL is empty");
         for (name, glyph) in icon::ALL {
             let cp = glyph
                 .chars()
@@ -1515,36 +1563,66 @@ mod tests {
     /// — is scanned.
     #[test]
     fn the_icon_registry_is_the_only_way_an_icon_is_defined() {
-        let source = include_str!("theme.rs");
+        // Line-based throughout, so a checkout with CRLF endings reads the same as this one:
+        // `include_str!` embeds a file's bytes verbatim — rustc's newline normalisation is for
+        // source literals, not included files — and nothing in the tree pins `eol=lf`. A byte
+        // scan for "\n}\n" would fail on such a checkout and blame the one thing that is
+        // certainly true, that `mod icon` is closed. `lines()` drops the `\r` and the question
+        // does not arise.
+        let lines: Vec<&str> = include_str!("theme.rs").lines().collect();
+        let open = lines
+            .iter()
+            .position(|l| l.trim_end() == "pub mod icon {")
+            .expect("theme.rs declares `pub mod icon`");
         // `mod icon` closes with a `}` in the first column; every brace inside it is indented.
-        let module = source
-            .split_once("pub mod icon {")
-            .expect("theme.rs declares `pub mod icon`")
-            .1
-            .split_once("\n}\n")
-            .expect("`mod icon` is closed")
-            .0;
+        let close = open
+            + 1
+            + lines[open + 1..]
+                .iter()
+                .position(|l| l.trim_end() == "}")
+                .expect("`mod icon` is closed");
+        let body = &lines[open + 1..close];
 
-        let start = module
-            .find("macro_rules! icons {")
+        let mac = body
+            .iter()
+            .position(|l| l.trim_start().starts_with("macro_rules! icons {"))
             .expect("`mod icon` defines the icons! macro");
-        let tail = &module[start..];
-        let end = start
-            + tail
-                .find("\n    }\n")
-                .expect("the icons! macro definition is closed")
-            + "\n    }\n".len();
-        let outside = format!("{}{}", &module[..start], &module[end..]);
+        let mac_end = mac
+            + 1
+            + body[mac + 1..]
+                .iter()
+                .position(|l| l.trim_end() == "    }")
+                .expect("the icons! macro definition is closed");
+
+        // What is scanned is the module minus the macro's own definition — whose body holds
+        // the literal text `pub const $name` and `pub const ALL`, so a naive search finds the
+        // machinery instead of a bypass — and minus every comment line. An icon's `///`, and
+        // the macro's own doc above it, are entitled to say "pub const"; prose about a
+        // declaration is not a declaration, and a test that cannot tell the two apart fails
+        // the next time someone documents the macro. What remains is the gap between the
+        // macro and its invocation, which is exactly where a stray constant would sit.
+        let code: Vec<&str> = body[..mac]
+            .iter()
+            .chain(&body[mac_end + 1..])
+            .copied()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect();
 
         assert!(
-            outside.contains("icons! {"),
+            code.iter().any(|l| l.contains("icons! {")),
             "the icons! invocation was cut away with the definition — this test would \
              otherwise pass by absence"
         );
-        assert!(
-            !outside.contains("pub const"),
-            "`mod icon` declares a `pub const` outside the icons! invocation; it would be \
-             drawn but checked by nothing, because both other tests only see what ALL names"
-        );
+        // Any public item, not merely a `pub const`: a `pub static`, or a `pub use` renaming
+        // one of the generated constants, would ship a glyph past `ALL` just as well, and the
+        // claim this test is named for is that the macro is the *only* way an icon is defined.
+        for l in &code {
+            assert!(
+                !l.trim_start().starts_with("pub "),
+                "`mod icon` declares {:?} outside the icons! invocation; it would be drawn but \
+                 checked by nothing, because every other icon test sees only what ALL names",
+                l.trim()
+            );
+        }
     }
 }
