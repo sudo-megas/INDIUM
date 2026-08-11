@@ -115,8 +115,20 @@ fn payload() -> Vec<(Meta, Option<Vec<u8>>)> {
 }
 
 /// Write the payload into `path` under `recipe`, through the real `Sink`.
+/// Write the standard payload through whichever backend the recipe's container names.
+///
+/// It reached `arch::Writer` unconditionally until P18, which is why every test built on it
+/// silently excluded 7z — the one writable container libarchive does not handle. The routing
+/// here is the same two-arm match `tasks` does at Apply, so a test that uses this exercises the
+/// backend the window would have used.
 fn write_payload(path: &Path, recipe: &Recipe) {
-    let mut writer = arch::Writer::create(path, recipe).expect("could not open the writer");
+    let mut writer: Box<dyn Sink> = match recipe.container() {
+        indium::tasks::Container::SevenZ => Box::new(
+            indium::sevenz::Writer::create(path, recipe, None)
+                .expect("could not open the 7z writer"),
+        ),
+        _ => Box::new(arch::Writer::create(path, recipe).expect("could not open the writer")),
+    };
     for (meta, data) in payload() {
         match data {
             Some(bytes) => {
@@ -236,6 +248,17 @@ fn a_zip_rebuild_loses_owner_names_as_the_table_says() {
 ///
 /// Every level in every method's own range must be accepted by libarchive. A range this
 /// file claims but libarchive rejects would otherwise surface as a mystery at Apply.
+///
+/// **Every** means every, since P18: this walked only `[start, end]` before, so zstd was
+/// checked at 1 and 22 and never at the twenty levels between them. The full sweep costs
+/// about six tenths of a second, and no new peak memory — level 22 was already one of the
+/// two ends, and it is the expensive one.
+///
+/// The six here are the methods libarchive is handed. **`Method::Lzma2` is deliberately
+/// absent**: it routes to `sevenz-rust2` and never reaches libarchive at all, so adding it
+/// would make this test's own name false. Its range is checked by
+/// `every_lzma2_level_the_slider_offers_builds_a_7z_that_reads_back` below, which is where
+/// that claim can be true.
 #[test]
 fn every_level_a_method_offers_is_one_libarchive_accepts() {
     let dir = TempDir::new("levels");
@@ -248,7 +271,7 @@ fn every_level_a_method_offers_is_one_libarchive_accepts() {
         Method::Deflate,
     ] {
         let range = method.levels().expect("these methods all take a level");
-        for level in [*range.start(), *range.end()] {
+        for level in range {
             let path = dir.join(&format!("lvl-{}-{level}", method.label()));
             let recipe = Recipe {
                 path: path.clone(),
@@ -267,6 +290,49 @@ fn every_level_a_method_offers_is_one_libarchive_accepts() {
                 method.label()
             );
         }
+    }
+}
+
+/// The other half of the same claim, for the one method the test above cannot make it about.
+///
+/// `Method::Lzma2` goes to `sevenz-rust2`, so "libarchive accepts it" is not a sentence that
+/// can be true of it — and until P18 that meant nothing anywhere checked LZMA2's advertised
+/// `0..=9` at all, while the slider offered every one of them.
+///
+/// **What this cannot prove, said plainly, because it was tried.** Widening LZMA2's range to
+/// `0..=99` and re-running this leaves it green. `clamp_level` clamps against `levels()`
+/// itself, so it can only ever hold a level inside whatever range is declared, and
+/// `sevenz-rust2` does not refuse the result — where libarchive refuses `zstd:23` at writer
+/// creation, which is what gives the test above its teeth. So this proves every level the
+/// window offers builds a 7z both readers can read; it does **not** prove the range is the
+/// right one, and no test here can. Nor does it prove level 9 compresses harder than level 6:
+/// asserting a size difference on a payload this small would be a lie dressed as a check.
+#[test]
+fn every_lzma2_level_the_slider_offers_builds_a_7z_that_reads_back() {
+    let dir = TempDir::new("lzma2-levels");
+    let range = Method::Lzma2
+        .levels()
+        .expect("LZMA2 takes a level, and the New Archive slider offers it");
+    for level in range {
+        let path = dir.join(&format!("lvl-{level}.7z"));
+        let recipe = Recipe {
+            path: path.clone(),
+            method: Method::Lzma2,
+            level,
+            encrypt: false,
+        };
+        write_payload(&path, &recipe);
+
+        let ours = indium::sevenz::list_all(&path, None)
+            .unwrap_or_else(|e| panic!("LZMA2 at level {level}: our own reader refused it: {e}"));
+        let theirs = arch::list_all(&path, None)
+            .unwrap_or_else(|e| panic!("LZMA2 at level {level}: libarchive refused it: {e}"));
+        assert_eq!(ours.len(), 3, "LZMA2 at level {level} lost an entry");
+        assert_eq!(
+            theirs.len(),
+            3,
+            "LZMA2 at level {level} lost an entry for the other reader"
+        );
     }
 }
 

@@ -98,11 +98,14 @@ impl Method {
     /// The libarchive ranges come from `archive_write_set_options(3)` on the build
     /// machine, and then from asking libarchive itself, because on one filter the two
     /// disagree: the manual gives **lz4** as 0–9, and libarchive refuses
-    /// `lz4:compression-level=0` outright. Every range below has been offered to
-    /// libarchive at both ends and accepted — `every_level_a_method_offers_is_one_
-    /// libarchive_accepts` in `tests/write_path.rs` is what keeps that true, and it is
-    /// the test that caught the lz4 case. LZMA2's range is `sevenz-rust2`'s, where an
-    /// out-of-range level is clamped rather than refused.
+    /// `lz4:compression-level=0` outright. Every level in every range below — not merely
+    /// both ends, which is all it was until P18 — has been offered to libarchive and
+    /// accepted: `every_level_a_method_offers_is_one_libarchive_accepts` in
+    /// `tests/write_path.rs` is what keeps that true, and it is the test that caught the
+    /// lz4 case. LZMA2's range is `sevenz-rust2`'s, where an out-of-range level is clamped
+    /// rather than refused, so it is checked by
+    /// `every_lzma2_level_the_slider_offers_builds_a_7z_that_reads_back` instead — the
+    /// libarchive test cannot make a claim about a method that never reaches libarchive.
     pub fn levels(self) -> Option<std::ops::RangeInclusive<u32>> {
         match self {
             Method::Store => None,
