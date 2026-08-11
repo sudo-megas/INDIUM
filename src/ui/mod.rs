@@ -497,6 +497,14 @@ impl Indium {
         self.cwd.clear();
         self.cursor = 0;
         self.crc_of = None;
+        // The Preview is the other half of what `crc_of` clears, and it was the half this
+        // function missed. `ApplyMsg::Done` re-opens the archive in this window precisely so
+        // the Inspector cannot describe a file that no longer exists — and an entry that kept
+        // its name through the rebuild kept its `PreviewData` too, so `request_preview`'s
+        // path check called it current and went on showing the bytes Apply had just replaced.
+        // A computed checksum and a previewed body go stale together; they are dropped
+        // together. The texture goes with it, which is `forget_preview`'s own reason to exist.
+        self.forget_preview(ctx);
         self.filter = None;
         self.archive_info = None;
         self.archive_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
