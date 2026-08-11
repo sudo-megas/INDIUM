@@ -336,11 +336,20 @@ and a failure should be the loudest thing in the window; **no third line weight*
 
 ## 7. VERSIONS
 
-Tags are two-numeral: `v0.1`, `v0.2`, … `v1.0`, `v1.1`. A tag that fixes a released
-version without changing it carries the package revision instead of a third numeral —
-`v1.0.0-2` — because the thing being distinguished is the build and not the version.
-The release workflow derives which of the two forms it will accept from `pkgrel`, so
-the rule is enforced rather than remembered.
+Tags are two-numeral — a major and a minor, and no third: `v1.0`, `v1.1`, `v1.2`. A tag
+that fixes a released version without changing it carries the package revision instead of
+that third numeral — `v1.0.0-2` — because the thing being distinguished is the build and
+not the version. The release workflow derives which of the two forms it will accept from
+`pkgrel`, so the rule is enforced rather than remembered.
+
+**The sequence begins at `v0.2`, and the hole below it is real.** `P1.md` asked for a
+`v0.1` in its done-when block and it was never cut — not here, not on origin — so P1
+shipped without one and the box is the only one in the ledger that was genuinely never
+done. This rule used to open by naming `v0.1` among the examples, which was the sole place
+in the project that asserted the tag existed; P18 stopped it doing that. The tag is **not**
+cut retroactively: P17's argument against a hole in the sequence was about a slot a future
+thing would never fill, and a tag dated two years after the work, with no artefacts to
+attach to it, would be a claim about the past rather than a repair to it.
 
 ### The road to v1.0
 
@@ -363,9 +372,20 @@ the rule is enforced rather than remembered.
 | P15 | The audit's open ledger: five defects closed, a false line in the record straightened, and V1.4's gate brought forward | **`v1.0.0-5`** |
 | P16 | The hex view, and the version number that goes with a feature rather than a fix | **`v1.1`** |
 | P17 | The terminal half, and the copyright the `.deb` had been getting wrong since P12 | **`v1.2`** |
+| P18 | The record round: the claims nothing could check, and the gates that now read them | **`v1.2.0-2`** |
 
 The P-table is a plan, not scripture; P-documents may split or merge steps, but scope
 only moves *out* of v1.0 by the maker's decision recorded here.
+
+**The `1.0` line is a beta, and this is the condition for it stopping.** Every release
+from `v1.0.0-3` onward has said so in its own notes, in these words: *"the `1.0` line stays
+one until the design work it is named for has been in real hands."* That sentence lived in
+four GitHub release bodies and **in no file in this repository** until P18 wrote it here —
+which made the project's own next state change the one claim a reader of the source could
+not find. The design work it names is P12's and P13's, shipped at `v1.0.0-4`; the gate is a
+testing round against a released build carrying it, and no such round has been run. **What
+"real hands" means is deliberately left undefined**: it is a decision the maker has not
+made, and recording the sentence is not the place to make it for him.
 
 ### After v1.0
 
