@@ -183,6 +183,16 @@ pub fn hex_body(chunk: &[u8]) -> String {
     out
 }
 
+/// How many rows a buffer of this length becomes, the short final one included.
+///
+/// One line, and it lives here rather than at the call site for the sake of the test that
+/// pins it: written inline in the view, the only thing a test could reach was
+/// `usize::div_ceil`, and asserting the standard library against a table of literals would
+/// have stayed green through a plain division that dropped the last row of every file.
+pub fn hex_rows(len: usize) -> usize {
+    len.div_ceil(HEX_COLUMNS)
+}
+
 // ---------------------------------------------------------------------------
 // Mode formatting
 // ---------------------------------------------------------------------------
@@ -339,7 +349,11 @@ pub enum Content {
     Image(&'static str),
     /// Text: no NUL byte, and valid UTF-8.
     Text,
-    /// Something else. CORE §4 reserves hex for V1.1, so the honest answer is a sentence.
+    /// Something else, which the Preview tab draws as hex. This variant read "CORE §4
+    /// reserves hex for V1.1, so the honest answer is a sentence" until P16 built it, and
+    /// was the twin of a comment in `inspector.rs` that the same commit deleted — a pair
+    /// split across two files, one half updated. That is the class of defect P13 left, P14
+    /// reintroduced and P16 found twice more, so it is worth naming where it happened.
     Binary,
     /// No bytes at all.
     Empty,
@@ -624,13 +638,35 @@ mod tests {
         }
     }
 
-    /// Every row is the same width, which is the property the whole view rests on.
+    /// **Both nibbles, for every byte there is.** The exact-row test above feeds `0x00..0x0F`,
+    /// whose high nibble is nought — so on its own it stays green if the high nibble is
+    /// shifted by five instead of four, and every byte over `0x0F` renders wrong. Checked
+    /// against `{:02X}`, which is a different implementation and not this one restated.
     #[test]
-    fn every_row_is_the_same_width() {
+    fn both_nibbles_of_every_byte_are_written() {
+        for b in 0u8..=255 {
+            let row = hex_body(&[b]);
+            assert_eq!(
+                &row[..2],
+                format!("{b:02X}"),
+                "byte {b:#04X} came out wrong"
+            );
+        }
+        // And in a full row, where the columns have to stay in line as well.
+        let high: Vec<u8> = (0xF0u8..=0xFF).collect();
+        assert_eq!(
+            hex_body(&high),
+            "F0 F1 F2 F3 F4 F5 F6 F7  F8 F9 FA FB FC FD FE FF  |................|"
+        );
+    }
+
+    /// The invariant this test had the wrong name for until P16: rows are **not** all the
+    /// same width — the gutter is only as long as the row has bytes — but everything to the
+    /// left of it is, which is the half that has to line up.
+    #[test]
+    fn the_hex_columns_hold_their_width_and_the_gutter_does_not() {
         let full = hex_body(&(0u8..16).collect::<Vec<u8>>()).chars().count();
         for n in 0..=HEX_COLUMNS {
-            // The gutter is shorter on a short row — that is the one part that may vary,
-            // because it has nothing to the right of it to push out of line.
             let row = hex_body(&vec![0xFFu8; n]);
             assert_eq!(row.chars().count(), full - (HEX_COLUMNS - n));
         }
@@ -652,7 +688,16 @@ mod tests {
         let cases: [(usize, usize); 7] =
             [(0, 0), (1, 1), (15, 1), (16, 1), (17, 2), (32, 2), (33, 3)];
         for (len, want) in cases {
-            assert_eq!(len.div_ceil(HEX_COLUMNS), want, "for {len} bytes");
+            assert_eq!(hex_rows(len), want, "for {len} bytes");
+        }
+        // The property the table is only a sample of: every byte is on a row, and no row is
+        // conjured for bytes that are not there.
+        for len in 0..200usize {
+            assert!(hex_rows(len) * HEX_COLUMNS >= len, "{len} bytes lost a row");
+            assert!(
+                len == 0 || (hex_rows(len) - 1) * HEX_COLUMNS < len,
+                "{len} bytes grew an empty row"
+            );
         }
     }
 }

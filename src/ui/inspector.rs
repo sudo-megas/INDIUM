@@ -575,7 +575,7 @@ fn hex(ui: &mut egui::Ui, data: &super::PreviewData) {
     // A dump is a grid, and a grid with gaps in it is not one.
     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
 
-    let rows = data.bytes.len().div_ceil(util::HEX_COLUMNS);
+    let rows = util::hex_rows(data.bytes.len());
     egui::ScrollArea::both()
         .auto_shrink([false, false])
         .show_rows(ui, row_h, rows, |ui, range| {

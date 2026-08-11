@@ -231,10 +231,13 @@ pub const PAD: i8 = 12;
 pub const CONTROL_H: f32 = 20.0;
 /// One status-bar row.
 ///
-/// Tall enough for an icon at [`ICON_SCALE`] — CORE §6 draws them at twice the text they
-/// name, and 13 × 2 needs more than the 20 this was until P13. The bar grew with it, which
-/// is the trade the maker asked for in as many words: "icons only sensible when they are
-/// big enough."
+/// Tall enough for an icon at [`ICON_SCALE`], which is 1.4 and not the 2 this comment
+/// claimed until P16 — CORE §6 said "twice" until the same round corrected it, and quoting
+/// a sentence that had already been rolled back is how the number survived here. The
+/// arithmetic that matters is not 13 × 1.4 = 18.2, which would fit the 20 this was until
+/// P13: it is the *line box* egui gives an 18.2pt glyph, which does not. The bar grew for
+/// that, which is the trade the maker asked for in as many words: "icons only sensible when
+/// they are big enough."
 pub const SB_ROW: f32 = 24.0;
 /// Between status-bar rows.
 pub const SB_GAP: f32 = 4.0;
