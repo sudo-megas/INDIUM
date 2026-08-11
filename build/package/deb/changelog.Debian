@@ -1,3 +1,28 @@
+indium (1.0.0-5) unstable; urgency=medium
+
+  * The Inspector no longer shows a file the way it used to be. Applying a
+    staged change rebuilds the archive and re-opens it, but the Preview pane
+    kept whatever it was already showing — so replacing a file and pressing
+    Apply left the old contents, and the old picture, on screen beside the new
+    archive. The checksum was being refreshed all along; the preview now goes
+    with it.
+  * Every popup's footer reaches its own edges. The band across the foot fell
+    two points short on the left, the right and the bottom, leaving a thin
+    border of the popup's own colour around what should have been a full-width
+    band.
+  * The status bar's numbers no longer slide about while an archive is being
+    read. The entry count and the sizes grow as entries stream in, and each
+    fresh digit pushed the ratio a step to the right; every number now sits in
+    a fixed column and stays there.
+  * Two archives whose names differ only outside ASCII no longer share one
+    lock. açık.zip and aşık.zip in one folder were treated as the same file, so
+    opening both and applying a change to either reported that another INDIUM
+    window was already rebuilding it.
+  * The build now tests itself on every push, not only when a release is cut.
+    The checks are the same ones the release has always run.
+
+ -- sudo-megas <sudo-megas@users.noreply.github.com>  Tue, 11 Aug 2026 09:35:00 +0300
+
 indium (1.0.0-4) unstable; urgency=medium
 
   * Extraction no longer reports success for files it never wrote. libarchive
