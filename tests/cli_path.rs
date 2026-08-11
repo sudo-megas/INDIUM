@@ -554,3 +554,20 @@ fn a_member_name_with_a_newline_survives_minus_zero() {
         );
     }
 }
+
+/// `--long` is for a person and `-0` is for a script. Asked for together one must lose,
+/// and a flag accepted and then silently discarded is worse than one refused — the caller
+/// believes they got what they asked for. An implementation where `--long` simply wins
+/// exits 0 and prints a perfectly good long listing, so the exit code is what catches it.
+#[test]
+fn long_and_nul_together_are_refused_rather_than_one_being_ignored() {
+    let path = fixture("basic.zip");
+    let r = run(&["list", path.to_str().unwrap(), "--long", "-0"]);
+    assert_eq!(
+        r.code,
+        2,
+        "one of the two flags was silently ignored: {:?}",
+        r.stdout()
+    );
+    assert!(r.out.is_empty(), "the archive was read before the refusal");
+}

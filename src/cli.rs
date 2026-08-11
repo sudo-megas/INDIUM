@@ -191,6 +191,14 @@ fn list(args: &[OsString], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         return usage_error(err, "list: no archive named");
     };
 
+    // **Refused rather than ignored.** `--long` is for a person and `-0` is for a script;
+    // asked for together, one of them has to lose, and a flag that is accepted and then
+    // silently discarded is worse than one that is refused — the caller believes they got
+    // what they asked for. Making the pair an error costs one line and no ambiguity.
+    if long && nul {
+        return usage_error(err, "list: --long is for a person and -0 is for a script");
+    }
+
     let entries = match read_listing(&path, err) {
         Ok(entries) => entries,
         Err(code) => return code,
