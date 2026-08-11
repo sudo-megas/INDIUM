@@ -1,3 +1,25 @@
+indium (1.2.0-2) unstable; urgency=medium
+
+  * The About window printed the wrong date. It has said 2026-08-10 since version
+    1.0.0-4, through three releases that each moved the version beside it, so the
+    binary published as 1.2 opened its About popup and dated itself to the day
+    before. The date is now read out of this changelog's newest entry by a test that
+    runs on every push, so a release that moves one and forgets the other fails to
+    build rather than shipping.
+  * Dimmed text on a selected row was too faint to read. A row you have just selected
+    or are pointing at is painted on a lighter ground than the window, and the quiet
+    text on it measured below the contrast floor this program holds itself to
+    everywhere else -- in the sidebar, the Recents and Bookmarks lists, the New
+    Archive method list, the Open With picker, and the entry table's own Packed,
+    Method and encrypted-member columns. All eight now step up one tier while the row
+    is selected, and every ink is measured against every ground it is allowed on.
+  * No change to what the program does otherwise. This revision is a correction to the
+    record: the project's own governing document, its milestone history and its code
+    comments carried claims that were no longer true, and the checkable ones now have
+    tests reading the document rather than a second copy of it.
+
+ -- sudo-megas <sudo-megas@users.noreply.github.com>  Tue, 11 Aug 2026 21:13:45 +0300
+
 indium (1.2.0-1) unstable; urgency=medium
 
   * INDIUM has a terminal half. `indium list` prints one stored path per line, `indium

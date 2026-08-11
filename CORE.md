@@ -383,9 +383,10 @@ below. This rule used to open by naming `v0.1` among its examples, and the road 
 carried it in P1's Tag column as though it had been cut; P18 stopped both. Two P-documents
 still speak of it as a release point that happened — `P6.md:368` and `P7.md:521` — and they
 are left standing, because a P-document records what its round believed and is annotated,
-never rewritten. The tag is **not** cut retroactively: P17's argument against a hole in the sequence was about a slot a future
-thing would never fill, and a tag dated two years after the work, with no artefacts to
-attach to it, would be a claim about the past rather than a repair to it.
+never rewritten. The tag is **not** cut retroactively: P17's argument against a hole in the
+sequence was about a slot a future thing would never fill, and a tag dated two years after
+the work, with no artefacts to attach to it, would be a claim about the past rather than a
+repair to it.
 
 ### The road to v1.0
 
