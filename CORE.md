@@ -118,9 +118,10 @@ no type-to-jump, because bare letters are shortcuts.
 Details shows everything the reader can know about the selection; multi-select shows
 aggregates; no selection shows the archive-level card. Preview renders text, images, and — for
 anything that is neither — **hex**, sixteen bytes to a row with the printable gutter beside them,
-which arrived at V1.1 as this line promised it would. The row count is fixed rather than fitted
-to the pane, so the same byte sits at the same offset however the Inspector is dragged, and the
-pane scrolls sideways instead. Two honest sourcing notes, so nobody files a bug about them:
+which arrived at V1.1 as this line promised it would. **Sixteen is fixed** — the bytes on a row
+are not fitted to the pane — so the same byte sits at the same offset however the Inspector is
+dragged, and the pane scrolls sideways instead. (How many *rows* there are is the file's business
+and varies with its length; it is the column count that is nailed down.) Two honest sourcing notes, so nobody files a bug about them:
 libarchive does not expose an entry's *stored* CRC, so INDIUM computes CRC32 on demand
 and labels it computed; 7z solid-block detail arrives with `sevenz-rust2` in P4, and until
 then the Inspector shows what the generic reader provides.
@@ -285,7 +286,7 @@ rather than nearly true. They come from the **Font Awesome** range the Nerd Font
 no second range is mixed with it: mixing icon families reads exactly like mixing typefaces. The
 `Mono` cut §2 names is the reason this costs nothing — every glyph is one cell, so an icon never
 widens a column or moves a number off its own. **An icon replaces a word; it never garnishes
-one.** **An icon is drawn half again the size of the text it stands beside — 1.4×**, and the row
+one.** **An icon is drawn at 1.4× the size of the text it stands beside**, and the row
 grows to carry it rather than the glyph shrinking to fit; a Font Awesome glyph carries padding
 inside its em box, so at 1× it puts about nine points of ink next to a thirteen-point capital and
 reads as an afterthought. This is why the status bar's rows are taller than the entry table's.
