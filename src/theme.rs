@@ -646,7 +646,12 @@ fn install_spacing(ctx: &egui::Context) {
         // The status bar's row is `SB_ROW` and no longer agrees with either: P13 split the
         // two so that a taller bar could carry a double-size glyph without making every
         // button in the program taller with it.
-        style.spacing.window_margin = egui::Margin::same(14);
+        // A popup's padding is `PAD` and not a number of its own. It read 14 while `foot`
+        // pulled its band back by `PAD`, and the two points between them showed as popup
+        // ground down both sides of every foot and along its bottom edge. One of the two had
+        // to give, and it is this one: `foot` cannot pull back by anything but the inset it is
+        // escaping, whereas the inset itself has no reason to be a second number.
+        style.spacing.window_margin = egui::Margin::same(PAD);
         style.spacing.menu_margin = egui::Margin::same(8);
         style.spacing.indent = 18.0;
         style.spacing.interact_size.y = CONTROL_H;
@@ -720,12 +725,13 @@ pub fn list_height(ctx: &egui::Context, chrome: f32, want: f32) -> f32 {
 /// bottom, which is a panel, not a foot. Pulling back by that inset puts the band's edges
 /// back on the popup's edges.
 ///
-/// **It pulls back by `PAD` and the inset is `window_margin`, and those are 12 and 14** — so
-/// two points of popup ground still show at the left, right and bottom of every foot. The
-/// two used to be the same number and no longer are; an audit found it, and it is written
-/// down here rather than fixed in a milestone that has already been asked to stop moving.
-/// The fix is one line — give `window_margin` the value `PAD` in `install_spacing` — and it
-/// changes the padding of all nine popups, which is why it is not being done in passing.
+/// **It pulls back by `PAD`, and `window_margin` is `PAD`, because P15 made them one number
+/// again.** They had drifted apart to 12 and 14, and the two points between them showed as
+/// popup ground down both sides of every foot and along its bottom edge — a band with a
+/// gutter, which is the panel this function exists to avoid being. An audit found it, P13
+/// wrote it down here rather than move a milestone that had been asked to stop moving, and
+/// P15 spent the one line. The two must stay the same number: the pull-back is only correct
+/// while it is exactly the inset it escapes.
 pub fn foot(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::NONE
         .fill(POPUP_FOOT)
