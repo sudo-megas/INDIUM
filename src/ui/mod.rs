@@ -2537,6 +2537,37 @@ fn sb_what_is_open(app: &mut Indium, ui: &mut egui::Ui) {
     });
 }
 
+// The widest each of row 2's fields can be, so a lane never has to grow. `format_bytes` is
+// widest at `1023.9 KiB` — ten — and not at the top of its ladder as one would guess: a
+// value only ever reaches four digits before the unit changes beneath it, so the rungs above
+// KiB are no wider, and `u64::MAX` itself is merely `16.0 EiB`. A ratio reads `100.0%` at six
+// and is given seven so a format that grew what it packed still lands inside its lane. The
+// two counts are given six, a million entries, ten times the hundred thousand CORE §1 claims.
+const LANE_COUNT: usize = 6;
+const LANE_SIZE: usize = 10;
+const LANE_RATIO: usize = 7;
+
+/// Row 2's fields, padded into the lanes CORE §4 asks for.
+///
+/// Pure and separate from the drawing so the rule can be tested without a window: what the
+/// rule actually says is that these strings are the same length whatever the numbers are.
+fn sb_lane_entries(count: usize) -> String {
+    format!("{count:>LANE_COUNT$} entries")
+}
+
+fn sb_lane_sizes(real: u64, packed: u64) -> String {
+    format!(
+        "{:>LANE_SIZE$} -> {:>LANE_SIZE$} ({:>LANE_RATIO$})",
+        crate::util::format_bytes(real),
+        crate::util::format_bytes(packed),
+        crate::util::format_ratio(real, packed),
+    )
+}
+
+fn sb_lane_selected(n: usize) -> String {
+    format!("{n:>LANE_COUNT$} selected")
+}
+
 /// Row 2 — the numbers, and the voice.
 ///
 /// **`app.status` is drawn unconditionally, and that is the point of the row.** Until P7
@@ -2546,6 +2577,16 @@ fn sb_what_is_open(app: &mut Indium, ui: &mut egui::Ui) {
 /// are set at exactly the moments that branch was hiding — a user who pressed `E` twice
 /// got silence, which reads as the program ignoring the key. Nothing in this row may
 /// consult `progress`; that is row 3's job and only row 3's.
+///
+/// **The numbers hold their columns, and from P12 to P15 they did not.** CORE §4 asks that
+/// sizes, counts and ratios be "right-aligned to fixed positions and do not move as their
+/// digits change", and this row laid every field out with a plain left-to-right `label`, so
+/// a listing dragged the whole row sideways: `aggregate` is recomputed each frame from the
+/// entries that have arrived, so the count and the real size both grow as they stream, and
+/// the ratio slid a cell to the right on every tenth entry. P12 recorded it as a deviation,
+/// P13 claimed to have written it down here and did not, and P15 both wrote it and fixed it.
+/// The lanes below are the fix; the fields are padded rather than measured because §6's face
+/// is the `Mono` cut, where a character is a column.
 fn sb_the_numbers(app: &Indium, ui: &mut egui::Ui) {
     sb_row(ui, egui::Layout::left_to_right(egui::Align::Center), |ui| {
         if app.has_archive() {
@@ -2553,7 +2594,7 @@ fn sb_the_numbers(app: &Indium, ui: &mut egui::Ui) {
             // CORE §4: "One thing per row is the subject, and it is bold." On this row
             // that is the count — everything else here qualifies it.
             ui.label(
-                egui::RichText::new(format!("{} entries", agg.count))
+                egui::RichText::new(sb_lane_entries(agg.count))
                     .family(theme::bold())
                     .size(13.0)
                     .color(theme::TEXT),
@@ -2563,21 +2604,16 @@ fn sb_the_numbers(app: &Indium, ui: &mut egui::Ui) {
             // Archive-level real -> packed, which is honest: the packed side
             // is the archive's own size on disk.
             ui.label(
-                egui::RichText::new(format!(
-                    "{} -> {} ({})",
-                    crate::util::format_bytes(agg.total_real),
-                    crate::util::format_bytes(app.archive_bytes),
-                    crate::util::format_ratio(agg.total_real, app.archive_bytes),
-                ))
-                .family(theme::MONO)
-                .size(13.0)
-                .color(theme::TEXT_SECONDARY),
+                egui::RichText::new(sb_lane_sizes(agg.total_real, app.archive_bytes))
+                    .family(theme::MONO)
+                    .size(13.0)
+                    .color(theme::TEXT_SECONDARY),
             );
 
             if !app.selection.is_empty() {
                 ui.label(egui::RichText::new("·").color(theme::TEXT_MUTED));
                 ui.label(
-                    egui::RichText::new(format!("{} selected", app.selection.len()))
+                    egui::RichText::new(sb_lane_selected(app.selection.len()))
                         .family(theme::MONO)
                         .size(13.0)
                         .color(theme::TEXT_SECONDARY),
@@ -2893,5 +2929,77 @@ mod tests {
             (false, false)
         );
         assert_eq!(clipboard_chords(&[]), (false, false));
+    }
+
+    /// CORE §4: "Numbers hold their columns. Sizes, counts and ratios are right-aligned to
+    /// fixed positions and do not move as their digits change." In the `Mono` cut a column
+    /// is a character, so the rule is exactly this: one width, whatever the number.
+    #[test]
+    fn row_twos_numbers_hold_their_columns() {
+        let counts: Vec<usize> = vec![0, 7, 42, 999, 100_000, 999_999];
+        for window in counts.windows(2) {
+            assert_eq!(
+                sb_lane_entries(window[0]).chars().count(),
+                sb_lane_entries(window[1]).chars().count(),
+                "{} and {} entries are not the same width",
+                window[0],
+                window[1],
+            );
+            assert_eq!(
+                sb_lane_selected(window[0]).chars().count(),
+                sb_lane_selected(window[1]).chars().count(),
+            );
+        }
+
+        // Every rung of `format_bytes`, plus the zero-real case whose ratio is an em dash
+        // rather than a percentage — the one arm that is not a number at all.
+        let sizes: Vec<(u64, u64)> = vec![
+            (0, 0),
+            (1, 1),
+            (1023, 500),
+            (1024, 1024),
+            (1_048_576, 700_000),
+            (1_099_511_627_776, 900_000_000_000),
+            (u64::MAX, u64::MAX / 3),
+        ];
+        let widths: Vec<usize> = sizes
+            .iter()
+            .map(|(r, p)| sb_lane_sizes(*r, *p).chars().count())
+            .collect();
+        assert!(
+            widths.windows(2).all(|w| w[0] == w[1]),
+            "the size lanes moved: {widths:?} for {sizes:?}",
+        );
+    }
+
+    /// A lane that is too narrow silently stops being a lane, so the widths are asserted
+    /// against the widest thing each field can actually hold rather than trusted.
+    #[test]
+    fn no_number_overflows_the_lane_reserved_for_it() {
+        // `1023.9 KiB` is the widest `format_bytes` ever gets, and it is worth pinning
+        // because it is not where one would look for it — the ladder's top rung is
+        // narrower, since `u64::MAX` is only `16.0 EiB`.
+        assert_eq!(
+            crate::util::format_bytes(1_048_474).chars().count(),
+            LANE_SIZE
+        );
+        assert!(crate::util::format_bytes(u64::MAX).chars().count() <= LANE_SIZE);
+
+        // Every rung, and both sides of each boundary, rather than trusting the argument.
+        let mut n: u64 = 1;
+        loop {
+            for probe in [n.saturating_sub(1), n, n.saturating_add(1)] {
+                let w = crate::util::format_bytes(probe).chars().count();
+                assert!(w <= LANE_SIZE, "format_bytes({probe}) is {w} wide");
+            }
+            match n.checked_mul(2) {
+                Some(next) => n = next,
+                None => break,
+            }
+        }
+
+        assert!(crate::util::format_ratio(1000, 1000).chars().count() <= LANE_RATIO);
+        assert!(crate::util::format_ratio(0, 0).chars().count() <= LANE_RATIO);
+        assert!(999_999usize.to_string().chars().count() <= LANE_COUNT);
     }
 }
