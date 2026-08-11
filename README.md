@@ -175,7 +175,7 @@ compositor running:
 ```sh
 indium list    archive.zip              # one stored path per line, in archive order
 indium list    archive.zip --long       # mode, size, packed, method, encryption,
-                                        #   time, and a total
+                                        #   time, path, and a total
 indium list    archive.zip -0           # NUL-separated, for names holding a newline
 indium extract archive.zip --to ~/out   # everything, or name the members you want
 indium extract archive.zip -- notes.txt

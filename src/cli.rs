@@ -63,8 +63,8 @@ The terminal half is entered only when the first argument is exactly `list`,
 
     list       one stored path per line, in archive order, undecorated, so the
                output feeds straight back into `cat` and `extract`
-      --long   mode, size, packed, method, encryption, time and a total — for
-               a person to read, not for a script to parse
+      --long   mode, size, packed, method, encryption, time, path and a total —
+               for a person to read, not for a script to parse
       -0       separate with NUL instead of newline. A member name may contain
                a newline, and a line-oriented listing of one is silently wrong
                The two are refused together: one is for a person, one for a
