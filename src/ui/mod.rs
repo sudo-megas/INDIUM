@@ -1,16 +1,18 @@
 //! The window: sidebar, table, Inspector, status bar, and every popup.
 //!
-//! CORE §4: "Five fixed zones and nine popups. Nothing else appears, ever." P2 §5 added
+//! CORE §4: "Five fixed zones and ten popups. Nothing else appears, ever." P2 §5 added
 //! the password prompt by the maker's ordered CORE edit; P4 fills in the two the count
 //! always allowed for — New Archive and Pending tasks — and puts rename in the table
 //! rather than making it another. P12 numbers the two §4 had been running without: Open,
-//! which the keyboard table has carried since P1, and Keys.
+//! which the keyboard table has carried since P1, and Keys. P21b raises the count to ten,
+//! by the maker's lifting of the cap, for Measure — the first popup to stand over another.
 
 pub mod about;
 pub mod extract;
 pub mod filter;
 pub mod inspector;
 pub mod keys;
+pub mod measure;
 pub mod newarchive;
 pub mod openwith;
 pub mod password;
@@ -79,7 +81,7 @@ pub enum InspectorTab {
     Preview,
 }
 
-/// The popups — nine of them, and this is all of them: rename happens in the table
+/// The popups — ten of them, and this is all of them: rename happens in the table
 /// rather than in another popup.
 ///
 /// CORE §4's numbered list once stopped at seven and did not carry `OpenPath`, while §4's
@@ -88,7 +90,8 @@ pub enum InspectorTab {
 /// number the window it opens. This comment used to claim seven and count eight, which was
 /// the wrong half to leave standing. P12 applied the edit `build/docs/P6.md` ordered, so
 /// Open is numbered eighth, and added `Keys` as the ninth — the list is now the same length
-/// in both places.
+/// in both places. P21b adds the tenth, `Measure`, by the maker's lifting of the cap; it is
+/// the only one that stands *over* another, in [`Indium::over`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Popup {
     NewArchive,
@@ -100,6 +103,29 @@ pub enum Popup {
     Password,
     OpenWith,
     Keys,
+    Measure,
+}
+
+impl Popup {
+    /// Every variant, in CORE §4's numbered order.
+    ///
+    /// It exists to be counted. `std::mem::variant_count` is nightly-only, so the gate that
+    /// holds this enum against CORE §4's numbered list — `the_popup_list_and_core_agree_about_
+    /// how_many_there_are` — needs a list it can take the length of. Adding a variant without
+    /// adding it here, or without numbering it in the document, fails that test either way,
+    /// which is the drift the whole arrangement is for.
+    pub const ALL: &'static [Popup] = &[
+        Popup::NewArchive,
+        Popup::PendingTasks,
+        Popup::Extract,
+        Popup::OpenWith,
+        Popup::Settings,
+        Popup::About,
+        Popup::Password,
+        Popup::OpenPath,
+        Popup::Keys,
+        Popup::Measure,
+    ];
 }
 
 /// What INDIUM is currently saying, and whether it is bad news.
@@ -272,8 +298,8 @@ pub struct Indium {
     /// The normalised paths the queue was staged against, so Apply can refuse if the
     /// archive changed on disk underneath it.
     pub staged_against: Vec<String>,
-    /// `Some(path)` while a name is being edited in place. CORE §4 fixes the popup count
-    /// at nine, so rename is not a tenth.
+    /// `Some(path)` while a name is being edited in place. CORE §4 numbers the popups, and
+    /// rename is not among them: it is the Name cell becoming a text field.
     pub rename_target: Option<String>,
     pub rename_input: String,
 
@@ -308,6 +334,19 @@ pub struct Indium {
 
     // --- popups -----------------------------------------------------------
     pub popup: Option<Popup>,
+    /// The popup drawn *over* [`Indium::popup`] — P21b, and CORE §4's *"Close the topmost
+    /// popup"* becoming literally true for the first time.
+    ///
+    /// Only ever `Popup::Measure`, and only ever over `Popup::NewArchive`. Typed as the enum
+    /// rather than as a `bool` so the pair reads as one stack in every place that touches it,
+    /// and so a second over-popup would need no new field.
+    ///
+    /// It deliberately does **not** take part in `focus_given_to`: that flag is re-armed
+    /// against `popup` alone, one line down in `ui()`, so a `wants_initial_focus` keyed on an
+    /// over-popup would be reset every frame and grab focus forever. The Measure popup has no
+    /// text field, so there is nothing to hand focus to; teaching that line about `over` is
+    /// the price of the first over-popup that does.
+    pub over: Option<Popup>,
     pub extract_path: String,
     pub extract_to_subdir: bool,
     pub open_path: String,
@@ -413,6 +452,7 @@ impl Indium {
             focus_given_to: None,
 
             popup: None,
+            over: None,
             extract_path: String::new(),
             extract_to_subdir: settings.value.extract.default == ExtractDefault::Subdir,
             open_path: String::new(),
@@ -1041,6 +1081,8 @@ impl Indium {
         // calls this for exactly that reason rather than clearing `popup` by hand.
         self.cancel_estimate();
         self.popup = None;
+        // P21b: the over-popup belongs to the popup underneath it and cannot outlive it.
+        self.over = None;
         self.focus_given_to = None;
         self.pending = None;
         self.password_input.clear();
@@ -1177,8 +1219,8 @@ impl Indium {
         }
     }
 
-    /// `F2` — begin editing a name in the table. CORE §4 fixes the popup count at nine,
-    /// so this is not a tenth popup; it is the Name cell becoming a text field.
+    /// `F2` — begin editing a name in the table. CORE §4 numbers the popups and rename is
+    /// not among them; it is the Name cell becoming a text field.
     pub fn begin_rename(&mut self, rows: &[Row]) {
         if !self.has_archive() {
             return;
@@ -1446,6 +1488,19 @@ impl Indium {
     /// abandonment into a fistful of I/O errors; `measure` deletes its own candidate file
     /// on every path including this one, and the empty directory goes on the next `begin`
     /// or on `Scratch`'s drop, both of which already do exactly that.
+    /// True while anything from a measurement is still held — a worker on its way back,
+    /// figures, refusals, or the statement of what was weighed.
+    ///
+    /// One predicate rather than four inlined tests, because the sweeper in `ui()` asks this
+    /// on every frame and the answer has to mean *exactly* what `cancel_estimate` clears. A
+    /// field added to one and forgotten in the other is how a stale figure survives a close.
+    pub fn holds_estimate(&self) -> bool {
+        self.estimate_running
+            || !self.estimates.is_empty()
+            || !self.estimate_failed.is_empty()
+            || self.estimate_of.is_some()
+    }
+
     pub fn cancel_estimate(&mut self) {
         self.estimate_cancel.store(true, Ordering::Relaxed);
         self.estimate_rx = None;
@@ -2234,6 +2289,24 @@ impl eframe::App for Indium {
             self.focus_given_to = None;
         }
 
+        // And the same treatment for the second slot, for the same reason and one worse.
+        //
+        // `over` is only ever `Measure`, and Measure only ever stands over New Archive. Sixteen
+        // sites assign `self.popup` by hand without going through `close_popup` — the sidebar
+        // and the keyboard table among them, and both are reachable while New Archive is open,
+        // because §4.1's popup is an `egui::Window` and not a modal. Left unswept, pressing `,`
+        // over an open Measure would park the over-popup in the state, and pressing `N` a minute
+        // later would raise it again over figures measured from an input that had since changed.
+        //
+        // Sweeping the figures with it is what makes E1's *"discarded when New Archive closes"*
+        // true on **every** close path rather than on the four that call `close_popup`. That
+        // half was already leaking before this round; it was invisible while the figures were
+        // drawn only inside the popup that was going away.
+        if self.popup != Some(Popup::NewArchive) && (self.over.is_some() || self.holds_estimate()) {
+            self.over = None;
+            self.cancel_estimate();
+        }
+
         let rows = self.rows();
         self.handle_keys(&ctx, &rows);
 
@@ -2261,6 +2334,10 @@ impl eframe::App for Indium {
         keys::show(self, &ctx);
         open_path_popup(self, &ctx);
         newarchive::show(self, &ctx);
+        // Immediately after the popup it stands on, and before the rest — a `Modal` paints
+        // above every `Window` whatever the call order, but reading the two together is what
+        // says they are one stack.
+        measure::show(self, &ctx);
         pending::show(self, &ctx);
         password::show(self, &ctx);
         openwith::show(self, &ctx);
@@ -2322,6 +2399,14 @@ impl Indium {
                 self.rename_target = None;
                 self.rename_input.clear();
                 ctx.memory_mut(|m| m.request_focus(egui::Id::NULL));
+                return;
+            }
+            // P21b: the topmost popup, which for the first time in the program's life may be
+            // one standing on another. It closes alone — the measurement underneath it is not
+            // cancelled and its figures are not discarded, because E1 keeps them for as long
+            // as New Archive lives and a run three seconds in still has somewhere to land.
+            if self.over.is_some() {
+                self.over = None;
                 return;
             }
             if self.popup.is_some() {
@@ -3160,6 +3245,70 @@ mod tests {
     fn the_status_bar_is_as_tall_as_it_says() {
         let content = 3.0 * theme::SB_ROW + 2.0 * theme::SB_GAP;
         assert_eq!(content + sb_frame().total_margin().sum().y, SB_HEIGHT);
+    }
+
+    /// CORE §4's numbered list of popups, and the enum that holds them, are the same length.
+    ///
+    /// **Nothing enforced this until P21b, and the count had already drifted twice.** §4 said
+    /// seven while the code had eight; a doc comment in this file said seven and counted eight
+    /// in the same breath; P12 straightened both by hand. The number is written in three
+    /// places — §4's opening sentence in words, §4's numbered list, and [`Popup`] itself — and
+    /// two of the three were prose that no test read. This reads all three.
+    ///
+    /// It is a count and not a comparison of names because the two lists are not written in the
+    /// same idiom: §4 numbers *Open* where the enum says `OpenPath`, and *Pending tasks* where
+    /// the enum says `PendingTasks`. A count is what the drift actually looked like both times.
+    #[test]
+    fn the_popup_list_and_core_agree_about_how_many_there_are() {
+        let core = include_str!("../../CORE.md");
+        let after = core
+            .split_once("### The popups")
+            .expect("CORE §4 has a 'The popups' heading")
+            .1;
+
+        // Every item opens at column zero with its own number; an item's continuation lines are
+        // indented, and the list ends at the next heading.
+        let numbered: Vec<u32> = after
+            .lines()
+            .take_while(|l| !l.starts_with('#'))
+            .filter_map(|l| l.split_once(". ").and_then(|(n, _)| n.parse().ok()))
+            .collect();
+
+        assert_eq!(
+            numbered.len(),
+            Popup::ALL.len(),
+            "CORE §4 numbers {} popups and the program has {}",
+            numbered.len(),
+            Popup::ALL.len()
+        );
+        // And they are numbered 1..=n, in order: a list that goes 8, 9, 9 is the same defect
+        // wearing the right length.
+        for (i, n) in numbered.iter().enumerate() {
+            assert_eq!(
+                *n as usize,
+                i + 1,
+                "CORE §4's list is numbered {numbered:?}"
+            );
+        }
+        // A variant added to the enum but pasted twice into `ALL` would keep the length and
+        // lose the popup, which is the one way this gate could be satisfied while wrong.
+        for (i, p) in Popup::ALL.iter().enumerate() {
+            assert!(!Popup::ALL[..i].contains(p), "{p:?} is listed twice in ALL");
+        }
+
+        // The third place the count is written: §4's opening sentence, in words.
+        const WORDS: &[&str] = &[
+            "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+            "eleven", "twelve",
+        ];
+        let sentence = format!(
+            "Five fixed zones and {} popups. Nothing else appears, ever.",
+            WORDS[Popup::ALL.len()]
+        );
+        assert!(
+            core.contains(&sentence),
+            "CORE §4 does not open with {sentence:?}"
+        );
     }
 
     #[test]

@@ -199,7 +199,8 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                             row.display.clone()
                         };
                         // `F2` turns this cell into a text field rather than opening a
-                        // tenth popup — CORE §4 fixes the count at nine. A focused field
+                        // popup of its own — CORE §4 numbers them, and rename is not one of
+                        // them; it is the Name cell becoming editable. A focused field
                         // also makes the existing `typing` guard suppress bare keys, so
                         // `Del` cannot fire into a half-typed name.
                         if app.rename_target.as_deref() == Some(row.path.as_str()) {

@@ -117,7 +117,7 @@ ends. They are never written to settings, recents, or anywhere else.
 
 ## 4. THE WINDOW
 
-Five fixed zones and nine popups. Nothing else appears, ever.
+Five fixed zones and ten popups. Nothing else appears, ever.
 
 **Sidebar** (family style): the wordmark at top, then *Open file* `O` and *Archive* `1`; a
 rule; then *Bookmarks* `2` and *Recent files* `3`; at the bottom *New* `N`, *Settings* `,`,
@@ -191,11 +191,10 @@ bar has a hierarchy, and it is part of this document rather than a matter of tas
    should compress. If unsure, keep the default."). Four preset chips — *Fastest*,
    *Balanced* (default), *Smallest*, *Encrypted* — each highlighting a row in the method
    list below, where **every method
-   carries its one-sentence verdict** (§5). Beside the heading, **Measure** — V2.0's
-   estimator — runs the eight real candidates over the real input and writes each one's
-   level, time and ratio into a column of its own beside the verdict, filling one row at a
-   time as they land. The figures are told in text and never in colour, a `~` marks a ratio
-   the sample could not promise, and the popup always states what it weighed. An *Advanced*
+   carries its one-sentence verdict** (§5) and nothing else. Beside the heading, **Measure**
+   — V2.0's estimator — opens the Measure popup (§4.10) and runs the eight real candidates
+   over the real input; the figures are drawn there, on a surface with room for them, and
+   not in a lane on a row that is already carrying a sentence. An *Advanced*
    disclosure holds the level slider. At the foot, a live sentence states exactly what will
    be built: *"Building photos-2026.7z — 7z, LZMA2:19, AES-256."*
 2. **Pending tasks** (`W`, or clicking the tray). The full task list: one row per staged
@@ -222,6 +221,24 @@ bar has a hierarchy, and it is part of this document rather than a matter of tas
    don't know how to exit from the archive"* — a program whose whole interface is bare
    keypresses owes the reader the list. It is **generated from the bindings, never typed
    twice**: a keys popup that has drifted from the keys is worse than no keys popup.
+10. **Measure**. Opened by *Measure* on the New Archive popup, and the only popup that is
+    drawn **over** another — which is what makes `Esc`'s *"close the topmost popup"* below a
+    description rather than an aspiration. It holds nothing but the measurements: one row per
+    method, carrying the level it was built at, the time it took, the size it produced and the
+    ratio that follows. All eight rows stand from the first frame and their cells fill in as
+    the candidates land, because a table that grows is a table that moves. The figures are told
+    in text and never in colour, a `~` marks a ratio the sample could not promise, and the
+    popup always states what it weighed. It runs when it opens and **keeps its figures for as
+    long as New Archive lives** — *Measure again* is how they are spent a second time, and
+    closing New Archive discards them, because a figure that outlives its input is the folklore
+    V2.0 was sent to replace. **Clicking a row chooses that method**: the measuring was to
+    decide, so the answer is the control. It has no key of its own; the popup it stands on is
+    the way in.
+
+    It has this popup because it did not, and that was wrong: V2.0 first wrote the figures
+    into a lane on each method row, at the smallest and dimmest type in the window, beside a
+    verdict that had already taken the width. The round's whole payload landed in the least
+    readable element on screen. A row cannot hold five columns and a sentence.
 
 ### Keyboard
 
@@ -265,10 +282,10 @@ refuses. ACE is absent for the same family of reasons and its security history.
 ### The method verdicts
 
 This copy ships in the New Archive popup, one honest sentence each. **They no longer stand
-alone: since V2.0 the estimator sets a measured level, time and ratio beside every one of
-them** — this data, this CPU, this moment. The sentences stay because they say what a
-method is *for*, which a number cannot, and because a figure is only ever about the input
-that was measured. Where that input was too large to weigh whole the figure is marked `~`
+alone: since V2.0 the estimator will give any one of them a measured level, time, size and
+ratio, one Measure away in §4.10's popup** — this data, this CPU, this moment. The sentences
+stay because they say what a method is *for*, which a number cannot, and because a figure is
+only ever about the input that was measured. Where that input was too large to weigh whole the figure is marked `~`
 and is an estimate in the strict sense: a stratified sample predicts throughput well and
 gzip and zstd's ratios closely, but it cannot predict LZMA's, whose dictionary earns its
 ratio on exactly the long-range matches that chopping a stream destroys. The program says
@@ -428,7 +445,7 @@ repair to it.
 | P18 | The record round: the claims nothing could check, and the gates that now read them | **`v1.2.0-2`** |
 | P19 | The front page read against the tree: a library three of four packages never declared, a panel's third group, and a password refused as the wrong one | **`v1.2.0-3`** |
 | P20 | The yazi plugin, in a repository of its own because `contrib/` could never have been installed, and the description settled in all four places that state one | **`v1.2.0-4`** |
-| P21 | V2.0, the live estimator: eight real candidates on the real CPU, exact under its budget and marked above it, and the popup made re-openable so there is something to measure | **`v2.0`** |
+| P21 | V2.0, the live estimator: eight real candidates on the real CPU, exact under its budget and marked above it, the popup made re-openable so there is something to measure, and — once it had been seen on screen — a tenth popup to draw the figures in | **`v2.0`** |
 
 The P-table is a plan, not scripture; P-documents may split or merge steps, but scope
 only moves *out* of v1.0 by the maker's decision recorded here.
@@ -492,7 +509,8 @@ finds that sentence in one of them is owed this paragraph rather than a puzzle.
 only on a tag is not a gate; it stays listed here so the road reads as what happened.
 **V2.0** the live estimator: sample the actual input, run the real candidates on the
 real CPU, report measured time and ratio instead of folklore — **shipped in P21**, as
-`estimate` (§3) and the Measure action in §4.1's first popup. It came out narrower than
+`estimate` (§3), the Measure action in §4.1's first popup and the tenth popup it opens
+(§4.10). It came out narrower than
 the line above reads in one respect and wider in another. Narrower: the candidates run in
 sequence, because §3 fixes threading at the UI thread and one worker, so eight of them cost
 around three and a half seconds at the budget — xz and LZMA2 are five sixths of it — and
@@ -500,6 +518,13 @@ Measure is therefore a button rather than something the popup does on opening. W
 input through the same writers Apply uses, so the figure is not an estimate but the size
 Apply would produce. Only above the budget is anything sampled, and then it says so. §5
 records what that mark means and why LZMA is the method it means it most about.
+
+And wider again, after it was seen on screen: the figures needed a **popup of their own**.
+V2.0 first wrote them into a lane on each method row, which is where they fit and not where
+they could be read — 11 px of the dimmest ink in the window, beside a sentence already
+holding the width. The maker lifted the popup cap for it in the same breath, so §4 counts ten
+where it counted nine, and `Esc`'s "close the topmost popup" describes something the program
+actually does.
 
 Second language: shelved for an undefined time. English is the language of v1.
 

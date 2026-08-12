@@ -6,6 +6,12 @@
 //! holds the level slider. At the foot, a live sentence states exactly what will be
 //! built."
 //!
+//! **The method list carries its verdicts and nothing else.** P21 wrote the estimator's
+//! figures into a lane on each row and P21b took them back out again: they were 11 px in
+//! `TEXT_MUTED` beside a sentence that had already claimed the width, which is the least
+//! readable place in the popup for the one thing the round was about. Measure now opens a
+//! popup of its own — §4.10, [`super::measure`] — and this file is what it was before.
+//!
 //! Copyright © sudo-megas. GPL-3.0-only.
 
 use std::path::PathBuf;
@@ -149,14 +155,18 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     // popup does on opening because the eight candidates run in
                     // sequence — CORE §3 has one worker — and three seconds is a great
                     // deal to spend on a question nobody asked.
+                    //
+                    // Since P21b it opens §4.10's popup and the figures are drawn there.
+                    // It stays live **while a run is in flight**, so a person who pressed
+                    // `Esc` two seconds in can get back to the table the run is still
+                    // filling; it is dead only when there is nothing to measure at all.
                     let refusal = app.estimate_refusal();
-                    let can = !app.estimate_running && refusal.is_none();
                     let label = if app.estimate_running {
                         "Measuring…"
                     } else {
                         "Measure"
                     };
-                    if theme::button(ui, egui::RichText::new(label), can).clicked() {
+                    if theme::button(ui, egui::RichText::new(label), refusal.is_none()).clicked() {
                         measure = true;
                     }
                     // Why it is dead, beside it. Drawn rather than pushed to the status
@@ -165,28 +175,6 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     // the one person who needs it.
                     if let Some(why) = refusal {
                         ui.label(egui::RichText::new(why).size(11.0).color(theme::TEXT_MUTED));
-                    }
-                    // What the figures rest on, stated beside them rather than left to
-                    // be assumed. `~` marks a figure the sample could not promise.
-                    else if let Some(of) = &app.estimate_of {
-                        let sentence = if of.sampled {
-                            format!(
-                                "~ estimated from {} of {}",
-                                crate::util::format_bytes(of.bytes),
-                                of.describe
-                            )
-                        } else {
-                            format!(
-                                "measured on all {} of {}",
-                                crate::util::format_bytes(of.bytes),
-                                of.describe
-                            )
-                        };
-                        ui.label(
-                            egui::RichText::new(sentence)
-                                .size(11.0)
-                                .color(theme::TEXT_MUTED),
-                        );
                     }
                 });
             });
@@ -297,7 +285,14 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
         });
 
     if measure {
-        app.request_estimate(ctx);
+        app.over = Some(Popup::Measure);
+        // E1: it runs when it opens — but only when there is nothing to show. Re-opening a
+        // popup whose figures are still good must not spend three seconds of CPU proving
+        // they were right; that is what the popup's own *Measure again* is for, and it is
+        // also what stops a click landing on an in-flight run and starting a second one.
+        if !app.holds_estimate() {
+            app.request_estimate(ctx);
+        }
     }
 
     if create {
@@ -350,38 +345,6 @@ fn method_row(ui: &mut egui::Ui, app: &mut Indium, method: Method) {
                             }),
                     );
                 }
-
-                // P21's figures, in a lane of their own against the right edge — last in
-                // the row because a right-to-left layout claims whatever width is left,
-                // and claiming it before the `AES-256` tag would leave that tag nowhere
-                // to go. Monospace and right-aligned so the columns hold as the digits
-                // change (CORE §4), and told in text only: §6 refuses a sixth colour by
-                // name and "in particular no green for success", so a good ratio reads
-                // exactly like a bad one and the number does the talking.
-                let sampled = app.estimate_of.as_ref().is_some_and(|of| of.sampled);
-                let measured = app.estimates.iter().find(|m| m.method == method);
-                let failed = app.estimate_failed.iter().any(|(m, _)| *m == method);
-                if measured.is_some() || failed {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let text = match measured {
-                            Some(m) => figure_of(m, sampled),
-                            // A method this build of libarchive will not write is a row
-                            // that says so rather than a row that stays blank. The reason
-                            // itself is in the status bar; the lane keeps its width.
-                            None => "     unavailable".to_string(),
-                        };
-                        ui.label(
-                            egui::RichText::new(text)
-                                .family(theme::MONO)
-                                .size(11.0)
-                                .color(if selected {
-                                    theme::TEXT_SECONDARY
-                                } else {
-                                    theme::TEXT_MUTED
-                                }),
-                        );
-                    });
-                }
             });
             // Verbatim from CORE §5, held once in `tasks` and pinned by a test.
             ui.label(
@@ -394,14 +357,26 @@ fn method_row(ui: &mut egui::Ui, app: &mut Indium, method: Method) {
     });
 
     if response.clicked() {
-        app.new_method = method;
-        app.new_level = method.default_level();
-        // Encryption belongs to 7z alone (CORE §9), so choosing anything else drops it.
-        if method != Method::Lzma2 {
-            app.new_encrypt = false;
-        }
-        app.new_preset = preset_for(method, app.new_encrypt);
+        choose_method(app, method);
     }
+}
+
+/// Choose a method, and everything that follows from choosing it.
+///
+/// Four assignments, not one, and they are shared rather than copied because P21b gave the
+/// program a **second** place a method can be picked from — §4.10's Measure popup, where a
+/// row is clicked for the same reason it is clicked here. Two copies of this would have gone
+/// stale in the usual way: the encryption drop and the preset recomputation are the two a
+/// second copy forgets, and forgetting them leaves a lit chip describing a recipe nobody
+/// chose and AES-256 riding on a container that cannot carry it.
+pub(super) fn choose_method(app: &mut Indium, method: Method) {
+    app.new_method = method;
+    app.new_level = method.default_level();
+    // Encryption belongs to 7z alone (CORE §9), so choosing anything else drops it.
+    if method != Method::Lzma2 {
+        app.new_encrypt = false;
+    }
+    app.new_preset = preset_for(method, app.new_encrypt);
 }
 
 /// Which preset a hand-picked method corresponds to, so the chips stay honest about what
@@ -422,29 +397,6 @@ fn preset_for(method: Method, encrypt: bool) -> Preset {
     Preset::Balanced
 }
 
-/// The extension the chosen method implies.
-/// One measured candidate, in the fixed-width form the lane holds — P21.
-///
-/// `<level> · <ms> ms · <mark><ratio>%`.
-///
-/// **The level is printed on purpose.** The slider goes on moving after a measurement, and
-/// a figure that does not say which level it was taken at becomes quietly false the moment
-/// it is left behind. Printing it makes a stale row describe itself instead, in the same
-/// `method:level` idiom `recipe_sentence` already writes.
-///
-/// The mark is `~` when the input was sampled and a space when it was not, so the per-cent
-/// signs stay in one column either way — CORE §4's "numbers hold their columns" is about
-/// the marked case too.
-fn figure_of(m: &crate::estimate::Measurement, sampled: bool) -> String {
-    let level = match m.method.levels() {
-        Some(_) => format!("{:>2}", m.level),
-        // Store has no levels, so there is no number here to print.
-        None => "  ".to_string(),
-    };
-    let mark = if sampled { '~' } else { ' ' };
-    format!("{level} · {:>5} ms · {mark}{:>5.1}%", m.millis, m.ratio())
-}
-
 /// The Name field's contents for a recipe already staged — P21.
 ///
 /// `Path::file_stem` is wrong here, and quietly: it takes `photos.tar.gz` to `photos.tar`,
@@ -460,6 +412,7 @@ pub(super) fn stem_of(path: &std::path::Path, method: Method, encrypt: bool) -> 
     file.strip_suffix(ext).unwrap_or(&file).to_string()
 }
 
+/// The extension the chosen method implies.
 fn extension_for(method: Method, _encrypt: bool) -> &'static str {
     match method {
         Method::Store => ".tar",
