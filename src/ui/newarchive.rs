@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use eframe::egui;
 
 use super::{extract, Indium, Popup};
-use crate::tasks::{self, Method, Preset, Recipe, Task, METHODS};
+use crate::tasks::{self, Method, Preset, Recipe, METHODS};
 use crate::theme;
 
 /// CORE §4.1's instruction line, verbatim.
@@ -265,20 +265,30 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
 
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    let ready = !app.new_name.trim().is_empty() && !app.new_dir.trim().is_empty();
+                    let refusal = create_refusal_for(
+                        app.draft.is_empty(),
+                        app.new_name.trim().is_empty(),
+                        app.new_dir.trim().is_empty(),
+                    );
                     // Orange while it can be pressed, and the helper's muted ghost when it
                     // cannot: CORE §6 gives orange to "something *will* happen", and a Create
-                    // with no name and no directory is exactly the case where nothing will.
+                    // over an empty draft is exactly the case where nothing will.
                     create = theme::button(
                         ui,
                         egui::RichText::new("Create").color(theme::ORANGE),
-                        ready,
+                        refusal.is_none(),
                     )
                     .clicked();
+                    // Why it is dead, beside it — the same discipline Measure has followed
+                    // since P21b, and for the same reason: a disabled button reports no
+                    // click, so a sentence waiting for one never reaches the person who
+                    // needs it.
                     ui.label(
-                        egui::RichText::new("Nothing is written until you Apply · Esc closes")
-                            .size(12.0)
-                            .color(theme::TEXT_MUTED),
+                        egui::RichText::new(
+                            refusal.unwrap_or("Nothing is written until you Apply · Esc closes"),
+                        )
+                        .size(12.0)
+                        .color(theme::TEXT_MUTED),
                     );
                 });
             });
@@ -298,9 +308,10 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
     if create {
         let recipe = recipe_of(app);
         app.stage_creation(recipe);
-        // A staged creation adopts an archive that does not exist yet, and the title
-        // should name it just as an opened one does.
-        app.set_window_title(ctx);
+        // No `set_window_title` here any more. A staged creation used to adopt an archive
+        // that did not exist yet and the title named it; P22 adopts nothing, so the title
+        // goes on naming whatever is actually open — which is the truth it was invented to
+        // tell.
         // The second of the popup's two close paths, and the reason `cancel_estimate` is
         // called here as well as in `close_popup`: leaving `popup` assigned by hand skips
         // everything that one does, and a measurement outliving its popup is three seconds
@@ -438,50 +449,106 @@ fn recipe_of(app: &Indium) -> Recipe {
 }
 
 impl Indium {
-    /// Stage `Task::Create`, and adopt the archive that does not exist yet.
+    /// Project the draft onto the queue, and say what that displaced.
     ///
-    /// P4 §1: Create writes nothing. The window takes the chosen path, the entry
-    /// list is empty, the tray appears, and Apply builds it through the same lock,
-    /// verify and rename as every other rebuild. Writing an empty archive here instead
-    /// would touch the disk before anything had been staged, which is the surprise CORE
-    /// §3's ethic exists to prevent.
+    /// P4 §1: Create writes nothing. **P22: it also adopts nothing.** Until this round the
+    /// window took the chosen path right here — `archive_path`, the title, an emptied entry
+    /// list — which made `has_archive()` answer true for a file that had never been written
+    /// and put a phantom behind fourteen call sites. The archive that is open now stays open
+    /// and stays itself; what appears is a queue and a tray, and the window opens the result
+    /// once Apply has written it.
+    ///
+    /// There is no re-staging branch either. P21 needed one because the queue held the file
+    /// list and a second Create would have thrown it away; the draft holds it now, and
+    /// [`crate::tasks::Draft::project_onto`] rebuilds the queue from empty every press. That
+    /// is strictly stronger than keeping the adds: a file dropped from the draft between two
+    /// presses is dropped from the queue with it.
     pub fn stage_creation(&mut self, recipe: Recipe) {
         let name = recipe
             .path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
+        // Read before the projection, because it is what the projection is displacing.
+        let open = self
+            .archive_path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().to_string());
 
-        self.archive_path = Some(recipe.path.clone());
-        self.archive_bytes = 0;
-        self.archive_info = None;
-        self.section = super::Section::File;
-
-        // **Re-staging keeps the queue.** Until P21 this method cleared it unconditionally,
-        // which was invisible while the popup could not be reached a second time: pressing
-        // `N` again could only be starting over. The estimator needs the popup open *over*
-        // staged files — those are the bytes it measures — so a second Create now replaces
-        // the first in place and the adds staged against it survive. Nothing else is reset
-        // either, because a re-stage changes the recipe and not what is being packaged.
-        if self.tasks.set_creation(recipe.clone()) {
-            self.status = format!("Staged: create {name}. Add files, then Apply.").into();
-            return;
-        }
-
-        self.entries.clear();
-        self.selection.clear();
-        self.cwd.clear();
-        self.cursor = 0;
+        let displaced = self.draft.project_onto(&mut self.tasks, recipe);
+        // The queue no longer describes the archive that is open, so the listing it was
+        // staged against is not the listing Apply should refuse over.
         self.staged_against.clear();
-        self.tasks.clear();
-        self.tasks.push(Task::Create { recipe });
-        self.status = format!("Staged: create {name}. Add files, then Apply.").into();
+        // The draft is what the queue now describes, so it is what to be looking at.
+        self.section = super::Section::Draft;
+
+        self.status = if displaced == 0 {
+            format!("Staged: create {name}. Apply to build it.").into()
+        } else {
+            super::discarded_line(
+                &format!("Staged: create {name}"),
+                displaced,
+                open.as_deref(),
+            )
+            .into()
+        };
     }
+}
+
+/// Why *Create* cannot be pressed, or `None` if it can.
+///
+/// The draft comes first because it is the round's whole subject, and because it is the one
+/// a person fixes by leaving the popup: the name and the directory are seeded when the popup
+/// opens, so an empty draft is the refusal this will actually show.
+///
+/// Free rather than a method, for [`super::estimate_refusal_for`]'s reason — `Indium` cannot
+/// be built in a unit test, and a gate written as a method on it is held by eye.
+fn create_refusal_for(empty_draft: bool, no_name: bool, no_dir: bool) -> Option<&'static str> {
+    if empty_draft {
+        return Some("The draft is empty — add files to it first.");
+    }
+    if no_name {
+        return Some("Give it a name.");
+    }
+    if no_dir {
+        return Some("Say which directory it goes in.");
+    }
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// CORE §4.1: *"The popup's own button is dead, with a sentence, while the draft is
+    /// empty."*
+    ///
+    /// The draft is asked before the name and the directory because it is the refusal this
+    /// will actually show — `open_create` seeds both fields before the popup is drawn, so an
+    /// empty draft is the ordinary way to arrive here with nothing to build. It is also the
+    /// only one of the three you leave the popup to fix.
+    #[test]
+    fn create_is_dead_over_an_empty_draft_and_says_which() {
+        // empty_draft, no_name, no_dir
+        assert_eq!(create_refusal_for(false, false, false), None);
+
+        assert_eq!(
+            create_refusal_for(true, false, false),
+            Some("The draft is empty — add files to it first.")
+        );
+        assert_eq!(
+            create_refusal_for(true, true, true),
+            Some("The draft is empty — add files to it first."),
+            "with everything missing, the draft is still what to say"
+        );
+        assert!(create_refusal_for(false, true, false)
+            .expect("a nameless archive cannot be created")
+            .contains("name"));
+        assert!(create_refusal_for(false, false, true)
+            .expect("an archive with nowhere to go cannot be created")
+            .contains("directory"));
+    }
 
     /// The trap P21 walked into on paper before it walked into it in code.
     ///

@@ -866,9 +866,22 @@ impl Indium {
                     // the archive that was replaced. Re-open it rather than leave stale
                     // rows behind — the Inspector is the point of this program, and it
                     // must not describe a file that no longer exists.
+                    //
+                    // **Which archive to open is the recipe's business when this was a
+                    // creation.** Since P22 nothing adopts a path before there is a file at
+                    // it, so `archive_path` still names whatever was open while the new one
+                    // was being built — or nothing at all. The target has to come from the
+                    // queue, and it has to be read before the queue is cleared.
+                    let created = self.tasks.creation().map(|r| r.path.clone());
+                    let path = created.clone().or_else(|| self.archive_path.clone());
                     self.tasks.clear();
                     self.staged_against.clear();
-                    let path = self.archive_path.clone();
+                    if created.is_some() {
+                        // The draft has been spent: it is a file now. This is the one place
+                        // it is emptied, and the reason *Discard* can leave it standing.
+                        self.draft.clear();
+                        self.draft_cursor = 0;
+                    }
                     let pass = self.passphrase.take();
                     if let Some(path) = path {
                         self.open_archive(ctx, path, pass);
@@ -1206,10 +1219,25 @@ impl Indium {
     /// P4 §1's two refusals, asked before the user invests in a queue rather than after.
     /// The engine checks both again at Apply — this is the courtesy, that is the guard.
     pub fn staging_refusal(&self) -> Option<String> {
-        let path = self.archive_path.as_ref()?;
+        // **P22: a creation closes the door on the archive that is open.** They are two
+        // targets and `plan` folds toward one, so a `Rename` pushed into a queue whose
+        // target is `backup.7z` fails at Apply — a late failure of exactly the species D5
+        // exists to prevent. This used to return `None` here and let it through, which was
+        // harmless only because a staged creation cleared `entries` and left no rows for
+        // `Del` and `F2` to act on. P22 leaves the archive open and listed, so the guard
+        // that was a consequence of an empty table has to be said out loud.
+        //
+        // The asymmetry with Create is deliberate: Create displaces mutations and says what
+        // went, because a person choosing to build a new archive has chosen. A rename cannot
+        // displace a creation in the same way — nothing about `F2` says *and throw away the
+        // archive I was building* — so this direction refuses.
         if self.tasks.creation().is_some() {
-            return None;
+            return Some(
+                "A creation is staged — Apply or Discard it before changing this archive."
+                    .to_string(),
+            );
         }
+        let path = self.archive_path.as_ref()?;
         let info = self.archive_info.as_ref()?;
         let encrypted = self.entries.iter().any(|e| e.encrypted);
         match tasks::Recipe::from_info(info, path, encrypted) {
@@ -1356,10 +1384,20 @@ impl Indium {
     /// one is the other reason to be here.
     pub fn estimate_refusal(&self) -> Option<&'static str> {
         estimate_refusal_for(
-            self.tasks
-                .tasks()
-                .iter()
-                .any(|t| matches!(t, Task::Add { .. })),
+            // **The draft counts, and it is why P22 exists.** Before *Create* is pressed
+            // there are no tasks at all — the files live in the draft — and that is exactly
+            // the moment the popup now opens in. Folded into this one boolean rather than
+            // given a fifth parameter, because the existing order already produces the right
+            // sentence: a full draft short-circuits before `unread`, and an empty one with
+            // nothing open falls to "Add files, or open an archive", which is the correct
+            // words already. After a Create the queue's adds are the draft's projection, so
+            // the two halves of this `||` say the same thing.
+            !self.draft.is_empty()
+                || self
+                    .tasks
+                    .tasks()
+                    .iter()
+                    .any(|t| matches!(t, Task::Add { .. })),
             self.archive_path.is_some(),
             // **One fact, not two.** `archive_info` is what a successful listing produces, so
             // its absence is exactly "nothing at this path has ever been read" — the phantom
@@ -1390,15 +1428,26 @@ impl Indium {
         if let Some(why) = self.estimate_refusal() {
             return Err(why);
         }
-        let adds: Vec<(PathBuf, String)> = self
-            .tasks
-            .tasks()
-            .iter()
-            .filter_map(|t| match t {
-                Task::Add { source, dest } => Some((source.clone(), dest.clone())),
-                _ => None,
-            })
-            .collect();
+        // The draft first, because it is the source of truth. Before *Create* it is the only
+        // thing holding anything, which is what makes Measure live on the popup's first
+        // frame; after *Create* the queue's adds are its projection and the two say the same
+        // thing, so which one is read cannot matter.
+        let adds: Vec<(PathBuf, String)> = if !self.draft.is_empty() {
+            self.draft
+                .items()
+                .iter()
+                .map(|i| (i.source.clone(), i.dest.clone()))
+                .collect()
+        } else {
+            self.tasks
+                .tasks()
+                .iter()
+                .filter_map(|t| match t {
+                    Task::Add { source, dest } => Some((source.clone(), dest.clone())),
+                    _ => None,
+                })
+                .collect()
+        };
         if !adds.is_empty() {
             return Ok(EstimateSource::Staged(adds));
         }
@@ -2330,6 +2379,31 @@ fn clipboard_chords(events: &[egui::Event]) -> (bool, bool) {
     (copy, paste)
 }
 
+/// The status line for a door that loses staged work.
+///
+/// CORE §4, and the maker's ruling on it: both doors that can lose a queue act immediately —
+/// nothing to dismiss, nothing to decide — and say what went. **One function because it is
+/// one ruling.** A program that guards your staged renames when you press Create and drops
+/// them without a word when you press Close is a rule nobody could hold in their head, and
+/// the two sentences were about to be written separately.
+///
+/// `against` names the archive the lost changes described, when the sentence has room for it.
+/// Create is displacing work aimed somewhere else and can say where; Close is taking that
+/// archive with it and has already named it in the headline.
+///
+/// Free rather than a method, for [`estimate_refusal_for`]'s reason: `Indium` cannot be built
+/// in a unit test, and a sentence nobody can reach is a sentence nobody checks.
+pub fn discarded_line(headline: &str, discarded: usize, against: Option<&str>) -> String {
+    if discarded == 0 {
+        return format!("{headline}.");
+    }
+    let s = if discarded == 1 { "" } else { "s" };
+    match against {
+        Some(name) => format!("{headline} · {discarded} change{s} against {name} discarded."),
+        None => format!("{headline} · {discarded} staged change{s} discarded."),
+    }
+}
+
 /// Why Measure cannot run, or `None` if it can — as a function of the four facts it turns on.
 ///
 /// **Free rather than a method, and that is the point.** `Indium::new` wants an
@@ -2342,13 +2416,19 @@ fn clipboard_chords(events: &[egui::Event]) -> (bool, bool) {
 /// popup is open for; the archive already open comes second, because re-compressing one is
 /// the other reason to be here.
 ///
-/// **`unbuilt` is the case P21b found and P21 shipped without.** `stage_creation` adopts the
-/// recipe's path before anything exists at it, so `archive_path` is `Some` for a file
+/// **`unread` is the case P21b found and P21 shipped without.** `stage_creation` used to adopt
+/// the recipe's path before anything existed at it, so `archive_path` was `Some` for a file
 /// libarchive cannot open. The button was therefore live over a freshly staged creation, the
 /// worker failed in `Reader::open`, and the raw error went to the status bar while the Measure
 /// popup sat there with eight blank rows and no reason on it. A refusal that says so is both
 /// the honest answer and the one that reaches the person who needs it, because a disabled
 /// button never reports a click.
+///
+/// **P22 removed the phantom that made that case, and this stays anyway.** Nothing adopts a
+/// path before there is a file at it any more, so the creation half of `unread` can no longer
+/// arise — but the other three it covers can: a listing still in flight, a listing that
+/// failed, and `on_list_failure` leaving a partial `entries` behind. One fact, four causes,
+/// and the round that removed one of them is not a reason to start asking two questions.
 fn estimate_refusal_for(
     has_adds: bool,
     has_path: bool,
@@ -3494,6 +3574,14 @@ mod tests {
     #[test]
     fn measure_refuses_wherever_it_has_nothing_to_weigh_and_says_which() {
         // has_adds, has_path, unread, locked
+        //
+        // **This first row is the whole of P22 in one assertion.** `has_adds` carries the
+        // draft as well as the queue's adds since this round, so "a full draft with nothing
+        // open" is live — which is what makes Measure available on the Create popup's first
+        // frame, and what moving Create last was for. What the row cannot reach is *which*
+        // of the two filled the boolean: the mapping folds them, deliberately, because after
+        // a Create the queue's adds are the draft's projection and the two say the same
+        // thing. Only the window shows that the draft alone reaches it.
         assert_eq!(estimate_refusal_for(true, false, false, false), None);
         // Staged adds outrank everything: they are bytes on disk, whatever the window holds.
         assert_eq!(estimate_refusal_for(true, true, true, true), None);
@@ -3515,6 +3603,30 @@ mod tests {
                 "{adds}/{path}/{unread}/{locked}: {got:?} does not mention {want:?}"
             );
         }
+    }
+
+    /// F7 at the Create door: it displaces the queue and says what went.
+    ///
+    /// The sentence rather than the plumbing. [`discarded_line`] is where the maker's ruling
+    /// actually lives, and it is a free function so that the ruling can be *read* by a test
+    /// rather than looked at in a window — which is the only way the other door's sentence
+    /// can be held to the same words.
+    #[test]
+    fn create_says_what_it_displaced() {
+        assert_eq!(
+            discarded_line("Staged: create backup.7z", 4, Some("photos.zip")),
+            "Staged: create backup.7z · 4 changes against photos.zip discarded."
+        );
+        assert_eq!(
+            discarded_line("Staged: create backup.7z", 1, Some("photos.zip")),
+            "Staged: create backup.7z · 1 change against photos.zip discarded.",
+            "one change is not one changes"
+        );
+        assert_eq!(
+            discarded_line("Staged: create backup.7z", 0, Some("photos.zip")),
+            "Staged: create backup.7z.",
+            "nothing went, so nothing is said about it"
+        );
     }
 
     #[test]

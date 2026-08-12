@@ -416,26 +416,12 @@ impl Queue {
     }
 
     /// The recipe staged by a `Create`, if this queue creates an archive.
-    /// Swap the staged creation's recipe, keeping everything staged against it.
     ///
-    /// P21: re-opening Create over a staged creation must be able to change the
-    /// method without discarding the files already added to it — which is what lets the
-    /// estimator have anything to measure. `Task::Create` is documented "Only ever first,
-    /// and only ever one", and replacing it *in place* is what preserves that; pushing a
-    /// second would break the invariant the fold depends on.
-    ///
-    /// Returns false when there was no creation to replace, which is the caller's signal
-    /// that this is a first staging and the queue is its to reset.
-    pub fn set_creation(&mut self, recipe: Recipe) -> bool {
-        for task in self.tasks.iter_mut() {
-            if let Task::Create { recipe: staged } = task {
-                *staged = recipe;
-                return true;
-            }
-        }
-        false
-    }
-
+    /// `set_creation` stood beside this until P22, swapping a staged recipe in place so a
+    /// second Create would not discard the files already added to it. [`Draft::project_onto`]
+    /// replaces it: the queue is rebuilt from the draft on every press, which preserves
+    /// `Task::Create`'s *"only ever first, and only ever one"* by construction instead of by
+    /// careful mutation, and drops a file the draft has dropped instead of keeping it.
     pub fn creation(&self) -> Option<&Recipe> {
         self.tasks.iter().find_map(|t| match t {
             Task::Create { recipe } => Some(recipe),
@@ -2143,80 +2129,14 @@ mod tests {
         assert!(is_our_temp(".photos.tar.gz.indium-new"));
     }
 
-    /// P21: re-staging a creation keeps what was staged against it.
-    ///
-    /// `stage_creation` used to clear the queue, and nothing noticed because the popup
-    /// could not be re-opened over a staged creation in the first place — pressing `N`
-    /// twice could only ever be starting again. The estimator needs it open *over* staged
-    /// files, since those are the bytes it measures, so the second Create replaces the
-    /// first in place. Everything below is the invariant that replacement has to preserve:
-    /// `Task::Create` is "Only ever first, and only ever one".
-    #[test]
-    fn restaging_a_creation_keeps_the_files_already_added() {
-        let recipe = |method: Method| Recipe {
-            path: PathBuf::from("/tmp/a.tar.gz"),
-            method,
-            level: method.default_level(),
-            encrypt: false,
-        };
-
-        let mut queue = Queue::new();
-        queue.push(Task::Create {
-            recipe: recipe(Method::Gzip),
-        });
-        queue.push(Task::Add {
-            source: PathBuf::from("/tmp/one"),
-            dest: "one".to_string(),
-        });
-        queue.push(Task::Add {
-            source: PathBuf::from("/tmp/two"),
-            dest: "two".to_string(),
-        });
-
-        assert!(queue.set_creation(recipe(Method::Zstd)));
-
-        assert_eq!(
-            queue.creation().map(|r| r.method),
-            Some(Method::Zstd),
-            "the staged recipe did not take the new method"
-        );
-        assert_eq!(queue.len(), 3, "the files staged for adding were discarded");
-        assert!(
-            matches!(queue.tasks()[0], Task::Create { .. }),
-            "Create is no longer first"
-        );
-        assert_eq!(
-            queue
-                .tasks()
-                .iter()
-                .filter(|t| matches!(t, Task::Create { .. }))
-                .count(),
-            1,
-            "a second Create was pushed instead of the first being replaced"
-        );
-    }
-
-    /// And with nothing to replace it says so, which is how the caller knows this is a
-    /// first staging and the queue is its to reset.
-    #[test]
-    fn setting_a_creation_on_a_queue_that_has_none_reports_that_it_did_nothing() {
-        let mut queue = Queue::new();
-        queue.push(Task::Add {
-            source: PathBuf::from("/tmp/one"),
-            dest: "one".to_string(),
-        });
-        assert!(!queue.set_creation(Recipe {
-            path: PathBuf::from("/tmp/a.tar.gz"),
-            method: Method::Gzip,
-            level: 6,
-            encrypt: false,
-        }));
-        assert_eq!(
-            queue.len(),
-            1,
-            "a refused replacement still changed the queue"
-        );
-    }
+    // `restaging_a_creation_keeps_the_files_already_added` and its companion stood here
+    // until P22, holding `Queue::set_creation`. Both are gone with it, and deliberately:
+    // the premise changed. P21 needed the queue to keep its adds across a second Create
+    // because the queue was the only place the file list lived. The draft holds it now, and
+    // `create_projects_the_draft_onto_the_queue` above asserts something strictly stronger
+    // — the queue is rebuilt from the draft on every press, so a file dropped from the
+    // draft between two presses is dropped from the queue with it, which "keeps the files
+    // already added" would have let through.
 
     // -----------------------------------------------------------------------
     // The draft
