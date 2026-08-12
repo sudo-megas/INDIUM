@@ -1326,26 +1326,22 @@ impl Indium {
     /// the popup is open for; the archive already open comes second because re-compressing
     /// one is the other reason to be here.
     pub fn estimate_refusal(&self) -> Option<&'static str> {
-        if self
-            .tasks
-            .tasks()
-            .iter()
-            .any(|t| matches!(t, Task::Add { .. }))
-        {
-            return None;
-        }
-        if self.archive_path.is_none() {
-            return Some("Add files, or open an archive: there is nothing to measure yet.");
-        }
-        // The third case, and the one easiest to forget: reading an encrypted member needs
-        // the password, and CORE §9 does not keep one lying about.
-        if self.entries.iter().any(|e| e.encrypted) && self.passphrase.is_none() {
-            return Some("These members are encrypted, and measuring them needs the password.");
-        }
-        None
+        estimate_refusal_for(
+            self.tasks
+                .tasks()
+                .iter()
+                .any(|t| matches!(t, Task::Add { .. })),
+            self.archive_path.is_some(),
+            // "Named but never written." `stage_creation` adopts the recipe's path before
+            // anything exists at it, so these two facts together are the phantom.
+            self.tasks.creation().is_some() && self.archive_info.is_none(),
+            self.entries.iter().any(|e| e.encrypted) && self.passphrase.is_none(),
+        )
     }
 
     /// The bytes themselves, resolved once — on the click, never on the frame.
+    ///
+    /// See [`estimate_refusal_for`] for why the decision above it is a free function.
     pub fn estimate_source(&self) -> Result<EstimateSource, &'static str> {
         if let Some(why) = self.estimate_refusal() {
             return Err(why);
@@ -2253,6 +2249,48 @@ fn clipboard_chords(events: &[egui::Event]) -> (bool, bool) {
         }
     }
     (copy, paste)
+}
+
+/// Why Measure cannot run, or `None` if it can — as a function of the four facts it turns on.
+///
+/// **Free rather than a method, and that is the point.** `Indium::new` wants an
+/// `eframe::CreationContext`, so the application cannot be built in a unit test; every gate
+/// written as a method on it is held by construction and by eye, and this one was wrong for a
+/// whole round without anything noticing. Four booleans and a sentence each is not something
+/// that has to be unreachable.
+///
+/// The order is D5's. Files staged for adding come first, because packaging them is what the
+/// popup is open for; the archive already open comes second, because re-compressing one is
+/// the other reason to be here.
+///
+/// **`unbuilt` is the case P21b found and P21 shipped without.** `stage_creation` adopts the
+/// recipe's path before anything exists at it, so `archive_path` is `Some` for a file
+/// libarchive cannot open. The button was therefore live over a freshly staged creation, the
+/// worker failed in `Reader::open`, and the raw error went to the status bar while the Measure
+/// popup sat there with eight blank rows and no reason on it. A refusal that says so is both
+/// the honest answer and the one that reaches the person who needs it, because a disabled
+/// button never reports a click.
+fn estimate_refusal_for(
+    has_adds: bool,
+    has_path: bool,
+    unbuilt: bool,
+    locked: bool,
+) -> Option<&'static str> {
+    if has_adds {
+        return None;
+    }
+    if !has_path {
+        return Some("Add files, or open an archive: there is nothing to measure yet.");
+    }
+    if unbuilt {
+        return Some("Nothing has been added yet: this archive has not been built.");
+    }
+    // The case easiest to forget: reading an encrypted member needs the password, and CORE §9
+    // does not keep one lying about.
+    if locked {
+        return Some("These members are encrypted, and measuring them needs the password.");
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -3309,6 +3347,39 @@ mod tests {
             core.contains(&sentence),
             "CORE §4 does not open with {sentence:?}"
         );
+    }
+
+    /// Measure is dead in every state where it has nothing honest to measure, and says which.
+    ///
+    /// The `unbuilt` row is the one this test exists for. P21 shipped a button that was live
+    /// over a creation staged but never written — `archive_path` is `Some` the moment Create
+    /// is pressed — so the worker opened a file that was not there and the failure landed in
+    /// the status bar, one zone away from the popup that had asked for it. Nothing caught it
+    /// because the decision lived on `Indium`, which no test can build.
+    #[test]
+    fn measure_refuses_wherever_it_has_nothing_to_weigh_and_says_which() {
+        // has_adds, has_path, unbuilt, locked
+        assert_eq!(estimate_refusal_for(true, false, false, false), None);
+        // Staged adds outrank everything: they are bytes on disk, whatever the window holds.
+        assert_eq!(estimate_refusal_for(true, true, true, true), None);
+        // A real archive, listed and unencrypted.
+        assert_eq!(estimate_refusal_for(false, true, false, false), None);
+
+        for (adds, path, unbuilt, locked, want) in [
+            (false, false, false, false, "Add files, or open an archive"),
+            (false, true, true, false, "has not been built"),
+            // An unbuilt archive is unbuilt before it is locked: there are no members to be
+            // encrypted yet, so the password sentence would be the wrong reason.
+            (false, true, true, true, "has not been built"),
+            (false, true, false, true, "encrypted"),
+        ] {
+            let got = estimate_refusal_for(adds, path, unbuilt, locked)
+                .unwrap_or_else(|| panic!("{adds}/{path}/{unbuilt}/{locked} should refuse"));
+            assert!(
+                got.contains(want),
+                "{adds}/{path}/{unbuilt}/{locked}: {got:?} does not mention {want:?}"
+            );
+        }
     }
 
     #[test]

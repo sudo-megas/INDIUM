@@ -55,9 +55,11 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
         .show(ctx, |ui| {
             // A minimum, not a width. `set_width` fixes both bounds, and a table wider than
             // its bound does not overflow in egui — it *wraps*, which turns a grid into
-            // rubble. The floor keeps the sentence and the foot from crowding; the table
-            // takes whatever it needs above it, and every row asks not to be wrapped.
-            ui.set_min_width(520.0);
+            // rubble. The floor is low enough that **the table sets the width**: the grid
+            // below is wider than this, so the popup is exactly as wide as its own columns
+            // and there is no empty lane down the right-hand side for the table to be
+            // dwarfed by. Only a sentence longer than the grid can widen it further.
+            ui.set_min_width(460.0);
             // A `Modal` draws no title bar, so this label is the title, in the same Heading
             // style every other popup's bar carries.
             ui.label(egui::RichText::new("Measure").heading().color(theme::TEXT));
@@ -75,21 +77,34 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             // The header rides the same grid as the rows: one family, one size, so a column
             // heading stands over its column at every display scale. Two tiers of ink is what
             // tells it from the data, not weight and not size.
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(header())
-                        .family(theme::bold())
-                        .size(14.0)
-                        .color(theme::TEXT_MUTED),
-                )
-                .wrap_mode(egui::TextWrapMode::Extend),
-            );
+            //
+            // **And the same left inset**, which is not decoration: `theme::row` frames its
+            // content in `Margin::symmetric(8, 5)`, so a header drawn straight onto the popup
+            // sits eight points to the *left* of the column it names. At the window that read
+            // as every heading being a character adrift of its own numbers.
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(8, 0))
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(header())
+                                .family(theme::bold())
+                                .size(TABLE_PT)
+                                .color(theme::TEXT_MUTED),
+                        )
+                        .wrap_mode(egui::TextWrapMode::Extend),
+                    );
+                });
             ui.add_space(2.0);
             ui.add(egui::Separator::default().horizontal().spacing(6.0));
 
             egui::ScrollArea::vertical()
                 .max_height(theme::list_height(ctx, 300.0, 340.0))
-                .auto_shrink([false, false])
+                // Vertically it shrinks to what it holds, which costs nothing in stability
+                // here: all eight rows stand from the first frame, so the list is the same
+                // height before the figures land as after. Refusing to shrink left a hand's
+                // width of empty ground between the last method and the foot.
+                .auto_shrink([false, true])
                 .show(ui, |ui| {
                     // **All eight rows, from the first frame.** Growing the table as figures
                     // land would reflow it eight times and move every row under the pointer
@@ -148,12 +163,12 @@ fn method_row(ui: &mut egui::Ui, app: &Indium, method: Method, chose: &mut Optio
     let measured = app.estimates.iter().find(|m| m.method == method);
     let failed = app.estimate_failed.iter().any(|(m, _)| *m == method);
 
-    let response = theme::row(ui, selected, egui::Margin::symmetric(8, 5), |ui| {
+    let response = theme::row(ui, selected, egui::Margin::symmetric(8, ROW_PAD), |ui| {
         ui.add(
             egui::Label::new(
                 egui::RichText::new(row_text(method, measured, failed, sampled))
                     .family(theme::bold())
-                    .size(14.0)
+                    .size(TABLE_PT)
                     .color(if selected {
                         theme::TEXT
                     } else {
@@ -174,6 +189,21 @@ fn method_row(ui: &mut egui::Ui, app: &Indium, method: Method, chose: &mut Optio
 // Written out as constants rather than inlined, because the header and the three kinds of row
 // have to agree about them and a width typed four times is a width that will drift.
 
+/// The type size of the whole table, header and rows alike.
+///
+/// **Sixteen, and the number is the point of this popup.** The figures were 11 pt in a lane
+/// on a method row when the maker first saw them, which is why they are here at all; putting
+/// them on a surface of their own and then setting them at the body size would have moved the
+/// problem rather than fixed it. The table is the largest text in the window after a title,
+/// and the popup is sized by it rather than the other way round.
+const TABLE_PT: f32 = 16.0;
+
+/// The breathing room above and below a row's text.
+///
+/// Eight rather than five so eight rows fill the height the popup wants to be, instead of
+/// standing in the top two-thirds of it with a hand's width of empty ground beneath.
+const ROW_PAD: i8 = 8;
+
 const METHOD_W: usize = 8;
 const LEVEL_W: usize = 5;
 /// Wide enough for `99999 ms` — two orders of magnitude past the slowest candidate a 2 MiB
@@ -188,7 +218,12 @@ const TIME_W: usize = 9;
 /// actually produce under its own budget and shifted the ratio column on the one it cannot.
 const SIZE_W: usize = 10;
 const RATIO_W: usize = 7;
-const GAP: &str = "  ";
+/// The space between two columns.
+///
+/// Four rather than two, because the popup is the table's and the table should fill it. The
+/// alternative was leaving the grid narrow and letting the popup stand wider than its own
+/// content, which is the empty lane down the right-hand side the maker circled.
+const GAP: &str = "    ";
 /// The four numeric columns and the gaps between them, for the one cell that spans them all.
 const FIGURES_W: usize = LEVEL_W + TIME_W + SIZE_W + RATIO_W + 3 * GAP.len();
 /// Every row this file produces is exactly this many characters wide.
