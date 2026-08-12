@@ -464,6 +464,122 @@ impl Queue {
 }
 
 // ---------------------------------------------------------------------------
+// The draft
+// ---------------------------------------------------------------------------
+
+/// One thing that will go into the next archive: a file on disk, and the name it takes
+/// inside the archive.
+///
+/// The same pair `Task::Add` carries, and deliberately so — the projection below turns one
+/// into the other and has nothing to invent on the way.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftItem {
+    pub source: PathBuf,
+    pub dest: String,
+}
+
+/// What the next archive will be made of.
+///
+/// CORE §3: *"a plain list of what the next archive will be made of, holding no mutation of
+/// anything, folding nothing, and becoming tasks only when Create is pressed. A queue
+/// describes changes to one archive and folds toward it; a draft names a thing that does not
+/// exist yet."* That is the whole reason this is not a second [`Queue`]: `plan` folds toward
+/// one target, and *"rename inside photos.zip"* and *"build backup.7z out of these"* are two.
+///
+/// **The draft is the source of truth until Apply succeeds**, and the queue's creation lane
+/// is a projection of it, recomputed by [`Draft::project_onto`] every time *Create* is
+/// pressed. That is what leaves the P21 drift nowhere to live: a method chosen in Measure
+/// used to write the popup's fields while the staged recipe kept the old one, because the
+/// two were separate states that looked like one. There is now no state in the queue's adds
+/// that the draft did not put there this press.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Draft {
+    items: Vec<DraftItem>,
+}
+
+impl Draft {
+    pub fn new() -> Draft {
+        Draft::default()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn items(&self) -> &[DraftItem] {
+        &self.items
+    }
+
+    /// Put one file in the draft, and report what it displaced.
+    ///
+    /// **One item per `dest`.** Two items sharing a name inside the archive is a silent
+    /// loss: the fold below resolves an add over an existing name by replacing it, so the
+    /// second would win at Apply and the first would vanish having never been refused.
+    /// Replacing here makes the same outcome visible at the moment it is chosen, and the
+    /// displaced item comes back so the caller can say so. The row keeps its position
+    /// rather than moving to the end, because a list that reorders under a person's hand
+    /// is a list they have to re-read.
+    pub fn add(&mut self, source: PathBuf, dest: String) -> Option<DraftItem> {
+        if let Some(i) = self.items.iter().position(|it| it.dest == dest) {
+            return Some(std::mem::replace(
+                &mut self.items[i],
+                DraftItem { source, dest },
+            ));
+        }
+        self.items.push(DraftItem { source, dest });
+        None
+    }
+
+    pub fn remove(&mut self, index: usize) -> Option<DraftItem> {
+        if index < self.items.len() {
+            Some(self.items.remove(index))
+        } else {
+            None
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.items.clear();
+    }
+
+    /// Rewrite `queue` as `recipe` plus this draft, and report what that displaced.
+    ///
+    /// This is the projection. It runs on every *Create* press rather than merging into
+    /// what is already there, which is what makes the draft the source of truth: the queue
+    /// cannot hold an add the draft has since dropped, or miss one it has since gained.
+    ///
+    /// What it displaces depends on what the queue was. A queue that already creates is
+    /// this draft's own previous projection, and its adds are regenerated below rather than
+    /// lost — nothing went. A queue that does not create is a set of mutations of the
+    /// archive that is open, and every one of them goes: `plan` folds toward one target and
+    /// these name another. The count comes back so the caller can say what went, which is
+    /// the maker's ruling for both doors that lose staged work.
+    ///
+    /// `Task::Create` is documented *"Only ever first, and only ever one"*, and building the
+    /// queue from empty is what makes that true by construction rather than by care.
+    pub fn project_onto(&self, queue: &mut Queue, recipe: Recipe) -> usize {
+        let displaced = if queue.creation().is_some() {
+            0
+        } else {
+            queue.len()
+        };
+        queue.clear();
+        queue.push(Task::Create { recipe });
+        for item in &self.items {
+            queue.push(Task::Add {
+                source: item.source.clone(),
+                dest: item.dest.clone(),
+            });
+        }
+        displaced
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The plan
 // ---------------------------------------------------------------------------
 
@@ -2100,6 +2216,174 @@ mod tests {
             1,
             "a refused replacement still changed the queue"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // The draft
+    // -----------------------------------------------------------------------
+
+    fn draft_of(names: &[&str]) -> Draft {
+        let mut draft = Draft::new();
+        for n in names {
+            draft.add(PathBuf::from(format!("/tmp/{n}")), n.to_string());
+        }
+        draft
+    }
+
+    fn a_recipe(method: Method) -> Recipe {
+        Recipe {
+            path: PathBuf::from("/tmp/backup.tar.gz"),
+            method,
+            level: method.default_level(),
+            encrypt: false,
+        }
+    }
+
+    fn dests(queue: &Queue) -> Vec<String> {
+        queue.tasks()[1..]
+            .iter()
+            .map(|t| match t {
+                Task::Add { dest, .. } => dest.clone(),
+                other => panic!("not an add: {other:?}"),
+            })
+            .collect()
+    }
+
+    /// The projection: a draft plus a recipe *is* the queue, rebuilt from empty each press.
+    ///
+    /// This holds what P21's `set_creation` held — Create first, and only ever one — and one
+    /// thing besides, which is the point of the round: a second press **refreshes** the adds
+    /// from the draft rather than preserving whatever the first press left behind. A file
+    /// dropped from the draft between the two presses is dropped from the queue with it, so
+    /// a recipe can never be staged beside a stale list of what it is building.
+    #[test]
+    fn create_projects_the_draft_onto_the_queue() {
+        let mut draft = draft_of(&["one", "two", "three"]);
+        let mut queue = Queue::new();
+
+        assert_eq!(draft.project_onto(&mut queue, a_recipe(Method::Gzip)), 0);
+        assert_eq!(queue.len(), 4, "one Create and one Add per item");
+        assert!(
+            matches!(queue.tasks()[0], Task::Create { .. }),
+            "Create is not first"
+        );
+        assert_eq!(
+            queue
+                .tasks()
+                .iter()
+                .filter(|t| matches!(t, Task::Create { .. }))
+                .count(),
+            1,
+            "a second Create was pushed instead of the queue being rebuilt"
+        );
+        assert_eq!(
+            dests(&queue),
+            ["one", "two", "three"],
+            "the dests are the draft's, in the draft's order"
+        );
+
+        // Second press: a different method, and one fewer file.
+        draft.remove(2);
+        assert_eq!(
+            draft.project_onto(&mut queue, a_recipe(Method::Zstd)),
+            0,
+            "re-Create over its own projection displaces nothing"
+        );
+        assert_eq!(queue.creation().map(|r| r.method), Some(Method::Zstd));
+        assert_eq!(
+            dests(&queue),
+            ["one", "two"],
+            "the removed file is still staged — the queue was merged into, not rebuilt"
+        );
+    }
+
+    /// A creation displaces mutations staged against the archive that is open, and reports
+    /// how many. The maker's ruling for both doors that lose staged work is to say what went.
+    #[test]
+    fn create_over_staged_mutations_displaces_them_and_counts_them() {
+        let mut queue = Queue::new();
+        queue.push(Task::Rename {
+            from: "a".into(),
+            to: "b".into(),
+        });
+        queue.push(Task::Rename {
+            from: "c".into(),
+            to: "d".into(),
+        });
+        queue.push(Task::Remove { path: "e".into() });
+
+        let draft = draft_of(&["one"]);
+        assert_eq!(
+            draft.project_onto(&mut queue, a_recipe(Method::Gzip)),
+            3,
+            "the changes against the open archive went unreported"
+        );
+        assert_eq!(queue.len(), 2, "a displaced task is still in the queue");
+    }
+
+    /// Projecting does not consume the draft, and that is what makes *Discard* safe: it
+    /// clears the queue, and the basket a person built is still there to build from.
+    #[test]
+    fn projecting_does_not_consume_the_draft() {
+        let draft = draft_of(&["one", "two"]);
+        let mut queue = Queue::new();
+        draft.project_onto(&mut queue, a_recipe(Method::Gzip));
+
+        queue.clear(); // what Discard does
+        assert_eq!(draft.len(), 2, "the draft went with the queue");
+
+        assert_eq!(draft.project_onto(&mut queue, a_recipe(Method::Gzip)), 0);
+        assert_eq!(queue.len(), 3, "the draft could not be built from twice");
+    }
+
+    /// One item per name inside the archive, replaced in place, and the displaced one comes
+    /// back so it can be said out loud rather than lost at Apply.
+    #[test]
+    fn a_second_item_with_the_same_name_replaces_the_first_in_place() {
+        let mut draft = draft_of(&["one", "two"]);
+
+        let displaced = draft.add(PathBuf::from("/elsewhere/one"), "one".to_string());
+        assert_eq!(
+            displaced.map(|d| d.source),
+            Some(PathBuf::from("/tmp/one")),
+            "the replaced item was not reported"
+        );
+        assert_eq!(draft.len(), 2, "the collision grew the draft instead");
+        assert_eq!(draft.items()[0].source, PathBuf::from("/elsewhere/one"));
+        assert_eq!(
+            draft.items()[0].dest,
+            "one",
+            "the row moved instead of staying"
+        );
+        assert_eq!(draft.items()[1].dest, "two");
+    }
+
+    /// A draft names a file on disk and the name it will take, and the two are independent.
+    /// That independence is what lets an item pulled out of an archive outlive it.
+    ///
+    /// What this reaches is the projection: both halves are copied through untouched, so no
+    /// task a draft builds refers back to any archive. What it cannot reach is the pull —
+    /// that entries are written to disk *before* they enter the draft is a fact about
+    /// `Kind::Draft` and the worker, and only the window shows that.
+    #[test]
+    fn a_draft_names_a_file_and_the_name_it_will_take() {
+        let mut draft = Draft::new();
+        draft.add(
+            PathBuf::from("/run/user/1000/indium/dr-42-1/photos/a.jpg"),
+            "photos/a.jpg".to_string(),
+        );
+        let mut queue = Queue::new();
+        draft.project_onto(&mut queue, a_recipe(Method::Gzip));
+
+        let Task::Add { source, dest } = &queue.tasks()[1] else {
+            panic!("the projection did not produce an add");
+        };
+        assert_eq!(
+            source,
+            Path::new("/run/user/1000/indium/dr-42-1/photos/a.jpg"),
+            "the source stopped being where the file actually is"
+        );
+        assert_eq!(dest, "photos/a.jpg", "the name inside the archive drifted");
     }
 
     #[test]
