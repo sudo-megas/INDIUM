@@ -1,3 +1,26 @@
+indium (2.0.0-1) unstable; urgency=medium
+
+  * The New Archive popup measures instead of asserting. A Measure action runs all eight
+    compression methods over the files you have actually staged — or over the archive you
+    have open — on this machine, and prints each one's level, elapsed time and resulting
+    ratio beside the sentence describing it. The sentences stay: a number says how much,
+    a sentence says what for.
+  * The figures are exact where they can be. Inputs of 2 MiB or less are compressed
+    whole, through the same writers a rebuild uses, so the size shown is the size a
+    rebuild would produce. Larger inputs are sampled across their whole length rather
+    than from the front, and every figure taken from a sample is marked with a leading
+    "~" — sampling predicts speed well and gzip and zstd's ratios closely, but it cannot
+    predict xz's, whose dictionary depends on matches a sample necessarily breaks up.
+  * The candidates run one at a time and can be stopped. Closing the popup ends a
+    measurement, and starting a rebuild or an extraction takes priority over one.
+    Nothing is ever encrypted to measure it, and no password is ever asked for.
+  * New Archive can be re-opened over a staged creation without discarding the files
+    already added to it, and shows the recipe that is actually staged.
+  * Text renders without sub-pixel binning. The window is monospace throughout, so the
+    even kerning it buys was already there, and the blur it costs was not worth paying.
+
+ -- sudo-megas <sudo-megas@users.noreply.github.com>  Wed, 12 Aug 2026 15:40:00 +0300
+
 indium (1.2.0-4) unstable; urgency=medium
 
   * The line under the name in the About window, and the description these packages
