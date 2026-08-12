@@ -1,9 +1,9 @@
 //! Measure — CORE §4's tenth popup, and the first that stands over another.
 //!
-//! §4.10: "Opened by **Measure** on the New Archive popup, and drawn over it. It holds
+//! §4.10: "Opened by **Measure** on the Create popup, and drawn over it. It holds
 //! nothing but the measurements: one row per method, with the level each was built at, the
 //! time it took, the size it produced and the ratio that follows. It runs when it opens and
-//! keeps its figures for as long as New Archive lives. Clicking a row chooses that method.
+//! keeps its figures for as long as Create lives. Clicking a row chooses that method.
 //! A `~` marks a figure the sample could not promise."
 //!
 //! **Why it is a popup of its own.** P21 wrote these figures into a lane on the method row —
@@ -30,12 +30,12 @@ use crate::theme;
 
 pub fn show(app: &mut Indium, ctx: &egui::Context) {
     // **Both slots, deliberately.** `over` alone is not enough: sixteen sites assign
-    // `app.popup` by hand, the New Archive window is an `egui::Window` rather than a modal, so
+    // `app.popup` by hand, the Create window is an `egui::Window` rather than a modal, so
     // the sidebar beneath it stays clickable, and `Ctrl+O` fires whatever is open. The frame
     // that swaps the popup underneath is the frame this must not draw on. `ui()` sweeps the
     // stale `over` immediately afterwards; this is the half that keeps the picture honest
     // within the frame itself.
-    if app.over != Some(Popup::Measure) || app.popup != Some(Popup::NewArchive) {
+    if app.over != Some(Popup::Measure) || app.popup != Some(Popup::Create) {
         return;
     }
 
@@ -65,7 +65,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             ui.label(egui::RichText::new("Measure").heading().color(theme::TEXT));
             ui.add_space(4.0);
             // What the figures rest on, stated above them rather than left to be assumed.
-            // This sentence used to sit on the New Archive heading line, beside a button; it
+            // This sentence used to sit on the Create heading line, beside a button; it
             // belongs with the numbers it describes.
             ui.label(
                 egui::RichText::new(statement(app.estimate_of.as_ref(), app.estimate_running))

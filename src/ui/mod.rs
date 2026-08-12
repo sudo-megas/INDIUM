@@ -2,7 +2,7 @@
 //!
 //! CORE §4: "Five fixed zones and ten popups. Nothing else appears, ever." P2 §5 added
 //! the password prompt by the maker's ordered CORE edit; P4 fills in the two the count
-//! always allowed for — New Archive and Pending tasks — and puts rename in the table
+//! always allowed for — Create and Pending tasks — and puts rename in the table
 //! rather than making it another. P12 numbers the two §4 had been running without: Open,
 //! which the keyboard table has carried since P1, and Keys. P21b raises the count to ten,
 //! by the maker's lifting of the cap, for Measure — the first popup to stand over another.
@@ -94,7 +94,7 @@ pub enum InspectorTab {
 /// the only one that stands *over* another, in [`Indium::over`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Popup {
-    NewArchive,
+    Create,
     PendingTasks,
     Extract,
     About,
@@ -115,7 +115,7 @@ impl Popup {
     /// adding it here, or without numbering it in the document, fails that test either way,
     /// which is the drift the whole arrangement is for.
     pub const ALL: &'static [Popup] = &[
-        Popup::NewArchive,
+        Popup::Create,
         Popup::PendingTasks,
         Popup::Extract,
         Popup::OpenWith,
@@ -303,7 +303,7 @@ pub struct Indium {
     pub rename_target: Option<String>,
     pub rename_input: String,
 
-    // --- New Archive (P4 §5) ----------------------------------------------
+    // --- Create (P4 §5) ----------------------------------------------
     pub new_name: String,
     pub new_dir: String,
     pub new_preset: tasks::Preset,
@@ -337,7 +337,7 @@ pub struct Indium {
     /// The popup drawn *over* [`Indium::popup`] — P21b, and CORE §4's *"Close the topmost
     /// popup"* becoming literally true for the first time.
     ///
-    /// Only ever `Popup::Measure`, and only ever over `Popup::NewArchive`. Typed as the enum
+    /// Only ever `Popup::Measure`, and only ever over `Popup::Create`. Typed as the enum
     /// rather than as a `bool` so the pair reads as one stack in every place that touches it,
     /// and so a second over-popup would need no new field.
     ///
@@ -1076,7 +1076,7 @@ impl Indium {
 
     pub fn close_popup(&mut self) {
         // P21: a measurement belongs to the popup that asked for it. Left running it would
-        // spend three seconds of CPU on figures with nowhere to appear, and the New Archive
+        // spend three seconds of CPU on figures with nowhere to appear, and the Create
         // popup has a second close path of its own — the `X` at `newarchive.rs` — which
         // calls this for exactly that reason rather than clearing `popup` by hand.
         self.cancel_estimate();
@@ -1259,7 +1259,7 @@ impl Indium {
         self.stage(Task::Rename { from, to });
     }
 
-    /// `N` — seed and open the New Archive popup.
+    /// `N` — seed and open the Create popup.
     ///
     /// **Re-openable since P21.** Resetting to Balanced unconditionally was harmless while
     /// `stage_creation` cleared the queue behind it: pressing `N` a second time could only
@@ -1267,7 +1267,7 @@ impl Indium {
     /// which is what lets the estimator measure them — re-opening has to show the recipe
     /// that is *staged*, or the popup would sit there offering to build something other
     /// than the thing actually pending.
-    pub fn open_new_archive(&mut self) {
+    pub fn open_create(&mut self) {
         self.new_advanced = false;
 
         if let Some(recipe) = self.tasks.creation().cloned() {
@@ -1305,7 +1305,7 @@ impl Indium {
             self.new_name = "archive".to_string();
         }
 
-        self.popup = Some(Popup::NewArchive);
+        self.popup = Some(Popup::Create);
     }
 
     // -----------------------------------------------------------------------
@@ -1602,7 +1602,7 @@ impl Indium {
                 Status::bad("An extraction is already running. Cancel it, or let it finish.");
             return;
         }
-        // P21: real work preempts a measurement. New Archive is an `egui::Window` rather
+        // P21: real work preempts a measurement. Create is an `egui::Window` rather
         // than a `Modal`, so the tray strip stays clickable underneath it and Apply can
         // genuinely start while the eight candidates are running. The estimate is advisory
         // and the rebuild is not, so the advisory one goes.
@@ -2344,18 +2344,18 @@ impl eframe::App for Indium {
 
         // And the same treatment for the second slot, for the same reason and one worse.
         //
-        // `over` is only ever `Measure`, and Measure only ever stands over New Archive. Sixteen
+        // `over` is only ever `Measure`, and Measure only ever stands over Create. Sixteen
         // sites assign `self.popup` by hand without going through `close_popup` — the sidebar
-        // and the keyboard table among them, and both are reachable while New Archive is open,
+        // and the keyboard table among them, and both are reachable while Create is open,
         // because §4.1's popup is an `egui::Window` and not a modal. Left unswept, pressing `,`
         // over an open Measure would park the over-popup in the state, and pressing `N` a minute
         // later would raise it again over figures measured from an input that had since changed.
         //
-        // Sweeping the figures with it is what makes E1's *"discarded when New Archive closes"*
+        // Sweeping the figures with it is what makes E1's *"discarded when Create closes"*
         // true on **every** close path rather than on the four that call `close_popup`. That
         // half was already leaking before this round; it was invisible while the figures were
         // drawn only inside the popup that was going away.
-        if self.popup != Some(Popup::NewArchive) && (self.over.is_some() || self.holds_estimate()) {
+        if self.popup != Some(Popup::Create) && (self.over.is_some() || self.holds_estimate()) {
             self.over = None;
             self.cancel_estimate();
         }
@@ -2457,7 +2457,7 @@ impl Indium {
             // P21b: the topmost popup, which for the first time in the program's life may be
             // one standing on another. It closes alone — the measurement underneath it is not
             // cancelled and its figures are not discarded, because E1 keeps them for as long
-            // as New Archive lives and a run three seconds in still has somewhere to land.
+            // as Create lives and a run three seconds in still has somewhere to land.
             if self.over.is_some() {
                 self.over = None;
                 return;
@@ -2510,7 +2510,7 @@ impl Indium {
         // CORE §4's bare letters are shortcuts, so they must not fire into a popup that
         // happens to hold no focused text field. About and Settings never focus anything,
         // and P4's two new popups are full of chips, rows and a slider that hold nothing
-        // either — without this guard, pressing `E` inside New Archive would silently
+        // either — without this guard, pressing `E` inside Create would silently
         // swap it for the Extract popover.
         if typing || self.popup.is_some() || self.rename_target.is_some() {
             return;
@@ -2582,7 +2582,7 @@ impl Indium {
         });
 
         if new_archive {
-            self.open_new_archive();
+            self.open_create();
         }
         if open_picker {
             self.request_picker(ctx, PickerFor::Open);

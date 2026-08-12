@@ -52,7 +52,7 @@ pub enum Container {
 impl Method {
     /// CORE §5's verdict for this method, **verbatim**.
     ///
-    /// CORE §5: "This copy ships in the New Archive popup, one honest sentence each,
+    /// CORE §5: "This copy ships in the Create popup, one honest sentence each,
     /// static in v1.x — the live estimator that measures *your* data on *your* CPU is
     /// V2.0." Typed here and read back out of `CORE.md` itself by
     /// `every_method_verdict_is_core_section_five_verbatim`, so an edit to the document
@@ -271,7 +271,7 @@ fn method_for(info: &ArchiveInfo) -> Option<Method> {
     None
 }
 
-/// The live sentence at the foot of the New Archive popup.
+/// The live sentence at the foot of the Create popup.
 ///
 /// CORE §4.1: "a live sentence states exactly what will be built: *"Building
 /// photos-2026.7z — 7z, LZMA2:19, AES-256."*"
@@ -418,7 +418,7 @@ impl Queue {
     /// The recipe staged by a `Create`, if this queue creates an archive.
     /// Swap the staged creation's recipe, keeping everything staged against it.
     ///
-    /// P21: re-opening New Archive over a staged creation must be able to change the
+    /// P21: re-opening Create over a staged creation must be able to change the
     /// method without discarding the files already added to it — which is what lets the
     /// estimator have anything to measure. `Task::Create` is documented "Only ever first,
     /// and only ever one", and replacing it *in place* is what preserves that; pushing a
@@ -1856,7 +1856,7 @@ mod tests {
             .contains("99 bytes instead of 10"));
     }
 
-    /// CORE §5's verdicts ship in the New Archive popup, and this reads them out of the
+    /// CORE §5's verdicts ship in the Create popup, and this reads them out of the
     /// document rather than out of a second hand-copy.
     ///
     /// Until P18 the copy is what it compared against — eight sentences typed twice in this

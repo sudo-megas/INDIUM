@@ -21,7 +21,12 @@ All format work happens **inside the process.** INDIUM never runs `7z`, `tar`, `
 supported by code linked into the binary, on every machine, whether or not any archive
 tool is installed.
 
-One archive per window. Opening a second archive opens a second window. There are no tabs.
+One archive per window, and no tabs. A window holds one archive at a time; a *file manager*
+asking INDIUM to open a second gets a second window, because that is what the desktop means
+by opening a file. From inside the program the rule runs the other way: you close the file
+you have, and the next archive you name takes this window. Until P22 there was no way to
+leave an archive at all — the second half of this rule had to be written before it could
+be true.
 
 ---
 
@@ -97,7 +102,7 @@ One binary crate, `indium`, with modules. No workspace, no premature abstraction
 | `arch` | Hand-written FFI over system libarchive (~15 functions) and the safe wrapper around it. Listing streams entries over a channel from a worker thread; extraction runs with libarchive's secure flags (`SECURE_SYMLINKS`, `SECURE_NODOTDOT`) so a hostile archive cannot write outside its target. |
 | `sevenz` | The 7z half, over `sevenz-rust2`: AES-256 writing, which libarchive cannot do, and the detail the generic reader does not expose — solid blocks, the per-entry method, and headers that are themselves encrypted. It sits beside `arch` rather than inside it because `arch`'s own first sentence is hand-written FFI over the system libarchive, and a crate-backed backend does not belong inside that sentence. |
 | `model` | Archive state: entries, selection, the open archive's identity. |
-| `tasks` | The staging engine. Every mutation — add, remove, rename, create — is a task in a queue. **Apply** builds the new archive in a temp file beside the target, verifies it by walking its entries, then atomically renames over the original. The original is never touched until the replacement is proven. |
+| `tasks` | The staging engine, and the draft that feeds it. Every mutation — add, remove, rename, create — is a task in a queue; **Apply** builds the new archive in a temp file beside the target, verifies it by walking its entries, then atomically renames over the original, and the original is never touched until the replacement is proven. The **draft** is the other half, and deliberately not a second queue: a plain list of what the next archive will be made of, holding no mutation of anything, folding nothing, and becoming tasks only when *Create* is pressed. A queue describes changes to one archive and folds toward it; a draft names a thing that does not exist yet. The draft is the source of truth until Apply succeeds, and the queue's creation lane is a projection of it, recomputed every time *Create* is pressed. |
 | `estimate` | Measures instead of asserting. It runs the real writers over the real input on the real CPU, so §5's eight sentences stand beside a time and a ratio from *this* machine rather than from folklore. It owns no format knowledge of its own — it drives the same `Sink` Apply drives, into a scratch file it deletes — and it is the one module in the program allowed to be wrong out loud: at or under its budget it measures the whole input and the figure is exact, above it the input is sampled and every figure says so, because chopping a stream costs LZMA the long-range matches its dictionary lives on and no amount of arithmetic gets them back. |
 | `ui` | The window: sidebar, table, Inspector, tray, status bar, and every popup. |
 | `platform` | The Linux specifics: clipboard, `.desktop` parsing for Open With, default-app registration, XDG paths, the second window — on this platform a window is a process, and opening one is a Linux specific like the rest — and handing a directory to the desktop's file manager, which is the portal's job for the same reason the picker is. |
@@ -119,23 +124,39 @@ ends. They are never written to settings, recents, or anywhere else.
 
 Five fixed zones and ten popups. Nothing else appears, ever.
 
-**Sidebar** (family style): the wordmark at top, then *Open file* `O` and *Archive* `1`; a
-rule; then *Bookmarks* `2` and *Recent files* `3`; at the bottom *New* `N`, *Settings* `,`,
-*About* `A`. Numbers and letters are bare keypresses, as in JADEITE. Every row carries a
-leading glyph in the same ink as its label, so the column can be found by shape before it is
-read; §6 says which glyphs and what they are allowed to do.
+**Sidebar** (family style): the wordmark at top, then *File* `1`, *Draft* `2` and *Create*
+`N`; a rule; then *Open file* `O`, *Recent files* `3` and *Bookmarks* `4`; at the bottom
+*Settings* `,` and *About* `A`. Numbers and letters are bare keypresses, as in JADEITE. Every
+row carries a leading glyph in the same ink as its label, so the column can be found by shape
+before it is read; §6 says which glyphs and what they are allowed to do.
 
-The archive sits above the rule and the two lists below it because the first thing a person
-looks for is the archive they are already inside — the order used to run the other way, and a
-testing round said so plainly. *Open file* keeps the archive's company for the same reason: it
-is how you get into one. The rule is a rule and not a gap; §6 fixes what it has to be to be
-seen.
+The three groups are three questions, in the order a person asks them. Above the rule is the
+archive you are in or making — the file, the draft it will be built from, and the control that
+builds it, which are one piece of work and sit together. Below the rule is how you reach
+another one — the picker, the history, the shelf. At the bottom is the program itself, which
+is about no archive at all. Two rows moved in P22 to make that true: *Create* came up from the
+bottom, because it is the last step of the work above the rule and not a utility beside
+Settings, and *Open file* went down, because it is a way in rather than something you are
+holding. The rule is a rule and not a gap; §6 fixes what it has to be to be seen.
 
 **Entry table**: virtualized; columns Name, Size, Packed, Method; a breadcrumb path above
-it, with *Add files…* at the far end of that row — the picker adds into the directory the
-breadcrumb names, which is the one placement that needs no explanation. `Enter` descends
-into a directory, `Backspace` goes up. `Ctrl+F` opens a filter bar — there is deliberately
-no type-to-jump, because bare letters are shortcuts.
+it, with *Add files…* and *Close* at the far end of that row — the picker adds into the
+directory the breadcrumb names, which is the one placement that needs no explanation, and
+*Close* is beside it because leaving the file is an act on the file and belongs where the
+file is. `Enter` descends into a directory, `Backspace` goes up. `Ctrl+F` opens a filter bar
+— there is deliberately no type-to-jump, because bare letters are shortcuts. With nothing
+open the table says so and offers the way in: it is a zone that is always there, not one
+that appears with an archive.
+
+**The Draft** is what this same zone shows when the second section is chosen — one row per
+item with its own remove ✕, and two controls: *Add files…*, which is the same picker, and
+*Bring from archive*, which pulls the entries selected in the open archive across into the
+draft. It is not a sixth zone; the entry table is the zone, and the draft is one of the
+things it shows, as the two lists already are. What *Bring from archive* pulls are **copies**:
+an entry inside an archive is not a file until something makes it one, so the draft holds
+files from that moment and the archive they came from can be closed without touching them.
+Nothing in the draft is a mutation of anything and nothing in it is written; it becomes tasks
+when *Create* is pressed, and not before.
 
 **Inspector** (right, permanent): two tabs, *Details* and *Preview*, toggled with `Space`.
 Details shows everything the reader can know about the selection; multi-select shows
@@ -186,17 +207,24 @@ bar has a hierarchy, and it is part of this document rather than a matter of tas
 
 ### The popups
 
-1. **New Archive** (`N`). A subwindow, Clonezilla in content, and wearing the popup's own
-   three grounds rather than the window's. An instruction line at top ("Choose how INDIUM
+1. **Create** (`N`). A subwindow, Clonezilla in content, and wearing the popup's own
+   three grounds rather than the window's. **It is the last step and not the first**: it is
+   reached with a draft already full, so every figure it can show is a figure about real
+   bytes. Until P22 it was the only door into the state where files could exist, which put
+   the recipe before the input it describes, and made a person press `N` twice to build one
+   archive. An instruction line at top ("Choose how INDIUM
    should compress. If unsure, keep the default."). Four preset chips — *Fastest*,
    *Balanced* (default), *Smallest*, *Encrypted* — each highlighting a row in the method
    list below, where **every method
    carries its one-sentence verdict** (§5) and nothing else. Beside the heading, **Measure**
    — V2.0's estimator — opens the Measure popup (§4.10) and runs the eight real candidates
    over the real input; the figures are drawn there, on a surface with room for them, and
-   not in a lane on a row that is already carrying a sentence. An *Advanced*
-   disclosure holds the level slider. At the foot, a live sentence states exactly what will
-   be built: *"Building photos-2026.7z — 7z, LZMA2:19, AES-256."*
+   not in a lane on a row that is already carrying a sentence. **Measure is live from the
+   first frame**, because the draft is full before this popup opens; that is what moving it
+   last was for. An *Advanced*
+   disclosure holds the level slider. The popup's own button is dead, with a sentence, while
+   the draft is empty. At the foot, a live sentence states exactly what will
+   be built: *"Building photos-2026.7z — 7z, LZMA2:9, AES-256."*
 2. **Pending tasks** (`W`, or clicking the tray). The full task list: one row per staged
    operation with its own remove ✕, then *Discard all* and **Apply**.
 3. **Extract** (`E`). A popover: *Extract here*, *Extract to `<name>/`*, a path field with
@@ -215,13 +243,14 @@ bar has a hierarchy, and it is part of this document rather than a matter of tas
 8. **Open** (`Ctrl+O`). A path field with tab completion, a *Browse…* button beside it
    raising the desktop's own picker through `xdg-desktop-portal`, and the only popup that
    is not about the archive already open. Naming an archive this window does not hold
-   opens it in a window of its own, per §1.
+   closes the one it holds and takes the new one here, per §1 — the same close the *Close*
+   control performs, and it says what it discarded in the same words.
 9. **Keys** (`F1`). The table below, drawn in the window. It exists because a person who had
    used the program for an afternoon wrote *"I didn't know `Ctrl+O` opens a file, and still
    don't know how to exit from the archive"* — a program whose whole interface is bare
    keypresses owes the reader the list. It is **generated from the bindings, never typed
    twice**: a keys popup that has drifted from the keys is worse than no keys popup.
-10. **Measure**. Opened by *Measure* on the New Archive popup, and the only popup that is
+10. **Measure**. Opened by *Measure* on the Create popup, and the only popup that is
     drawn **over** another — which is what makes `Esc`'s *"close the topmost popup"* below a
     description rather than an aspiration. It holds nothing but the measurements: one row per
     method, carrying the level it was built at, the time it took, the size it produced and the
@@ -229,8 +258,8 @@ bar has a hierarchy, and it is part of this document rather than a matter of tas
     the candidates land, because a table that grows is a table that moves. The figures are told
     in text and never in colour, a `~` marks a ratio the sample could not promise, and the
     popup always states what it weighed. It runs when it opens and **keeps its figures for as
-    long as New Archive lives** — *Measure again* is how they are spent a second time, and
-    closing New Archive discards them, because a figure that outlives its input is the folklore
+    long as Create lives** — *Measure again* is how they are spent a second time, and
+    closing Create discards them, because a figure that outlives its input is the folklore
     V2.0 was sent to replace. **Clicking a row chooses that method**: the measuring was to
     decide, so the answer is the control. It has no key of its own; the popup it stands on is
     the way in.
@@ -244,9 +273,9 @@ bar has a hierarchy, and it is part of this document rather than a matter of tas
 
 | Key | Does |
 | --- | --- |
-| `1` `2` `3` | Sidebar sections |
-| `O` / `I` | Open file · Add files — both raise the desktop's own picker |
-| `N` `W` `E` `A` `,` | New Archive · Pending tasks · Extract · About · Settings |
+| `1` `2` `3` `4` | Sidebar sections |
+| `O` / `I` | Open file · Add files — both raise the desktop's own picker. `I` adds to whichever section is showing: the draft, or the directory the breadcrumb names. |
+| `N` `W` `E` `A` `,` | Create · Pending tasks · Extract · About · Settings |
 | `F1` | Keys — this table, in the window |
 | Arrows, `PgUp/PgDn`, `Home/End` | Move in the table |
 | `Enter` / `Backspace` | Descend / go up |
@@ -254,7 +283,7 @@ bar has a hierarchy, and it is part of this document rather than a matter of tas
 | `Ctrl+F` | Filter bar |
 | `Ctrl+A` | Select all |
 | `Ctrl+C` | Copy out (extract to runtime dir, URIs to clipboard) |
-| `Ctrl+V` / drop files | Stage an add. A drop needs X11: winit has no Wayland drag-and-drop, so on Wayland the compositor never delivers one. `Ctrl+V` and *Add files…* are the routes that always work. |
+| `Ctrl+V` / drop files | Stage an add. A drop needs X11: winit has no Wayland drag-and-drop, so on Wayland the compositor never delivers one. `Ctrl+V` and *Add files…* are the routes that always work. Both land where `I` does, in the section that is showing. |
 | `Del` / `F2` | Stage a remove / a rename |
 | `Ctrl+O` | Open (path field) |
 | `Esc` | Close the topmost popup |
@@ -281,7 +310,7 @@ refuses. ACE is absent for the same family of reasons and its security history.
 
 ### The method verdicts
 
-This copy ships in the New Archive popup, one honest sentence each. **They no longer stand
+This copy ships in the Create popup, one honest sentence each. **They no longer stand
 alone: since V2.0 the estimator will give any one of them a measured level, time, size and
 ratio, one Measure away in §4.10's popup** — this data, this CPU, this moment. The sentences
 stay because they say what a method is *for*, which a number cannot, and because a figure is

@@ -1,4 +1,4 @@
-//! New Archive — CORE §4's first popup, `N`, built by P4 §5.
+//! Create — CORE §4's first popup, `N`, built by P4 §5.
 //!
 //! CORE §4.1: "An instruction line at top. Four preset chips — *Fastest*, *Balanced*
 //! (default), *Smallest*, *Encrypted* — each highlighting a row in the method list below,
@@ -26,7 +26,7 @@ use crate::theme;
 const INSTRUCTION: &str = "Choose how INDIUM should compress. If unsure, keep the default.";
 
 pub fn show(app: &mut Indium, ctx: &egui::Context) {
-    if app.popup != Some(Popup::NewArchive) {
+    if app.popup != Some(Popup::Create) {
         return;
     }
     let mut open = true;
@@ -35,7 +35,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
     // spawning the worker needs `&mut self` methods the closure cannot hold.
     let mut measure = false;
 
-    egui::Window::new("New Archive")
+    egui::Window::new("Create")
         .max_height(theme::popup_max_height(ctx))
         .collapsible(false)
         .resizable(false)
@@ -440,7 +440,7 @@ fn recipe_of(app: &Indium) -> Recipe {
 impl Indium {
     /// Stage `Task::Create`, and adopt the archive that does not exist yet.
     ///
-    /// P4 §1: New Archive writes nothing. The window takes the chosen path, the entry
+    /// P4 §1: Create writes nothing. The window takes the chosen path, the entry
     /// list is empty, the tray appears, and Apply builds it through the same lock,
     /// verify and rename as every other rebuild. Writing an empty archive here instead
     /// would touch the disk before anything had been staged, which is the surprise CORE

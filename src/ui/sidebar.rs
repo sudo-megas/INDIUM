@@ -71,7 +71,7 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                         theme::icon::NEW,
                         "New",
                         "N",
-                        Some(Popup::NewArchive),
+                        Some(Popup::Create),
                         true,
                     );
                     action_item(
@@ -243,8 +243,8 @@ fn action_item(
     let response = row(ui, icon, label, key, false, enabled, tag);
     if response.clicked() {
         match &popup {
-            // New Archive needs its fields seeded, which is what `N` does too.
-            Some(Popup::NewArchive) => app.open_new_archive(),
+            // Create needs its fields seeded, which is what `N` does too.
+            Some(Popup::Create) => app.open_create(),
             Some(p) => app.popup = Some(p.clone()),
             None => app.status = Status::bad(format!("{label} is not available yet.")),
         }

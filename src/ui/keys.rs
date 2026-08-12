@@ -23,14 +23,14 @@ use crate::theme;
 /// Kept as `(key, does)` pairs rather than as prose so the test can compare them cell by
 /// cell against the document.
 pub const ROWS: &[(&str, &str)] = &[
-    ("1 2 3", "Sidebar sections"),
+    ("1 2 3 4", "Sidebar sections"),
     (
         "O / I",
         "Open file · Add files — both raise the desktop's own picker",
     ),
     (
         "N W E A ,",
-        "New Archive · Pending tasks · Extract · About · Settings",
+        "Create · Pending tasks · Extract · About · Settings",
     ),
     ("F1", "Keys — this table, in the window"),
     ("Arrows, PgUp/PgDn, Home/End", "Move in the table"),

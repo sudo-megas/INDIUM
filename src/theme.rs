@@ -294,7 +294,7 @@ pub fn mark(size: f32) -> egui::Image<'static> {
 /// resting on", and reserves orange for the current selection, staged changes, and
 /// Apply/progress — orange means *something will happen*. A tab, a preset chip and a toggle say
 /// only *which mode is active*; nothing is about to happen because a tab is open. So they are
-/// Aubergine's work, and always were: the sidebar, the New Archive method rows and the focused
+/// Aubergine's work, and always were: the sidebar, the Create method rows and the focused
 /// Recents and Bookmarks rows have hand-painted Aubergine for this exact meaning since P1.
 /// P6 §6.6.
 ///
@@ -566,7 +566,7 @@ pub fn install_visuals(ctx: &egui::Context) {
     // recolouring exists to end. The band is now the popup's own darkest-but-one ground.
     //
     // That egui only lights the band on the top layer is still worth keeping deliberately:
-    // when the password modal opens over New Archive, New Archive's band drops back to
+    // when the password modal opens over Create, Create's band drops back to
     // plain POPUP and the modal is unmistakably the thing holding the keyboard.
     v.widgets.open.bg_fill = POPUP_HEAD;
     v.widgets.open.weak_bg_fill = POPUP_HEAD;
@@ -683,7 +683,7 @@ fn install_spacing(ctx: &egui::Context) {
         style.spacing.scroll = egui::style::ScrollStyle::solid();
 
         // The four this function's own doc comment promised to write down and never did.
-        // A popup's padding, a menu's padding, the `CollapsingHeader` offset in New Archive,
+        // A popup's padding, a menu's padding, the `CollapsingHeader` offset in Create,
         // and the minimum height of every button — `CONTROL_H`, which matches a table row.
         // The status bar's row is `SB_ROW` and no longer agrees with either: P13 split the
         // two so that a taller bar could carry a double-size glyph without making every
@@ -1120,7 +1120,7 @@ mod tests {
     fn every_ink_is_legible_on_every_ground_it_is_allowed_on() {
         // AUBERGINE is `widgets.hovered.bg_fill` everywhere, and `selection.bg_fill` only
         // inside [`active_fill`]'s scope — the Inspector tabs, the Settings toggles and the
-        // New Archive presets. It is the ground of every row `theme::row` draws active or
+        // Create presets. It is the ground of every row `theme::row` draws active or
         // under the pointer, and it was not in GROUNDS, so nothing measured any ink on it.
         // `a_rule_can_be_seen` below chains it in by hand and calls it "the lightest ground
         // any line in this program meets" — the file knew.
