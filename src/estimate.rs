@@ -287,6 +287,21 @@ pub fn from_archive(
     passphrase: Option<&Secret>,
     cancel: &AtomicBool,
 ) -> Result<(Vec<Member>, u64), String> {
+    walk(path, entries, passphrase, cancel, WALK_CAP)
+}
+
+/// [`from_archive`] with the cap given rather than assumed.
+///
+/// The cap is a parameter for one reason: at 64 MiB the only input that exercises it is one
+/// too big to build in a test, so a cap that never fired would test green forever. Handed a
+/// small cap, the same walk over a small archive proves the same property.
+fn walk(
+    path: &Path,
+    entries: &[Entry],
+    passphrase: Option<&Secret>,
+    cancel: &AtomicBool,
+    cap: u64,
+) -> Result<(Vec<Member>, u64), String> {
     /// The same predicate `Meta::has_data` applies, against a listing rather than a
     /// member: a directory, a link and an empty file all carry no stream to compress.
     fn carries_data(e: &Entry) -> bool {
@@ -332,7 +347,7 @@ pub fn from_archive(
         if cancel.load(Ordering::Relaxed) {
             return Err(CANCELLED.to_string());
         }
-        if walked >= WALK_CAP || held >= BUDGET {
+        if walked >= cap || held >= BUDGET {
             break;
         }
         if !carries_data(&entry) {
@@ -341,6 +356,14 @@ pub fn from_archive(
         }
         let at = index;
         index += 1;
+        // Charged here, before the selection, because the walk pays for every member it
+        // passes and not just for the ones it keeps: libarchive runs the filter
+        // sequentially, so `skip_data` pushes those bytes through the decompressor exactly
+        // as a read would. Charging only what is kept leaves the cap unreachable on
+        // precisely the archive it exists to bound — a 2 GiB stream whose thirty-two
+        // sampled members weigh a couple of megabytes between them would sail past a
+        // 64 MiB cap while decompressing all 2 GiB to reach the last of them.
+        walked += entry.size;
         if wanted.binary_search(&at).is_err() {
             reader.skip_data();
             continue;
@@ -353,7 +376,6 @@ pub fn from_archive(
             .take(take)
             .read_to_end(&mut buf)
             .map_err(|e| e.to_string())?;
-        walked += entry.size;
         held += buf.len() as u64;
         let mut meta = Meta::from_entry(&entry, &entry.path, None);
         meta.size = buf.len() as u64;
@@ -944,6 +966,60 @@ mod tests {
             furthest >= count - count / 8,
             "the walk stopped at member {furthest} of {count} — that is a head sample of \
              the entry list, not a spread across it: {reached:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The walk stops for the members it *skipped*, not only for the ones it kept.
+    ///
+    /// This is the property [`WALK_CAP`] exists for and the one it did not have. Skipping a
+    /// member is not free — libarchive decompresses sequentially, so `skip_data` pushes the
+    /// bytes through the filter exactly as a read does — and a cap charged only for what it
+    /// keeps never fires on the archive it was written for: thirty-two sampled members of a
+    /// 2 GiB stream weigh a couple of megabytes between them, so the walk would decompress
+    /// all 2 GiB and report a cap that was never approached.
+    ///
+    /// Four hundred small members make the two accountings say different things loudly.
+    /// Thirty-two are selected, so twelve are skipped for every one read: charged properly
+    /// the cap falls after the walk has passed thirty-two members and reached about the
+    /// twenty-fifth; charged only for reads it falls after *reading* thirty-two, having
+    /// passed all four hundred.
+    #[test]
+    fn the_walk_pays_for_the_members_it_skips_and_stops_when_it_has_spent_the_cap() {
+        let dir = scratch_dir("archive-cap");
+        let path = dir.join("many.tar.gz");
+
+        let count = 400usize;
+        let each = 8 * 1024usize;
+        let cap = 256 * 1024u64; // thirty-two members' worth of walking
+        let (members, _) = held(&vec![each; count]);
+        let recipe = Recipe {
+            path: path.clone(),
+            method: Method::Gzip,
+            level: 1,
+            encrypt: false,
+        };
+        {
+            let cancel = AtomicBool::new(false);
+            let mut sink = crate::arch::Writer::create(&path, &recipe).expect("the writer opens");
+            feed(&mut sink, &members, &cancel).expect("the members are written");
+            sink.finish().expect("the archive flushes");
+        }
+
+        let entries = crate::arch::list_all(&path, None).expect("the archive lists");
+        let cancel = AtomicBool::new(false);
+        let (got, _) = walk(&path, &entries, None, &cancel, cap).expect("the archive is readable");
+
+        let reached: Vec<usize> = got
+            .iter()
+            .filter_map(|m| m.meta.out_path.strip_prefix('m')?.parse::<usize>().ok())
+            .collect();
+        let furthest = *reached.iter().max().expect("something was read");
+        assert!(
+            furthest < count / 4,
+            "the walk reached member {furthest} of {count} on a cap worth thirty-two of \
+             them — it is charging itself only for the members it read and decompressing \
+             the rest for free, which is the one thing the cap exists to stop: {reached:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

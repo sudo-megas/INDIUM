@@ -1424,7 +1424,14 @@ impl Indium {
         });
     }
 
-    /// Stop a measurement and forget it.
+    /// Stop a measurement and forget it — including the figures it already reported.
+    ///
+    /// The figures go because a measurement that outlives the data it measured is folklore
+    /// again, which is the thing this whole round exists to remove. The popup closes, the
+    /// staged files change, Apply rebuilds the queue — and the numbers still on screen would
+    /// describe an input that is no longer there while looking exactly like ones that do.
+    /// Nothing here is cached between openings: measuring is a button, and pressing it again
+    /// costs the three seconds it honestly costs.
     ///
     /// The scratch directory is deliberately **not** removed here. The worker is still
     /// inside it, and pulling the directory out from under it would turn an orderly
@@ -1435,6 +1442,9 @@ impl Indium {
         self.estimate_cancel.store(true, Ordering::Relaxed);
         self.estimate_rx = None;
         self.estimate_running = false;
+        self.estimates.clear();
+        self.estimate_failed.clear();
+        self.estimate_of = None;
     }
 
     /// The container a rebuild would produce, for the metadata notes.
