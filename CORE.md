@@ -446,8 +446,24 @@ would not have survived it.
 
 **V1.2** headless subcommands (extract, list, single-file open) for terminal use without
 the GUI — **shipped in P17**, and the line stays here for the same reason V1.1's does.
-**V1.3** the yazi preview plugin, built only if the Inspector's verbosity genuinely beats
-a plain listing — judged then, in `contrib/`, versioned separately.
+**V1.3** the yazi preview plugin — **shipped, and not in `contrib/`, which is what this line
+used to say.** The gate was measured rather than asserted, both halves written down, because a
+gate that cannot return "no" is not one: yazi 26.5.6 ships a built-in archive previewer showing
+a name, a size, an icon and a tree depth, and it gets them by running `7zz` or `7z` — the thing
+§9 forbids this program from ever doing — so on a machine with no 7-zip installed it previews
+nothing at all. `indium list --long` states seven fields and a total, and runs nothing. The
+condition is met.
+
+It lives at [`sudo-megas/indium.yazi`](https://github.com/sudo-megas/indium.yazi), a repository
+of its own, because `contrib/` was never installable: `ya pkg` clones a repository's *default
+branch* and expects the plugin at its **root**, and its `rev` takes a commit hash rather than a
+branch or a tag. A directory in this tree could not have been installed, and neither could a
+branch of it. So *versioned separately* is now literally true — its own history, its own tags,
+and **INDIUM cuts no tag for it**, exactly as the paragraph below says it never could.
+
+It is a plugin for yazi, written against yazi's previewer API, and it reaches INDIUM the way
+anything reaches INDIUM: by running `indium list`, over the CLI §7 shipped at V1.2. Nothing here
+is added to this program.
 
 **Those two numbers were the other way round until P17, and the swap is recorded rather
 than quietly made.** The maker's call was that the tag sequence stays contiguous: the
