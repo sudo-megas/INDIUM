@@ -1394,7 +1394,11 @@ impl Indium {
                         1 => "1 staged item".to_string(),
                         n => format!("{n} staged items"),
                     };
-                    (describe, estimate::from_staged(&adds))
+                    (
+                        describe,
+                        estimate::from_staged(&adds)
+                            .and_then(|(members, total)| estimate::narrow(members, total)),
+                    )
                 }
                 EstimateSource::Archive { path, entries } => {
                     let describe = path
@@ -1408,7 +1412,11 @@ impl Indium {
                 }
             };
 
-            match resolved.and_then(|(members, total)| estimate::narrow(members, total)) {
+            // Each branch above already produced a finished `Input`: staged files are
+            // narrowed after the walk because they can be re-read at will, an archive during
+            // it because its bytes exist only while the walk is standing on them. Narrowing
+            // here instead would have run the archive's reduction a second time.
+            match resolved {
                 Ok(input) if input.is_empty() => {
                     let _ = tx.send(estimate::Msg::Fatal(
                         "There are no bytes to measure — everything here is empty.".to_string(),
