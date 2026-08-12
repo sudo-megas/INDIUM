@@ -29,6 +29,7 @@ use std::sync::Arc;
 use eframe::egui;
 
 use crate::arch::{self, ArchiveError, ArchiveInfo, Entry, ExtractMsg, ListMsg};
+use crate::estimate;
 use crate::model::{self, Row};
 use crate::platform::apps::{self, Candidate};
 use crate::platform::clipboard;
@@ -39,6 +40,28 @@ use crate::platform::window::{self, Destination};
 use crate::secret::Secret;
 use crate::tasks::{self, ApplyMsg, Queue, Task};
 use crate::theme;
+
+/// What a measurement was drawn from — P21.
+///
+/// Held and shown rather than inferred, because "54%" with no statement of what was
+/// weighed is the same species of claim as the folklore CORE §7 sent V2.0 to replace.
+pub struct EstimateOf {
+    /// The input, in words: `"12 staged items"`, or an archive's filename.
+    pub describe: String,
+    /// True when the input was over budget and only a sample was compressed. Every figure
+    /// drawn from it is marked wherever it appears.
+    pub sampled: bool,
+    /// How many bytes the candidates were actually handed.
+    pub bytes: u64,
+}
+
+/// Where a measurement's bytes come from. Resolved on the UI thread, read on the worker.
+pub enum EstimateSource {
+    /// Paths staged for adding, with the names they will take inside the archive.
+    Staged(Vec<(PathBuf, String)>),
+    /// The open archive. The listing rides along so the worker needs only one read pass.
+    Archive { path: PathBuf, entries: Vec<Entry> },
+}
 
 /// Which centre view the sidebar has selected. P2 §2: "the sidebar selects what the
 /// centre shows".
@@ -311,6 +334,23 @@ pub struct Indium {
     /// Where copies handed to the outside world live. Dropping it removes them.
     pub scratch: Scratch,
 
+    // --- the estimator (P21) ----------------------------------------------
+    /// Figures as they land, in the order `METHODS` lists them.
+    pub estimates: Vec<estimate::Measurement>,
+    /// Candidates that could not be built, and what libarchive said. One failing method
+    /// is a row that says so, not a dead popup.
+    pub estimate_failed: Vec<(tasks::Method, String)>,
+    /// What the last measurement was drawn from. The popup states it, always, because a
+    /// figure whose input is unstated is the folklore this round exists to replace.
+    pub estimate_of: Option<EstimateOf>,
+    estimate_rx: Option<Receiver<estimate::Msg>>,
+    /// The estimator's **own** flag, never `self.cancel`. That one belongs to a rebuild
+    /// or an extraction, and a measurement being abandoned must not be able to stop one.
+    estimate_cancel: Arc<AtomicBool>,
+    /// Set while a worker is out. The popup body runs every frame and would otherwise
+    /// spawn a second one on every one of them — the same guard `preview_loading` is.
+    pub estimate_running: bool,
+
     // --- worker -----------------------------------------------------------
     pub cancel: Arc<AtomicBool>,
     list_rx: Option<Receiver<ListMsg>>,
@@ -410,6 +450,13 @@ impl Indium {
             openwith_name: String::new(),
             openwith_mime: String::new(),
             scratch: Scratch::new(),
+
+            estimates: Vec::new(),
+            estimate_failed: Vec::new(),
+            estimate_of: None,
+            estimate_rx: None,
+            estimate_cancel: Arc::new(AtomicBool::new(false)),
+            estimate_running: false,
 
             cancel: Arc::new(AtomicBool::new(false)),
             list_rx: None,
@@ -556,6 +603,10 @@ impl Indium {
             Some(rx) => rx.try_iter().collect(),
             None => Vec::new(),
         };
+        let estimate_msgs: Vec<estimate::Msg> = match &self.estimate_rx {
+            Some(rx) => rx.try_iter().collect(),
+            None => Vec::new(),
+        };
         let preview_msgs: Vec<PreviewRead> = match &self.preview_rx {
             Some(rx) => rx.try_iter().collect(),
             None => Vec::new(),
@@ -564,6 +615,7 @@ impl Indium {
             || !extract_msgs.is_empty()
             || !apply_msgs.is_empty()
             || !paste_msgs.is_empty()
+            || !estimate_msgs.is_empty()
             || !preview_msgs.is_empty();
 
         for msg in list_msgs {
@@ -774,6 +826,38 @@ impl Indium {
             }
         }
 
+        // The estimator — P21. Figures are appended as they land, so the eight rows fill
+        // one at a time over about 2.7 s rather than appearing together at the end. That
+        // filling is the only progress this popup shows: CORE §6 refuses motion beyond
+        // what it already permits, and a row acquiring a number is not an animation.
+        for msg in estimate_msgs {
+            match msg {
+                estimate::Msg::Began {
+                    describe,
+                    sampled,
+                    bytes,
+                } => {
+                    self.estimate_of = Some(EstimateOf {
+                        describe,
+                        sampled,
+                        bytes,
+                    });
+                }
+                estimate::Msg::One(m) => self.estimates.push(m),
+                estimate::Msg::Failed { method, why } => self.estimate_failed.push((method, why)),
+                estimate::Msg::Done => {
+                    self.estimate_running = false;
+                    self.estimate_rx = None;
+                }
+                estimate::Msg::Fatal(why) => {
+                    self.estimate_running = false;
+                    self.estimate_rx = None;
+                    self.estimate_of = None;
+                    self.status = Status::bad(why);
+                }
+            }
+        }
+
         // Reactive mode repaints on input, and a painted progress line — unlike the
         // listing `Spinner` — asks for nothing on its own, while the worker holds no
         // `Context` to ask with. So the drain keeps the pump alive for exactly as long as
@@ -951,6 +1035,11 @@ impl Indium {
     }
 
     pub fn close_popup(&mut self) {
+        // P21: a measurement belongs to the popup that asked for it. Left running it would
+        // spend three seconds of CPU on figures with nowhere to appear, and the New Archive
+        // popup has a second close path of its own — the `X` at `newarchive.rs` — which
+        // calls this for exactly that reason rather than clearing `popup` by hand.
+        self.cancel_estimate();
         self.popup = None;
         self.focus_given_to = None;
         self.pending = None;
@@ -1129,16 +1218,223 @@ impl Indium {
     }
 
     /// `N` — seed and open the New Archive popup.
+    ///
+    /// **Re-openable since P21.** Resetting to Balanced unconditionally was harmless while
+    /// `stage_creation` cleared the queue behind it: pressing `N` a second time could only
+    /// ever be starting again. Now that a staged creation keeps the files added to it —
+    /// which is what lets the estimator measure them — re-opening has to show the recipe
+    /// that is *staged*, or the popup would sit there offering to build something other
+    /// than the thing actually pending.
     pub fn open_new_archive(&mut self) {
-        self.new_preset = tasks::Preset::Balanced;
-        let (method, encrypt) = self.new_preset.recipe_parts();
-        self.new_method = method;
-        self.new_level = method.default_level();
-        self.new_encrypt = encrypt;
         self.new_advanced = false;
-        self.new_dir = self.default_extract_dir().to_string_lossy().to_string();
-        self.new_name = "archive".to_string();
+
+        if let Some(recipe) = self.tasks.creation().cloned() {
+            self.new_method = recipe.method;
+            self.new_level = recipe.level;
+            self.new_encrypt = recipe.encrypt;
+            // The chip that would have produced this recipe, if one would have. A method
+            // chosen by hand matches none of the four, and then the chips are left as they
+            // were rather than one being lit that does not describe what is staged.
+            if let Some(preset) = [
+                tasks::Preset::Fastest,
+                tasks::Preset::Balanced,
+                tasks::Preset::Smallest,
+                tasks::Preset::Encrypted,
+            ]
+            .into_iter()
+            .find(|p| p.recipe_parts() == (recipe.method, recipe.encrypt))
+            {
+                self.new_preset = preset;
+            }
+
+            self.new_name = newarchive::stem_of(&recipe.path, recipe.method, recipe.encrypt);
+            self.new_dir = recipe
+                .path
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+        } else {
+            self.new_preset = tasks::Preset::Balanced;
+            let (method, encrypt) = self.new_preset.recipe_parts();
+            self.new_method = method;
+            self.new_level = method.default_level();
+            self.new_encrypt = encrypt;
+            self.new_dir = self.default_extract_dir().to_string_lossy().to_string();
+            self.new_name = "archive".to_string();
+        }
+
         self.popup = Some(Popup::NewArchive);
+    }
+
+    // -----------------------------------------------------------------------
+    // The estimator — P21, CORE §7's V2.0
+    // -----------------------------------------------------------------------
+
+    /// Why Measure cannot run, or `None` if it can. The button is dead **and says this** —
+    /// an inert control with no explanation is the one thing §4 will not have.
+    ///
+    /// **Split from `estimate_source` because the popup body runs every frame.** The two
+    /// were one function, and the button asked it for its enabled state — which meant
+    /// cloning every staged path and, on the archive branch, the *entire entry list*, on
+    /// every frame the popup was open. On a hundred-thousand-entry archive that is hundreds
+    /// of megabytes a second of allocation spent deciding whether a button is grey. This
+    /// half reads counts and flags; the expensive half runs once, on the click.
+    ///
+    /// The order is D5's. Files staged for adding come first because packaging them is what
+    /// the popup is open for; the archive already open comes second because re-compressing
+    /// one is the other reason to be here.
+    pub fn estimate_refusal(&self) -> Option<&'static str> {
+        if self
+            .tasks
+            .tasks()
+            .iter()
+            .any(|t| matches!(t, Task::Add { .. }))
+        {
+            return None;
+        }
+        if self.archive_path.is_none() {
+            return Some("Add files, or open an archive: there is nothing to measure yet.");
+        }
+        // The third case, and the one easiest to forget: reading an encrypted member needs
+        // the password, and CORE §9 does not keep one lying about.
+        if self.entries.iter().any(|e| e.encrypted) && self.passphrase.is_none() {
+            return Some("These members are encrypted, and measuring them needs the password.");
+        }
+        None
+    }
+
+    /// The bytes themselves, resolved once — on the click, never on the frame.
+    pub fn estimate_source(&self) -> Result<EstimateSource, &'static str> {
+        if let Some(why) = self.estimate_refusal() {
+            return Err(why);
+        }
+        let adds: Vec<(PathBuf, String)> = self
+            .tasks
+            .tasks()
+            .iter()
+            .filter_map(|t| match t {
+                Task::Add { source, dest } => Some((source.clone(), dest.clone())),
+                _ => None,
+            })
+            .collect();
+        if !adds.is_empty() {
+            return Ok(EstimateSource::Staged(adds));
+        }
+        let Some(path) = self.archive_path.clone() else {
+            return Err("Add files, or open an archive: there is nothing to measure yet.");
+        };
+        Ok(EstimateSource::Archive {
+            path,
+            entries: self.entries.clone(),
+        })
+    }
+
+    /// Hand the eight candidates to a worker.
+    ///
+    /// One worker and one candidate at a time — CORE §3 fixes threading at "the UI thread
+    /// and one worker", so the eight cost around three and a half seconds at the budget
+    /// rather than under a second spread over the cores. That is the price of the contract,
+    /// paid deliberately, and it is why nothing here starts on
+    /// its own: §4.1's Measure is a button, and a popup that spent three seconds of CPU
+    /// every time it opened would be a worse program than one that asserts.
+    pub fn request_estimate(&mut self, ctx: &egui::Context) {
+        // The popup body runs every frame, so without this the button's `clicked()` would
+        // be the only thing between here and eight workers.
+        if self.estimate_running {
+            return;
+        }
+        // A rebuild or an extraction is real work; measuring is advisory, and advisory
+        // work does not get to compete for the disk with the thing the user is waiting on.
+        if self.work_running() {
+            return;
+        }
+
+        let source = match self.estimate_source() {
+            Ok(source) => source,
+            Err(why) => {
+                self.status = Status::bad(why);
+                return;
+            }
+        };
+
+        // `begin` removes the previous measurement's directory, which is the whole reason
+        // to route through `Scratch` rather than inventing a temp path: the routing rule,
+        // the process id in the name, the launch sweep and the drop guard all come with it.
+        let placement = match self
+            .scratch
+            .begin(scratch::Kind::Estimate, estimate::BUDGET)
+        {
+            Ok(placement) => placement,
+            Err(e) => {
+                self.status = Status::bad(format!("Could not make a scratch directory: {e}"));
+                return;
+            }
+        };
+
+        self.estimates.clear();
+        self.estimate_failed.clear();
+        self.estimate_of = None;
+        self.estimate_cancel = Arc::new(AtomicBool::new(false));
+        self.estimate_running = true;
+
+        let (tx, rx) = channel();
+        self.estimate_rx = Some(rx);
+
+        let cancel = Arc::clone(&self.estimate_cancel);
+        let dir = placement.dir;
+        let selected = Some((self.new_method, self.new_method.clamp_level(self.new_level)));
+        let pass = self.passphrase.clone();
+        let ctx2 = ctx.clone();
+
+        std::thread::spawn(move || {
+            let wake = || ctx2.request_repaint();
+            let (describe, resolved) = match source {
+                EstimateSource::Staged(adds) => {
+                    let describe = match adds.len() {
+                        1 => "1 staged item".to_string(),
+                        n => format!("{n} staged items"),
+                    };
+                    (describe, estimate::from_staged(&adds))
+                }
+                EstimateSource::Archive { path, entries } => {
+                    let describe = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "the open archive".to_string());
+                    (
+                        describe,
+                        estimate::from_archive(&path, &entries, pass.as_ref(), &cancel),
+                    )
+                }
+            };
+
+            match resolved.and_then(|(members, total)| estimate::narrow(members, total)) {
+                Ok(input) if input.is_empty() => {
+                    let _ = tx.send(estimate::Msg::Fatal(
+                        "There are no bytes to measure — everything here is empty.".to_string(),
+                    ));
+                    wake();
+                }
+                Ok(input) => estimate::run(input, describe, dir, selected, &tx, &cancel, &wake),
+                Err(why) => {
+                    let _ = tx.send(estimate::Msg::Fatal(why));
+                    wake();
+                }
+            }
+        });
+    }
+
+    /// Stop a measurement and forget it.
+    ///
+    /// The scratch directory is deliberately **not** removed here. The worker is still
+    /// inside it, and pulling the directory out from under it would turn an orderly
+    /// abandonment into a fistful of I/O errors; `measure` deletes its own candidate file
+    /// on every path including this one, and the empty directory goes on the next `begin`
+    /// or on `Scratch`'s drop, both of which already do exactly that.
+    pub fn cancel_estimate(&mut self) {
+        self.estimate_cancel.store(true, Ordering::Relaxed);
+        self.estimate_rx = None;
+        self.estimate_running = false;
     }
 
     /// The container a rebuild would produce, for the metadata notes.
@@ -1222,6 +1518,11 @@ impl Indium {
                 Status::bad("An extraction is already running. Cancel it, or let it finish.");
             return;
         }
+        // P21: real work preempts a measurement. New Archive is an `egui::Window` rather
+        // than a `Modal`, so the tray strip stays clickable underneath it and Apply can
+        // genuinely start while the eight candidates are running. The estimate is advisory
+        // and the rebuild is not, so the advisory one goes.
+        self.cancel_estimate();
         self.cancel.store(true, Ordering::Relaxed);
         self.cancel = Arc::new(AtomicBool::new(false));
 
@@ -1418,6 +1719,9 @@ impl Indium {
         dest: PathBuf,
         post: PostExtract,
     ) {
+        // Same preemption Apply makes, for the same reason: an extraction is work the user
+        // is waiting on, and a measurement is not.
+        self.cancel_estimate();
         self.cancel = Arc::new(AtomicBool::new(false));
         let (tx, rx) = channel();
         self.extract_rx = Some(rx);

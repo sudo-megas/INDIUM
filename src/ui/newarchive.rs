@@ -25,6 +25,9 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
     }
     let mut open = true;
     let mut create = false;
+    // Set inside the window body and acted on after it, for the same reason `create` is:
+    // spawning the worker needs `&mut self` methods the closure cannot hold.
+    let mut measure = false;
 
     egui::Window::new("New Archive")
         .max_height(theme::popup_max_height(ctx))
@@ -128,7 +131,68 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 }
             });
 
-            theme::section(ui, "METHOD");
+            // `theme::section` unrolled, so Measure can sit on the heading's own line.
+            // A row of its own would have cost the method list a row of height at every
+            // display scale, and `list_height`'s chrome figure with it; the heading line
+            // was already there and had nothing on its right.
+            ui.add_space(theme::SECTION_ABOVE);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("METHOD")
+                        .size(14.0)
+                        .family(theme::bold())
+                        .color(theme::TEXT),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // CORE §7's V2.0, and the only control in the window that spends
+                    // CPU on being asked. It is a button rather than something the
+                    // popup does on opening because the eight candidates run in
+                    // sequence — CORE §3 has one worker — and three seconds is a great
+                    // deal to spend on a question nobody asked.
+                    let refusal = app.estimate_refusal();
+                    let can = !app.estimate_running && refusal.is_none();
+                    let label = if app.estimate_running {
+                        "Measuring…"
+                    } else {
+                        "Measure"
+                    };
+                    if theme::button(ui, egui::RichText::new(label), can).clicked() {
+                        measure = true;
+                    }
+                    // Why it is dead, beside it. Drawn rather than pushed to the status
+                    // bar on the click, because the click never comes: a disabled button
+                    // reports none, so a sentence waiting for one would never be read by
+                    // the one person who needs it.
+                    if let Some(why) = refusal {
+                        ui.label(egui::RichText::new(why).size(11.0).color(theme::TEXT_MUTED));
+                    }
+                    // What the figures rest on, stated beside them rather than left to
+                    // be assumed. `~` marks a figure the sample could not promise.
+                    else if let Some(of) = &app.estimate_of {
+                        let sentence = if of.sampled {
+                            format!(
+                                "~ estimated from {} of {}",
+                                crate::util::format_bytes(of.bytes),
+                                of.describe
+                            )
+                        } else {
+                            format!(
+                                "measured on all {} of {}",
+                                crate::util::format_bytes(of.bytes),
+                                of.describe
+                            )
+                        };
+                        ui.label(
+                            egui::RichText::new(sentence)
+                                .size(11.0)
+                                .color(theme::TEXT_MUTED),
+                        );
+                    }
+                });
+            });
+            ui.add_space(3.0);
+            ui.add(egui::Separator::default().horizontal().spacing(6.0));
+
             egui::ScrollArea::vertical()
                 .max_height(theme::list_height(ctx, 452.0, 210.0))
                 .auto_shrink([false, false])
@@ -232,12 +296,21 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             });
         });
 
+    if measure {
+        app.request_estimate(ctx);
+    }
+
     if create {
         let recipe = recipe_of(app);
         app.stage_creation(recipe);
         // A staged creation adopts an archive that does not exist yet, and the title
         // should name it just as an opened one does.
         app.set_window_title(ctx);
+        // The second of the popup's two close paths, and the reason `cancel_estimate` is
+        // called here as well as in `close_popup`: leaving `popup` assigned by hand skips
+        // everything that one does, and a measurement outliving its popup is three seconds
+        // of CPU spent on figures with nowhere left to appear.
+        app.cancel_estimate();
         app.popup = None;
     }
     if !open {
@@ -276,6 +349,38 @@ fn method_row(ui: &mut egui::Ui, app: &mut Indium, method: Method) {
                                 theme::TEXT_MUTED
                             }),
                     );
+                }
+
+                // P21's figures, in a lane of their own against the right edge — last in
+                // the row because a right-to-left layout claims whatever width is left,
+                // and claiming it before the `AES-256` tag would leave that tag nowhere
+                // to go. Monospace and right-aligned so the columns hold as the digits
+                // change (CORE §4), and told in text only: §6 refuses a sixth colour by
+                // name and "in particular no green for success", so a good ratio reads
+                // exactly like a bad one and the number does the talking.
+                let sampled = app.estimate_of.as_ref().is_some_and(|of| of.sampled);
+                let measured = app.estimates.iter().find(|m| m.method == method);
+                let failed = app.estimate_failed.iter().any(|(m, _)| *m == method);
+                if measured.is_some() || failed {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let text = match measured {
+                            Some(m) => figure_of(m, sampled),
+                            // A method this build of libarchive will not write is a row
+                            // that says so rather than a row that stays blank. The reason
+                            // itself is in the status bar; the lane keeps its width.
+                            None => "     unavailable".to_string(),
+                        };
+                        ui.label(
+                            egui::RichText::new(text)
+                                .family(theme::MONO)
+                                .size(11.0)
+                                .color(if selected {
+                                    theme::TEXT_SECONDARY
+                                } else {
+                                    theme::TEXT_MUTED
+                                }),
+                        );
+                    });
                 }
             });
             // Verbatim from CORE §5, held once in `tasks` and pinned by a test.
@@ -318,6 +423,43 @@ fn preset_for(method: Method, encrypt: bool) -> Preset {
 }
 
 /// The extension the chosen method implies.
+/// One measured candidate, in the fixed-width form the lane holds — P21.
+///
+/// `<level> · <ms> ms · <mark><ratio>%`.
+///
+/// **The level is printed on purpose.** The slider goes on moving after a measurement, and
+/// a figure that does not say which level it was taken at becomes quietly false the moment
+/// it is left behind. Printing it makes a stale row describe itself instead, in the same
+/// `method:level` idiom `recipe_sentence` already writes.
+///
+/// The mark is `~` when the input was sampled and a space when it was not, so the per-cent
+/// signs stay in one column either way — CORE §4's "numbers hold their columns" is about
+/// the marked case too.
+fn figure_of(m: &crate::estimate::Measurement, sampled: bool) -> String {
+    let level = match m.method.levels() {
+        Some(_) => format!("{:>2}", m.level),
+        // Store has no levels, so there is no number here to print.
+        None => "  ".to_string(),
+    };
+    let mark = if sampled { '~' } else { ' ' };
+    format!("{level} · {:>5} ms · {mark}{:>5.1}%", m.millis, m.ratio())
+}
+
+/// The Name field's contents for a recipe already staged — P21.
+///
+/// `Path::file_stem` is wrong here, and quietly: it takes `photos.tar.gz` to `photos.tar`,
+/// so re-opening the popup over a staged creation would offer to build
+/// `photos.tar.tar.gz`. Only the table below knows that `.tar.gz` is *one* extension, so
+/// the split goes through it and not through `Path`.
+pub(super) fn stem_of(path: &std::path::Path, method: Method, encrypt: bool) -> String {
+    let file = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let ext = extension_for(method, encrypt);
+    file.strip_suffix(ext).unwrap_or(&file).to_string()
+}
+
 fn extension_for(method: Method, _encrypt: bool) -> &'static str {
     match method {
         Method::Store => ".tar",
@@ -360,14 +502,87 @@ impl Indium {
         self.archive_path = Some(recipe.path.clone());
         self.archive_bytes = 0;
         self.archive_info = None;
+        self.section = super::Section::Archive;
+
+        // **Re-staging keeps the queue.** Until P21 this method cleared it unconditionally,
+        // which was invisible while the popup could not be reached a second time: pressing
+        // `N` again could only be starting over. The estimator needs the popup open *over*
+        // staged files — those are the bytes it measures — so a second Create now replaces
+        // the first in place and the adds staged against it survive. Nothing else is reset
+        // either, because a re-stage changes the recipe and not what is being packaged.
+        if self.tasks.set_creation(recipe.clone()) {
+            self.status = format!("Staged: create {name}. Add files, then Apply.").into();
+            return;
+        }
+
         self.entries.clear();
         self.selection.clear();
         self.cwd.clear();
         self.cursor = 0;
-        self.section = super::Section::Archive;
         self.staged_against.clear();
         self.tasks.clear();
         self.tasks.push(Task::Create { recipe });
         self.status = format!("Staged: create {name}. Add files, then Apply.").into();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The trap P21 walked into on paper before it walked into it in code.
+    ///
+    /// Re-opening the popup over a staged creation has to put the *stem* back in the Name
+    /// field, and every compressed tar carries two dots. `Path::file_stem` removes one of
+    /// them, so the popup would re-stage `photos.tar` + `.tar.gz` and offer to build
+    /// `photos.tar.tar.gz` — a name nobody typed, from a field nobody edited.
+    #[test]
+    fn a_reopened_new_archive_shows_the_name_that_was_staged() {
+        let cases = [
+            ("/home/m/photos.tar.gz", Method::Gzip, "photos"),
+            ("/home/m/photos.tar.zst", Method::Zstd, "photos"),
+            ("/home/m/photos.tar.bz2", Method::Bzip2, "photos"),
+            ("/home/m/photos.tar.xz", Method::Xz, "photos"),
+            ("/home/m/photos.tar", Method::Store, "photos"),
+            ("/home/m/backup.7z", Method::Lzma2, "backup"),
+            ("/home/m/backup.zip", Method::Deflate, "backup"),
+            // Dots inside the stem are the user's, and stay.
+            ("/home/m/site.v2.tar.gz", Method::Gzip, "site.v2"),
+        ];
+        for (path, method, want) in cases {
+            assert_eq!(
+                stem_of(std::path::Path::new(path), method, false),
+                want,
+                "{path}"
+            );
+        }
+    }
+
+    /// Every method's own extension round-trips, so no method can be added with a suffix
+    /// this split does not undo.
+    #[test]
+    fn every_extension_the_popup_writes_is_one_the_name_field_can_take_back() {
+        for method in crate::tasks::METHODS {
+            let file = format!("archive{}", extension_for(method, false));
+            assert_eq!(
+                stem_of(std::path::Path::new(&file), method, false),
+                "archive",
+                "{} does not round-trip",
+                method.label()
+            );
+        }
+    }
+
+    /// A name whose stem happens to end in the extension is still only stripped once.
+    #[test]
+    fn only_the_trailing_extension_is_taken_off() {
+        assert_eq!(
+            stem_of(
+                std::path::Path::new("/x/archive.tar.gz.tar.gz"),
+                Method::Gzip,
+                false
+            ),
+            "archive.tar.gz"
+        );
     }
 }
