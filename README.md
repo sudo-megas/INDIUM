@@ -12,7 +12,7 @@
 </p>
 
 <p>
-  <img alt="Arch Linux package" src="https://img.shields.io/badge/Arch%20Linux-9.81%20MB-1793D1?style=for-the-badge&logo=archlinux&logoColor=white">
+  <img alt="Arch Linux package" src="https://img.shields.io/badge/Arch%20Linux-9.80%20MB-1793D1?style=for-the-badge&logo=archlinux&logoColor=white">
   <img alt="Debian package" src="https://img.shields.io/badge/Debian%20-6.92%20MB-772953?style=for-the-badge&logo=debian&logoColor=white">
 </p>
 
