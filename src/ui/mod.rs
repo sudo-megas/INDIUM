@@ -1339,8 +1339,16 @@ impl Indium {
             // `creation().is_some() && archive_info.is_none()`, which described only the
             // first of those: `discard_tasks` clears the queue and leaves `archive_path`
             // standing, so `N` → Create → Discard put the button back over a file that had
-            // never been written. `entries` is empty in every one of these states and the
-            // walk needs it, so refusing is right in all four.
+            // never been written. The walk is built from `entries`, and in none of these four
+            // is `entries` something to walk: the two phantoms and a listing that has not
+            // reached `Opened` have it empty, and `on_list_failure` leaves behind whatever had
+            // streamed in before the failure — a partial list of an archive we have just been
+            // told we cannot read. Refusing is right in all four, for the same reason twice.
+            //
+            // Note what this deliberately does *not* gate: `Opened` arrives before the
+            // entries do, so once the header is read Measure goes live over a listing still
+            // streaming. That is unchanged from P21 and is not a phantom — the file is there
+            // and readable, and `walk` caps itself anyway.
             self.archive_info.is_none(),
             self.entries.iter().any(|e| e.encrypted) && self.passphrase.is_none(),
         )
