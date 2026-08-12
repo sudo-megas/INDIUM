@@ -607,6 +607,23 @@ pub fn install_visuals(ctx: &egui::Context) {
     v.selection.bg_fill = ORANGE.linear_multiply(0.35);
     v.selection.stroke = Stroke::new(1.0, ORANGE);
 
+    // P21. **Text was never un-antialiased**, and this line is not what turns it on: egui
+    // rasterizes each glyph's outline through `vello_cpu` into a coverage pixmap, hinting on
+    // (`Target::Smooth`), and pushes that coverage through `TwoCoverageMinusCoverageSq` —
+    // which `Visuals::dark()` above already selected, being the dark-mode default. The knob
+    // that *sounds* like the one is `TessellationOptions::feathering`, and epaint says of it
+    // flatly: "This setting does not affect text." It smooths shape edges. Raising it would
+    // blur the rules and leave every glyph exactly as it was.
+    //
+    // What *is* worth turning off is sub-pixel binning. It renders each glyph at four
+    // fractional horizontal offsets to even out kerning, and epaint is candid about the
+    // price — "It also lead to text looking more blurry." Even kerning is the payoff, and
+    // §6 puts this entire window in monospace on a fixed advance: INDIUM cannot collect that
+    // benefit and was paying the blur for it at every size. Set on `v` rather than through
+    // `Options` — `text_options` lives on `Visuals` — so the write below covers both styles
+    // for exactly the reason the note under it gives.
+    v.text_options.subpixel_binning = false;
+
     // Both styles, not just the current one. `set_visuals` writes only the theme egui thinks
     // it is in, and `Options::theme()` is refreshed from the platform on every pass — so a
     // compositor that reported "light" would have thrown away the entire palette and left
@@ -1024,6 +1041,40 @@ mod tests {
         let ctx = egui::Context::default();
         install_visuals(&ctx);
         ctx.style_of(egui::Theme::Dark).visuals.clone()
+    }
+
+    /// P21: the window does not pay for kerning it cannot collect.
+    ///
+    /// Sub-pixel binning renders every glyph at four fractional horizontal offsets to even
+    /// out kerning, and epaint is candid about the price — "It also lead to text looking
+    /// more blurry." CORE §6 puts the whole window in monospace on a fixed advance, so the
+    /// evenness is already there and the blur was being paid for nothing.
+    ///
+    /// Pinned because the upstream default is `true`: without this, an egui upgrade turns
+    /// it back on silently and nothing in the program would say so.
+    #[test]
+    fn the_window_does_not_pay_for_kerning_it_cannot_collect() {
+        assert!(
+            !visuals().text_options.subpixel_binning,
+            "sub-pixel binning is on again — every glyph is being rasterised at four \
+             offsets to even out kerning that a fixed advance makes even already"
+        );
+    }
+
+    /// The rest of the text pipeline is left exactly as egui ships it, and that is a
+    /// decision rather than an omission: hinting is what makes stems land on pixels, and
+    /// `TwoCoverageMinusCoverageSq` is the dark-mode gamma ramp this window wants. Both
+    /// arrive through `Visuals::dark()`. If a future round is tempted to "add antialiasing",
+    /// this is the test that says it is already there.
+    #[test]
+    fn glyphs_are_hinted_and_carry_the_dark_mode_ramp() {
+        let v = visuals();
+        assert!(v.text_options.font_hinting, "hinting was turned off");
+        assert_eq!(
+            v.text_options.color_transfer_function,
+            egui::epaint::FontColorTransferFunction::DARK_MODE_DEFAULT,
+            "the glyph coverage ramp is no longer the dark-mode one"
+        );
     }
 
     #[test]
