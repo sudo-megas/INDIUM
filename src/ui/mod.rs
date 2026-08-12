@@ -1332,9 +1332,16 @@ impl Indium {
                 .iter()
                 .any(|t| matches!(t, Task::Add { .. })),
             self.archive_path.is_some(),
-            // "Named but never written." `stage_creation` adopts the recipe's path before
-            // anything exists at it, so these two facts together are the phantom.
-            self.tasks.creation().is_some() && self.archive_info.is_none(),
+            // **One fact, not two.** `archive_info` is what a successful listing produces, so
+            // its absence is exactly "nothing at this path has ever been read" — the phantom
+            // `stage_creation` adopts, the phantom that outlives `discard_tasks`, a listing
+            // still in flight, and a listing that failed. The first version of this line read
+            // `creation().is_some() && archive_info.is_none()`, which described only the
+            // first of those: `discard_tasks` clears the queue and leaves `archive_path`
+            // standing, so `N` → Create → Discard put the button back over a file that had
+            // never been written. `entries` is empty in every one of these states and the
+            // walk needs it, so refusing is right in all four.
+            self.archive_info.is_none(),
             self.entries.iter().any(|e| e.encrypted) && self.passphrase.is_none(),
         )
     }
@@ -2273,7 +2280,7 @@ fn clipboard_chords(events: &[egui::Event]) -> (bool, bool) {
 fn estimate_refusal_for(
     has_adds: bool,
     has_path: bool,
-    unbuilt: bool,
+    unread: bool,
     locked: bool,
 ) -> Option<&'static str> {
     if has_adds {
@@ -2282,8 +2289,8 @@ fn estimate_refusal_for(
     if !has_path {
         return Some("Add files, or open an archive: there is nothing to measure yet.");
     }
-    if unbuilt {
-        return Some("Nothing has been added yet: this archive has not been built.");
+    if unread {
+        return Some("This archive has not been read: there is nothing to measure yet.");
     }
     // The case easiest to forget: reading an encrypted member needs the password, and CORE §9
     // does not keep one lying about.
@@ -3351,33 +3358,42 @@ mod tests {
 
     /// Measure is dead in every state where it has nothing honest to measure, and says which.
     ///
-    /// The `unbuilt` row is the one this test exists for. P21 shipped a button that was live
+    /// The `unread` row is the one this test exists for. P21 shipped a button that was live
     /// over a creation staged but never written — `archive_path` is `Some` the moment Create
     /// is pressed — so the worker opened a file that was not there and the failure landed in
     /// the status bar, one zone away from the popup that had asked for it. Nothing caught it
     /// because the decision lived on `Indium`, which no test can build.
+    ///
+    /// **What this test still cannot reach**, and the reason the first fix was wrong: the
+    /// mapping from `Indium`'s fields onto these four booleans is itself a decision, it lives
+    /// on `Indium`, and moving the branch off the type did not move the mapping with it. The
+    /// first version passed `creation().is_some() && archive_info.is_none()` here and this
+    /// test passed, because the row below was already `true` — while `Discard` cleared the
+    /// queue, left `archive_path` standing, and put the live button straight back over the
+    /// file that had never been written. Every row here can be green with the call site
+    /// wrong. Only the window shows that.
     #[test]
     fn measure_refuses_wherever_it_has_nothing_to_weigh_and_says_which() {
-        // has_adds, has_path, unbuilt, locked
+        // has_adds, has_path, unread, locked
         assert_eq!(estimate_refusal_for(true, false, false, false), None);
         // Staged adds outrank everything: they are bytes on disk, whatever the window holds.
         assert_eq!(estimate_refusal_for(true, true, true, true), None);
         // A real archive, listed and unencrypted.
         assert_eq!(estimate_refusal_for(false, true, false, false), None);
 
-        for (adds, path, unbuilt, locked, want) in [
+        for (adds, path, unread, locked, want) in [
             (false, false, false, false, "Add files, or open an archive"),
-            (false, true, true, false, "has not been built"),
-            // An unbuilt archive is unbuilt before it is locked: there are no members to be
-            // encrypted yet, so the password sentence would be the wrong reason.
-            (false, true, true, true, "has not been built"),
+            (false, true, true, false, "has not been read"),
+            // An unread archive is unread before it is locked: nothing has told us there are
+            // encrypted members, so the password sentence would be a guess at the reason.
+            (false, true, true, true, "has not been read"),
             (false, true, false, true, "encrypted"),
         ] {
-            let got = estimate_refusal_for(adds, path, unbuilt, locked)
-                .unwrap_or_else(|| panic!("{adds}/{path}/{unbuilt}/{locked} should refuse"));
+            let got = estimate_refusal_for(adds, path, unread, locked)
+                .unwrap_or_else(|| panic!("{adds}/{path}/{unread}/{locked} should refuse"));
             assert!(
                 got.contains(want),
-                "{adds}/{path}/{unbuilt}/{locked}: {got:?} does not mention {want:?}"
+                "{adds}/{path}/{unread}/{locked}: {got:?} does not mention {want:?}"
             );
         }
     }
