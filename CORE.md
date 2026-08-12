@@ -548,6 +548,16 @@ Second language: shelved for an undefined time. English is the language of v1.
 - Every P-document ends with the full ritual spelled out: **bump the version or `pkgrel`,
   write the `changelog.Debian` stanza and move `RELEASE_DATE` to its date**, test, commit,
   push, tag, build `--release`, run `check-deps.sh`, package, upload. Nothing implicit.
+  **Since P21 the last of those is not done by hand.** A release is drafted from the
+  **sudo-megas** account — the title, the notes, the decision that this is a release — and
+  the tag's own workflow attaches the three artefacts to that draft and publishes it. A
+  release's author is fixed when it is created, so the draft is what keeps the rule above
+  literally true: `release.yml` runs on `GITHUB_TOKEN`, and anything it *created* would be
+  authored by `github-actions[bot]`. The job therefore **refuses to create one** — no
+  draft, no release, and it says so — which makes the human half impossible to skip rather
+  than merely expected. This finishes an argument the workflow had already half made: no
+  byte a release ships is produced on a personal machine, and now none is uploaded from one
+  either.
   **The two that now open the list were added at P19, and they are not paperwork.**
   `release.yml` derives which tag form it will accept from `pkgrel` — two-numeral at 1, a
   revision above it — so that number decides the tag's name rather than following it. And

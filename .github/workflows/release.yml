@@ -33,10 +33,20 @@ on:
     tags:
       - 'v*'
 
-# Explicit and minimal. This workflow does not create a release, edit a release, or write
-# anything back to the repository: it uploads the artefacts to the run and stops. The
-# outward-facing act stays a separate human step, taken from the sudo-megas account and no
-# other, as CORE §8 requires.
+# Explicit and minimal, and read-only by default: the three build jobs write nothing back.
+# Only `publish` is trusted with `contents: write`, and only on a tag.
+#
+# **It fills a draft. It never creates one.** That is not a convenience — it is what keeps
+# CORE §8's "commits and releases come from the sudo-megas account and no other" literally
+# true while a robot does the lifting. A release's author is fixed at creation, and this
+# workflow authenticates as `GITHUB_TOKEN`, so anything it created would be authored by
+# `github-actions[bot]`. A draft created by hand stays sudo-megas's through every asset
+# upload and through publication itself. So the human half is the editorial half — the
+# title, the notes, the decision that this is a release at all — and the job **fails, loudly
+# and by name, when no draft is waiting** rather than helpfully making one.
+#
+# This finishes the argument the deb job below already half makes. No byte a release ships
+# is produced on a personal machine; since P21, none is uploaded from one either.
 permissions:
   contents: read
 
@@ -362,3 +372,83 @@ jobs:
       # so much as mentions RAR.
       - name: The packages, read by INDIUM itself
         run: cargo test --test package_path -- --ignored
+
+  # ---------------------------------------------------------------------------
+  # Publication. The bytes go up from here; the decision does not get made here.
+  # ---------------------------------------------------------------------------
+  #
+  # `needs: verify` and not `needs: [deb, arch]` — verify is the job that opens both
+  # packages together and asserts they put identical files on a machine, so hanging
+  # publication off it means nothing can ship that has not been read by INDIUM's own
+  # reader. Chaining through it also gets deb and arch transitively; naming them as well
+  # would only invite someone to drop verify from the list one day and not notice.
+  publish:
+    runs-on: ubuntu-latest
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/')
+
+    # The only write in the file, and it buys exactly two API calls: upload and edit.
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artefacts
+
+      # Three refusals, and each one is a way this could go quietly wrong.
+      #
+      #   no release      — creating one here would author it github-actions[bot] and break
+      #                     CORE §8 on the first tag that used it. Fail instead.
+      #   already published — a re-run of an old tag must not re-upload over a release
+      #                     people have already downloaded.
+      #   wrong author    — the rule is not "a draft exists", it is "sudo-megas drafted it".
+      - name: A draft has to be waiting, and it has to be sudo-megas's
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! info=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+                        --json isDraft,author --jq '"\(.isDraft) \(.author.login)"' 2>/dev/null); then
+            echo "No release exists for $GITHUB_REF_NAME."
+            echo "This job fills a draft; it does not create one. A release created here would"
+            echo "be authored by github-actions[bot], and CORE §8 requires sudo-megas. Draft it"
+            echo "from that account with its title and notes, then re-run this job."
+            exit 1
+          fi
+          draft=${info%% *}
+          author=${info##* }
+          if [ "$draft" != "true" ]; then
+            echo "$GITHUB_REF_NAME is already published. Refusing to touch a release that has shipped."
+            exit 1
+          fi
+          if [ "$author" != "sudo-megas" ]; then
+            echo "The draft for $GITHUB_REF_NAME is authored by '$author', not sudo-megas."
+            exit 1
+          fi
+          echo "Draft for $GITHUB_REF_NAME is sudo-megas's. Filling it."
+
+      - name: Attach the three artefacts and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          find artefacts -type f -printf '%s  %p\n' | sort -k2
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+            artefacts/indium-pkg/*.pkg.tar.zst \
+            artefacts/indium-deb/*.deb \
+            artefacts/indium-tar/*.tar.gz
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+
+      # Read back rather than assume. The claim this whole design rests on is that a draft
+      # authored by sudo-megas is still authored by sudo-megas after a robot publishes it,
+      # and an assertion in a comment is not evidence. This prints the author of the thing
+      # that actually shipped, into a log that outlives the run.
+      - name: Who the published release belongs to
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --json author,isDraft,assets \
+            --jq '"author: \(.author.login)   draft: \(.isDraft)   assets: \(.assets | length)"'
