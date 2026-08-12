@@ -415,6 +415,7 @@ repair to it.
 | P17 | The terminal half, and the copyright the `.deb` had been getting wrong since P12 | **`v1.2`** |
 | P18 | The record round: the claims nothing could check, and the gates that now read them | **`v1.2.0-2`** |
 | P19 | The front page read against the tree: a library three of four packages never declared, a panel's third group, and a password refused as the wrong one | **`v1.2.0-3`** |
+| P20 | The yazi plugin, in a repository of its own because `contrib/` could never have been installed, and the description settled in all four places that state one | **`v1.2.0-4`** |
 
 The P-table is a plan, not scripture; P-documents may split or merge steps, but scope
 only moves *out* of v1.0 by the maker's decision recorded here.
