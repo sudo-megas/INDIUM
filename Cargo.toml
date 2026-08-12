@@ -3,7 +3,7 @@ name = "indium"
 version = "1.2.0"
 edition = "2021"
 license = "GPL-3.0-only"
-description = "An archive manager for Linux on Wayland where the metadata is the main event."
+description = "The Most Verbose Archive Manager for Linux on Wayland."
 
 [dependencies]
 ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "file_chooser", "open_uri"] }

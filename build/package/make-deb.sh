@@ -183,7 +183,7 @@ Depends: $DEPENDS
 Section: utils
 Priority: optional
 Homepage: $HOMEPAGE
-Description: archive manager for Wayland where metadata is the main event
+Description: most verbose archive manager for Linux on Wayland
  Every other archiver on this platform treats an archive's contents as a name
  column and hides the rest behind a Properties dialog. INDIUM keeps a permanent
  Inspector pane on screen — sizes, packed sizes, ratio, method, checksums, four

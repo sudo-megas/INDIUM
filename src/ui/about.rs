@@ -65,7 +65,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 );
                 ui.label(
                     egui::RichText::new(
-                        "An archive manager for Linux on Wayland where the metadata is the main event.",
+                        "The Most Verbose Archive Manager for Linux on Wayland.",
                     )
                     .color(theme::TEXT_SECONDARY),
                 );
