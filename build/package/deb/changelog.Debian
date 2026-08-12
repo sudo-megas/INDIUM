@@ -2,9 +2,10 @@ indium (2.0.0-1) unstable; urgency=medium
 
   * The New Archive popup measures instead of asserting. A Measure action runs all eight
     compression methods over the files you have actually staged — or over the archive you
-    have open — on this machine, and prints each one's level, elapsed time and resulting
-    ratio beside the sentence describing it. The sentences stay: a number says how much,
-    a sentence says what for.
+    have open — on this machine, and opens a popup of its own holding each one's level,
+    elapsed time, resulting size and ratio in a table you can read down a column. The
+    sentences stay where they were: a number says how much, a sentence says what for.
+    Clicking a row chooses that method.
   * The figures are exact where they can be. Inputs of 2 MiB or less are compressed
     whole, through the same writers a rebuild uses, so the size shown is the size a
     rebuild would produce. Larger inputs are sampled across their whole length rather
