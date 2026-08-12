@@ -23,14 +23,18 @@ use std::path::PathBuf;
 
 use ashpd::desktop::file_chooser::OpenFileRequest;
 
-/// What the picker was opened for. Both arms end somewhere different, and the answer comes
+/// What the picker was opened for. Every arm ends somewhere different, and the answer comes
 /// back on a channel long after the button was clicked, so it has to carry its own reason.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickerFor {
-    /// Name an archive to open — a window of its own, per CORE §1.
+    /// Name an archive to open. Since P22 it takes *this* window, having closed what the
+    /// window held — CORE §1, as the maker amended it.
     Open,
     /// Name files to stage as adds into the archive already open.
     Add,
+    /// Name files to put in the draft. Distinct from `Add` because a draft has no current
+    /// directory to land in: it is the whole archive-to-be, so a file takes its own name.
+    Draft,
 }
 
 /// Ask the desktop's file picker for one or more files.

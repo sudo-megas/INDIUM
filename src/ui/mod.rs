@@ -40,7 +40,7 @@ use crate::platform::scratch::{self, Scratch};
 use crate::platform::store::{self, ExtractDefault, Recents, Settings, Store};
 use crate::platform::window::{self, Destination};
 use crate::secret::Secret;
-use crate::tasks::{self, ApplyMsg, Queue, Task};
+use crate::tasks::{self, ApplyMsg, Draft, Queue, Task};
 use crate::theme;
 
 /// What a measurement was drawn from — P21.
@@ -67,11 +67,17 @@ pub enum EstimateSource {
 
 /// Which centre view the sidebar has selected. P2 §2: "the sidebar selects what the
 /// centre shows".
+///
+/// `Archive` became `File` in P22, when the row it names did: a section that is enterable
+/// with nothing open is not "the archive", it is where the archive would be. `Draft` is the
+/// new one, and it is a section rather than a zone — CORE §4 still says *five fixed zones*,
+/// and the draft is drawn in the entry table's, as the two lists already are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
+    File,
+    Draft,
     Recents,
     Bookmarks,
-    Archive,
 }
 
 /// CORE §4: two tabs, toggled with `Space`.
@@ -298,6 +304,16 @@ pub struct Indium {
     /// The normalised paths the queue was staged against, so Apply can refuse if the
     /// archive changed on disk underneath it.
     pub staged_against: Vec<String>,
+
+    // --- the draft (P22) --------------------------------------------------
+    /// What the next archive will be made of. Deliberately not a second [`Queue`] — CORE §3
+    /// says why — and **the source of truth until Apply succeeds**: the queue's creation
+    /// lane is a projection of this, recomputed on every *Create* press. It outlives the
+    /// tray's *Discard*, and it outlives the archive its items were pulled from.
+    pub draft: Draft,
+    /// The draft section's own cursor. Every section has kept its own since P11, so leaving
+    /// one and coming back lands where you were.
+    pub draft_cursor: usize,
     /// `Some(path)` while a name is being edited in place. CORE §4 numbers the popups, and
     /// rename is not among them: it is the Name cell becoming a text field.
     pub rename_target: Option<String>,
@@ -458,6 +474,8 @@ impl Indium {
             open_path: String::new(),
             tasks: Queue::new(),
             staged_against: Vec::new(),
+            draft: Draft::new(),
+            draft_cursor: 0,
             rename_target: None,
             rename_input: String::new(),
             new_name: String::new(),
@@ -597,7 +615,7 @@ impl Indium {
         self.archive_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         self.archive_path = Some(path.clone());
         self.set_window_title(ctx);
-        self.section = Section::Archive;
+        self.section = Section::File;
         self.listing = true;
         self.status = format!("Reading {}…", path.display()).into();
 
@@ -792,7 +810,11 @@ impl Indium {
                 Ok(paths) if paths.is_empty() => {
                     self.status = Status::bad("The clipboard holds no files.");
                 }
-                Ok(paths) => self.stage_adds(paths),
+                // Where the paste lands is the section on screen, as `I` and a drop are.
+                Ok(paths) => match self.section {
+                    Section::Draft => self.add_to_draft(paths),
+                    _ => self.stage_adds(paths),
+                },
                 Err(e) => self.status = Status::bad(e),
             }
         }
@@ -809,13 +831,17 @@ impl Indium {
                 }
             };
             match what {
-                // CORE §1: one archive per window, so a named archive opens a new one.
+                // CORE §1 as P22 amends it: a window holds one archive at a time, and the
+                // one it is given takes this window rather than opening another. The comment
+                // here used to say the opposite while the code did this, which is the drift
+                // the amendment was written to end.
                 PickerFor::Open => {
                     if let Some(first) = paths.into_iter().next() {
                         self.open_archive(ctx, first, None);
                     }
                 }
                 PickerFor::Add => self.stage_adds(paths),
+                PickerFor::Draft => self.add_to_draft(paths),
             }
         }
 
@@ -1002,7 +1028,8 @@ impl Indium {
     /// user might not even be looking at.
     pub fn section_len(&self, rows: &[Row]) -> usize {
         match self.section {
-            Section::Archive => rows.len(),
+            Section::File => rows.len(),
+            Section::Draft => self.draft.len(),
             Section::Recents => self.recents.sorted().len(),
             Section::Bookmarks => self.settings.bookmarks.len(),
         }
@@ -1011,7 +1038,8 @@ impl Indium {
     /// The cursor belonging to the section on screen.
     pub fn section_cursor(&self) -> usize {
         match self.section {
-            Section::Archive => self.cursor,
+            Section::File => self.cursor,
+            Section::Draft => self.draft_cursor,
             Section::Recents => self.recents_cursor,
             Section::Bookmarks => self.bookmarks_cursor,
         }
@@ -1019,7 +1047,8 @@ impl Indium {
 
     pub fn set_section_cursor(&mut self, i: usize) {
         match self.section {
-            Section::Archive => self.cursor = i,
+            Section::File => self.cursor = i,
+            Section::Draft => self.draft_cursor = i,
             Section::Recents => self.recents_cursor = i,
             Section::Bookmarks => self.bookmarks_cursor = i,
         }
@@ -1644,6 +1673,40 @@ impl Indium {
         });
     }
 
+    /// Put every path given into the draft, under the name it will take inside the archive.
+    ///
+    /// A draft has no current directory to add *into* — it is the whole archive-to-be — so a
+    /// file takes its own name, where [`Indium::stage_adds`] prefixes the breadcrumb's.
+    ///
+    /// One item per name, so a second file called `notes.txt` replaces the first rather than
+    /// joining it: the fold would resolve that collision at Apply by keeping one of them
+    /// silently, and a loss a person can see is worth more than one they cannot.
+    pub fn add_to_draft(&mut self, paths: Vec<PathBuf>) {
+        if paths.is_empty() {
+            return;
+        }
+        let mut added = 0usize;
+        let mut replaced: Vec<String> = Vec::new();
+        for path in paths {
+            let Some(name) = path.file_name().map(|n| n.to_string_lossy().to_string()) else {
+                continue;
+            };
+            if self.draft.add(path, name.clone()).is_some() {
+                replaced.push(name);
+            } else {
+                added += 1;
+            }
+        }
+        let s = |n: usize| if n == 1 { "" } else { "s" };
+        self.status = match (added, replaced.len()) {
+            (0, 0) => return,
+            (n, 0) => format!("Draft: {n} file{} added.", s(n)).into(),
+            (0, 1) => format!("Draft: {} replaced.", replaced[0]).into(),
+            (0, r) => format!("Draft: {r} files replaced.").into(),
+            (n, r) => format!("Draft: {n} file{} added, {r} replaced.", s(n)).into(),
+        };
+    }
+
     /// Stage an add for every path given, landing each at the current directory.
     pub fn stage_adds(&mut self, paths: Vec<PathBuf>) {
         if paths.is_empty() {
@@ -1678,6 +1741,7 @@ impl Indium {
         let (title, multiple) = match what {
             PickerFor::Open => ("Open archive", false),
             PickerFor::Add => ("Add to archive", true),
+            PickerFor::Draft => ("Add to draft", true),
         };
         std::thread::spawn(move || {
             let _ = tx.send((what, picker::open_files(title, multiple)));
@@ -2409,12 +2473,31 @@ impl Indium {
         if dropped.is_empty() {
             return;
         }
-        // Before P4 this took `.next()` and silently discarded every other path. With an
-        // archive open, CORE §4 says a drop stages an add — of all of them.
-        if self.has_archive() && self.section == Section::Archive {
-            self.stage_adds(dropped);
-        } else if let Some(path) = dropped.into_iter().next() {
-            self.open_archive(ctx, path, None);
+        // Before P4 this took `.next()` and silently discarded every other path. CORE §4
+        // says a drop stages an add — of all of them — and since P22 it lands "where `I`
+        // does, in the section that is showing". With nowhere for files to land, the first
+        // path is read as an archive to open instead.
+        match self.section {
+            Section::Draft => self.add_to_draft(dropped),
+            Section::File if self.has_archive() => self.stage_adds(dropped),
+            _ => {
+                if let Some(path) = dropped.into_iter().next() {
+                    self.open_archive(ctx, path, None);
+                }
+            }
+        }
+    }
+
+    /// Is there somewhere in the section on screen for a file to land?
+    ///
+    /// CORE §4: `I`, `Ctrl+V` and a drop all put files in the section that is showing — the
+    /// draft, or the directory the breadcrumb names. The two lists are not places files go,
+    /// and the File view with nothing open has no directory to add into.
+    fn can_receive_files(&self) -> bool {
+        match self.section {
+            Section::Draft => true,
+            Section::File => self.has_archive(),
+            Section::Recents | Section::Bookmarks => false,
         }
     }
 
@@ -2503,7 +2586,7 @@ impl Indium {
         if ctrl_c && self.has_archive() && !typing && !selecting_text {
             self.copy_out(ctx, rows);
         }
-        if ctrl_v && self.has_archive() && !typing {
+        if ctrl_v && self.can_receive_files() && !typing {
             self.request_paste(ctx);
         }
 
@@ -2539,14 +2622,23 @@ impl Indium {
                     continue;
                 }
                 match key {
-                    // CORE §4's order, and it moved in P12: the archive is `1` because
-                    // it is what a person is looking at. The numbers are literals in the
-                    // sidebar too (`sidebar.rs`), so these two lists have to be read
-                    // together — a key that disagrees with the label beside it is worse
-                    // than no key.
-                    egui::Key::Num1 => self.section = Section::Archive,
-                    egui::Key::Num2 => self.section = Section::Bookmarks,
-                    egui::Key::Num3 => self.section = Section::Recents,
+                    // CORE §4's order, and it moved in P12: the file is `1` because it is
+                    // what a person is looking at. **Which digit means which section is
+                    // `sidebar::ROWS`' business and not this match's** — it used to be a
+                    // second hand-kept list with a comment saying the two "have to be read
+                    // together", which is the arrangement this project keeps finding
+                    // drifted. P22 made this one ask.
+                    egui::Key::Num1 | egui::Key::Num2 | egui::Key::Num3 | egui::Key::Num4 => {
+                        let digit = match key {
+                            egui::Key::Num1 => "1",
+                            egui::Key::Num2 => "2",
+                            egui::Key::Num3 => "3",
+                            _ => "4",
+                        };
+                        if let Some(section) = sidebar::section_for_key(digit) {
+                            self.section = section;
+                        }
+                    }
                     // `O` opens the desktop's picker; `Ctrl+O` still opens the path field,
                     // so the two readings of "open" sit on one letter with and without the
                     // modifier. `I` adds into the directory the breadcrumb names — the same
@@ -2587,8 +2679,16 @@ impl Indium {
         if open_picker {
             self.request_picker(ctx, PickerFor::Open);
         }
-        if add_picker && self.has_archive() {
-            self.request_picker(ctx, PickerFor::Add);
+        if add_picker {
+            // CORE §4: "`I` adds to whichever section is showing: the draft, or the
+            // directory the breadcrumb names." Decided rather than discovered — there are
+            // two *Add files…* controls after P22 and one key, and the section on screen is
+            // the one place the person is looking.
+            match self.section {
+                Section::Draft => self.request_picker(ctx, PickerFor::Draft),
+                Section::File if self.has_archive() => self.request_picker(ctx, PickerFor::Add),
+                _ => {}
+            }
         }
 
         // Movement and descent, which need `rows`.
@@ -2638,7 +2738,7 @@ impl Indium {
             // Moving the cursor selects what it lands on, which is what makes
             // "Inspector updates on arrow-key movement" (P1's manual checklist) true.
             // A checksum belongs to the entry it was computed for, so it is dropped.
-            if moved && self.section == Section::Archive {
+            if moved && self.section == Section::File {
                 self.crc_of = None;
                 self.forget_preview(ctx);
                 self.scroll_to_cursor = true;
@@ -2655,7 +2755,7 @@ impl Indium {
         }
 
         match self.section {
-            Section::Archive => {
+            Section::File => {
                 if enter {
                     match rows.get(self.cursor) {
                         Some(row) if row.is_dir => self.descend(rows),
@@ -2674,6 +2774,17 @@ impl Indium {
                 }
                 if f2 {
                     self.begin_rename(rows);
+                }
+            }
+            Section::Draft => {
+                // `Del` only. Nothing in a draft is descendable and nothing in it is a
+                // staged mutation, so there is no `Enter`, no `Backspace` and no rename —
+                // a row here is a file that will go in, and the only thing to say about it
+                // is that it will not.
+                if del {
+                    if let Some(gone) = self.draft.remove(self.draft_cursor) {
+                        self.status = format!("Removed {} from the draft.", gone.dest).into();
+                    }
                 }
             }
             Section::Recents => {

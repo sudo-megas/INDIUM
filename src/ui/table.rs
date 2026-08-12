@@ -38,7 +38,8 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui, rows: &[Row]) {
         // A `CentralPanel` draws no separator line, so there is none to turn off here.
         .frame(theme::zone(theme::WINDOW).inner_margin(egui::Margin::same(4)))
         .show(root, |ui| match app.section {
-            Section::Archive => archive_view(app, ui, rows),
+            Section::File => archive_view(app, ui, rows),
+            Section::Draft => draft_view(app, ui),
             Section::Recents => recents_view(app, &ctx, ui),
             Section::Bookmarks => bookmarks_view(app, ui),
         });
@@ -678,6 +679,104 @@ fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
         let name = gone.name.clone();
         app.change_settings(move |s| s.bookmarks.retain(|b| *b != gone));
         app.status = format!("Removed bookmark {name}.").into();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The draft
+// ---------------------------------------------------------------------------
+
+/// CORE §4: "one row per item with its own remove ✕, and two controls".
+///
+/// Only one of the two is here. *Bring from archive* arrives with the machinery that makes
+/// it honest — an entry inside an archive is not a file until the worker has written one,
+/// and a button that cannot keep that promise is worse than a button that is not there yet.
+///
+/// Each row shows the name the file will take **inside** the archive above the path it is
+/// coming **from**, in that order, because the first is what this archive will contain and
+/// the second is only how it got here. It is the same two-line shape the bookmarks list
+/// uses, for the same reason: a name a person chose, over a path they did not.
+fn draft_view(app: &mut Indium, ui: &mut egui::Ui) {
+    theme::section(ui, "Draft");
+    ui.label(
+        egui::RichText::new("What the next archive will be made of. Nothing here is written.")
+            .size(13.0)
+            .color(theme::TEXT_MUTED),
+    );
+    ui.add_space(6.0);
+
+    let mut pick = false;
+    ui.horizontal(|ui| {
+        if theme::small_button(ui, egui::RichText::new("Add files…"), true)
+            .on_hover_text("Choose files to put in the draft")
+            .clicked()
+        {
+            pick = true;
+        }
+    });
+    ui.add_space(6.0);
+    if pick {
+        app.request_picker(ui.ctx(), PickerFor::Draft);
+    }
+
+    if app.draft.is_empty() {
+        empty_state(
+            ui,
+            "The draft is empty.",
+            "Add files to it, then press N to choose how they are compressed.",
+        );
+        return;
+    }
+
+    let mut remove: Option<usize> = None;
+    // Set inside the loop and applied after it, exactly as the two lists do: the loop holds
+    // `app.draft` immutably and the cursor cannot be written through that borrow.
+    let mut focus: Option<usize> = None;
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for (i, item) in app.draft.items().iter().enumerate() {
+                let focused = i == app.draft_cursor;
+                let resp = theme::row(ui, focused, LIST_PAD, |ui| {
+                    // See `sidebar::row_body`: a selectable label out-ranks the row beneath
+                    // it and would eat the click that lands on the name.
+                    ui.style_mut().interaction.selectable_labels = false;
+                    let dim = if focused {
+                        theme::TEXT_SECONDARY
+                    } else {
+                        theme::TEXT_MUTED
+                    };
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new(&item.dest).color(theme::TEXT));
+                            ui.label(
+                                egui::RichText::new(item.source.to_string_lossy())
+                                    .family(theme::MONO)
+                                    .size(13.0)
+                                    .color(dim),
+                            );
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // A real `Button`, so it wins the hit test over the row's own
+                            // sense and removing an item does not also move the cursor onto
+                            // it — `UiBuilder::sense`'s stated property, as in the two lists.
+                            if theme::small_button(ui, egui::RichText::new("×"), true).clicked() {
+                                remove = Some(i);
+                            }
+                        });
+                    });
+                });
+                if resp.clicked() {
+                    focus = Some(i);
+                }
+            }
+        });
+
+    if let Some(i) = focus {
+        app.draft_cursor = i;
+    }
+    if let Some(gone) = remove.and_then(|i| app.draft.remove(i)) {
+        app.status = format!("Removed {} from the draft.", gone.dest).into();
     }
 }
 

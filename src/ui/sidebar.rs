@@ -1,16 +1,17 @@
 //! The sidebar — CORE §4's first zone.
 //!
-//! "the wordmark at top, then *Open file* `O` and *Archive* `1`; a rule; then
-//! *Bookmarks* `2` and *Recent files* `3`; at the bottom *New* `N`, *Settings* `,`,
-//! *About* `A`. Numbers and letters are bare keypresses, as in JADEITE."
+//! "the wordmark at top, then *File* `1`, *Draft* `2` and *Create* `N`; a rule; then
+//! *Open file* `O`, *Recent files* `3` and *Bookmarks* `4`; at the bottom *Settings* `,`
+//! and *About* `A`. Numbers and letters are bare keypresses, as in JADEITE."
 //!
-//! The order used to run the other way — *Recent files* first and *Archive* last — and a
+//! The order used to run the other way — *Recent files* first and the archive last — and a
 //! testing round said what was wrong with it in one line: *"as a person's first focus
-//! usually the archive he/she in."* The rule below the archive is from the same note.
+//! usually the archive he/she in."* The rule below it is from the same note. P22 kept that
+//! finding and moved two rows around it, per CORE §4's three groups.
 
 use eframe::egui;
 
-use super::{Indium, Popup, Section, Status};
+use super::{Indium, Popup, Section};
 use crate::platform::picker::PickerFor;
 use crate::theme;
 
@@ -18,6 +19,97 @@ use crate::theme;
 const CONTENT: f32 = 166.0;
 /// The sidebar's inner margin.
 const ZONE_PAD: egui::Margin = egui::Margin::symmetric(12, 14);
+
+/// What a sidebar row does when it is clicked.
+///
+/// Three kinds, because the sidebar has always had three: a section it shows in the centre
+/// zone, a popup it opens, and the one row that is neither — *Open file*, which raises the
+/// desktop's own picker and shows nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Does {
+    Show(Section),
+    Open(Popup),
+    Pick,
+}
+
+/// One line of the sidebar: what it does, its glyph, its label, its bare key, and which of
+/// CORE §4's three groups it belongs to.
+pub struct Row {
+    pub does: Does,
+    pub icon: &'static str,
+    pub label: &'static str,
+    pub key: &'static str,
+    /// 1 above the rule, 2 below it, 3 at the foot of the panel.
+    pub group: u8,
+}
+
+/// CORE §4's sidebar, in its order. The one list this zone draws.
+///
+/// It was **eight hand-written call sites** until P22, with nothing between them and the
+/// document: the labels, the keys and the groups could all drift silently, and the keys had
+/// already drifted into a second copy in `mod.rs`'s bare-key `match` besides, flagged there
+/// in a comment as two lists that must be read together and held by nothing.
+/// `the_sidebar_rows_are_the_ones_core_lists` below reads §4's own paragraph out of
+/// `CORE.md` at test time and fails if the two disagree — the `keys::ROWS` idiom, for the
+/// same reason and in the same direction: the document moves first, and this follows.
+pub const ROWS: &[Row] = &[
+    Row {
+        does: Does::Show(Section::File),
+        icon: theme::icon::ARCHIVE,
+        label: "File",
+        key: "1",
+        group: 1,
+    },
+    Row {
+        does: Does::Show(Section::Draft),
+        icon: theme::icon::DRAFT,
+        label: "Draft",
+        key: "2",
+        group: 1,
+    },
+    Row {
+        does: Does::Open(Popup::Create),
+        icon: theme::icon::NEW,
+        label: "Create",
+        key: "N",
+        group: 1,
+    },
+    Row {
+        does: Does::Pick,
+        icon: theme::icon::FOLDER_OPEN,
+        label: "Open file",
+        key: "O",
+        group: 2,
+    },
+    Row {
+        does: Does::Show(Section::Recents),
+        icon: theme::icon::RECENT,
+        label: "Recent files",
+        key: "3",
+        group: 2,
+    },
+    Row {
+        does: Does::Show(Section::Bookmarks),
+        icon: theme::icon::BOOKMARK,
+        label: "Bookmarks",
+        key: "4",
+        group: 2,
+    },
+    Row {
+        does: Does::Open(Popup::Settings),
+        icon: theme::icon::SETTINGS,
+        label: "Settings",
+        key: ",",
+        group: 3,
+    },
+    Row {
+        does: Does::Open(Popup::About),
+        icon: theme::icon::ABOUT,
+        label: "About",
+        key: "A",
+        group: 3,
+    },
+];
 
 pub fn show(app: &mut Indium, root: &mut egui::Ui) {
     // `exact_size` is the panel's *outer* width, so it has to pay for the whole frame —
@@ -65,33 +157,7 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     // shows all three sections without scrolling.
                     ui.separator();
                     ui.add_space(1.0);
-                    action_item(
-                        ui,
-                        app,
-                        theme::icon::NEW,
-                        "New",
-                        "N",
-                        Some(Popup::Create),
-                        true,
-                    );
-                    action_item(
-                        ui,
-                        app,
-                        theme::icon::SETTINGS,
-                        "Settings",
-                        ",",
-                        Some(Popup::Settings),
-                        true,
-                    );
-                    action_item(
-                        ui,
-                        app,
-                        theme::icon::ABOUT,
-                        "About",
-                        "A",
-                        Some(Popup::About),
-                        true,
-                    );
+                    draw_group(ui, app, 3);
                 });
 
             // **The bar floats here, and only here.** egui decides whether a `ScrollArea`
@@ -143,66 +209,61 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                     });
                     ui.add_space(6.0);
 
-                    open_item(ui, app);
-                    section_item(
-                        ui,
-                        app,
-                        Section::Archive,
-                        theme::icon::ARCHIVE,
-                        "Archive",
-                        "1",
-                        app.has_archive(),
-                    );
-                    // CORE §4: "a rule". The archive is what you are inside; the two lists
-                    // are ways of getting somewhere else, and the line says which is which.
-                    // It is legible now — `theme::HAIRLINE` was 8% white and measured
-                    // 1.2:1, which is the *other* half of the note this order came from:
-                    // "The separator staying on the New button is so faded."
+                    draw_group(ui, app, 1);
+                    // CORE §4: "a rule". Above it is the archive you are in or making — the
+                    // file, the draft, and the control that builds it; below it is how you
+                    // reach another one, and the line says which is which. It is legible now
+                    // — `theme::HAIRLINE` was 8% white and measured 1.2:1, which is the
+                    // *other* half of the note this order came from: "The separator staying
+                    // on the New button is so faded."
                     ui.add_space(1.0);
                     ui.separator();
                     ui.add_space(1.0);
-                    section_item(
-                        ui,
-                        app,
-                        Section::Bookmarks,
-                        theme::icon::BOOKMARK,
-                        "Bookmarks",
-                        "2",
-                        true,
-                    );
-                    section_item(
-                        ui,
-                        app,
-                        Section::Recents,
-                        theme::icon::RECENT,
-                        "Recent files",
-                        "3",
-                        true,
-                    );
+                    draw_group(ui, app, 2);
                 });
         });
 }
 
-/// *Open file* — a row that is an action rather than a section.
+/// The section a bare digit selects, read out of [`ROWS`] rather than typed a second time.
 ///
-/// It sits with *Archive* above the rule because both are about the archive you are in or
-/// about to be in, and it raises the desktop's own picker through `xdg-desktop-portal`
-/// rather than a dialog INDIUM draws. `Ctrl+O`'s path field is unchanged and still there;
-/// this is the route for people who do not know a path by heart, which is what the first
-/// note back from testing asked for: *"we need an open file option ... must use xdg-portal
-/// file picker."*
-fn open_item(ui: &mut egui::Ui, app: &mut Indium) {
-    if row(
-        ui,
-        theme::icon::FOLDER_OPEN,
-        "Open file",
-        "O",
-        false,
-        true,
-        None,
-    )
-    .clicked()
-    {
+/// `handle_keys` used to hold its own `Num1 => Archive, Num2 => Bookmarks, …` match, with a
+/// comment saying it and the sidebar "have to be read together". Two hand-kept lists and a
+/// comment between them is the arrangement this project keeps finding drifted, so P22 made
+/// the second one ask the first.
+pub fn section_for_key(key: &str) -> Option<Section> {
+    ROWS.iter().find_map(|r| match &r.does {
+        Does::Show(section) if r.key == key => Some(*section),
+        _ => None,
+    })
+}
+
+/// Draw one of CORE §4's three groups, in [`ROWS`] order.
+///
+/// **Every row is live.** Nothing in this zone has carried a "not yet" tag since P4, and P22
+/// removed the last thing that was ever conditionally dead: *File* used to be disabled with
+/// no archive open, which made the section you would go to *in order to* open one the single
+/// section you could not enter. `row` keeps its unavailable mode — P4 wrote it down as
+/// deliberate and a later round will want it — but nothing here asks for it.
+fn draw_group(ui: &mut egui::Ui, app: &mut Indium, group: u8) {
+    for r in ROWS.iter().filter(|r| r.group == group) {
+        match &r.does {
+            Does::Show(section) => section_item(ui, app, *section, r.icon, r.label, r.key),
+            Does::Open(popup) => action_item(ui, app, r.icon, r.label, r.key, popup),
+            Does::Pick => open_item(ui, app, r.icon, r.label, r.key),
+        }
+    }
+}
+
+/// *Open file* — the one row that is an action and shows nothing.
+///
+/// It raises the desktop's own picker through `xdg-desktop-portal` rather than a dialog
+/// INDIUM draws. `Ctrl+O`'s path field is unchanged and still there; this is the route for
+/// people who do not know a path by heart, which is what the first note back from testing
+/// asked for: *"we need an open file option ... must use xdg-portal file picker."* It kept
+/// the archive's company above the rule until P22 and now sits below it with the two lists,
+/// because it is a way in rather than something you are holding.
+fn open_item(ui: &mut egui::Ui, app: &mut Indium, icon: &str, label: &str, key: &str) {
+    if row(ui, icon, label, key, false, true, None).clicked() {
         let ctx = ui.ctx().clone();
         app.request_picker(&ctx, PickerFor::Open);
     }
@@ -215,14 +276,12 @@ fn section_item(
     icon: &str,
     label: &str,
     key: &str,
-    enabled: bool,
 ) {
     let active = app.section == section;
-    let response = row(ui, icon, label, key, active, enabled, None);
-    if response.clicked() && enabled {
-        // No cursor reset. Each section has kept its own since P11, so leaving Archive for
+    if row(ui, icon, label, key, active, true, None).clicked() {
+        // No cursor reset. Each section has kept its own since P11, so leaving File for
         // Bookmarks and coming back lands where you were rather than at the top — and
-        // resetting here would have written the *archive's* cursor on the way to a list,
+        // resetting here would have written the *file's* cursor on the way to a list,
         // which is how the one shared field used to corrupt itself.
         app.section = section;
     }
@@ -234,19 +293,13 @@ fn action_item(
     icon: &str,
     label: &str,
     key: &str,
-    popup: Option<Popup>,
-    enabled: bool,
+    popup: &Popup,
 ) {
-    // Every sidebar action is live as of P4, so nothing carries a "not yet" tag any
-    // more. The parameter stays because the next milestone will want it again.
-    let tag = if enabled { None } else { Some("soon") };
-    let response = row(ui, icon, label, key, false, enabled, tag);
-    if response.clicked() {
-        match &popup {
+    if row(ui, icon, label, key, false, true, None).clicked() {
+        match popup {
             // Create needs its fields seeded, which is what `N` does too.
-            Some(Popup::Create) => app.open_create(),
-            Some(p) => app.popup = Some(p.clone()),
-            None => app.status = Status::bad(format!("{label} is not available yet.")),
+            Popup::Create => app.open_create(),
+            p => app.popup = Some(p.clone()),
         }
     }
 }
@@ -367,4 +420,140 @@ fn row(
         };
         row_body(ui, icon, label, key, ink, dim, tag);
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// CORE §4's sidebar paragraph, as one run of words.
+    ///
+    /// Newlines in the document are wrapping and not structure — §4 wraps *Create* onto one
+    /// line and its `N` onto the next — so the paragraph is flattened before it is read.
+    fn sidebar_paragraph() -> String {
+        let core = include_str!("../../CORE.md");
+        let after = core
+            .split_once("**Sidebar**")
+            .expect("CORE §4 describes the Sidebar")
+            .1;
+        let para = after
+            .split_once("**Entry table**")
+            .expect("CORE §4 describes the Entry table after the Sidebar")
+            .0;
+        para.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Read the rows out of that paragraph: an italic label, then a backticked key.
+    ///
+    /// Split on the backtick and every odd chunk is a key; the chunk before it ends with the
+    /// label's closing `*` when — and only when — that key belongs to a row. A backtick that
+    /// is not preceded by an italic run is prose and is skipped, which is what lets §4 write
+    /// `Ctrl+O` in the same section without inventing a row.
+    fn rows_core_lists(flat: &str) -> Vec<(String, String)> {
+        let parts: Vec<&str> = flat.split('`').collect();
+        let mut out = Vec::new();
+        for k in (1..parts.len()).step_by(2) {
+            let Some(head) = parts[k - 1].strip_suffix("* ") else {
+                continue;
+            };
+            let Some(start) = head.rfind('*') else {
+                continue;
+            };
+            let label = &head[start + 1..];
+            if label.is_empty() || label.contains('*') {
+                continue;
+            }
+            out.push((label.to_string(), parts[k].to_string()));
+        }
+        out
+    }
+
+    /// CORE §4's sidebar paragraph and [`ROWS`] are the same list, in the same order and in
+    /// the same three groups.
+    ///
+    /// This zone was eight hand-written call sites and a paragraph with **nothing between
+    /// them**, in a program whose whole method is that a list written twice is held by a
+    /// test. `the_popup_and_core_agree_about_the_keys` has done this for the keyboard table
+    /// since P12 and caught drift more than once; this is the same instrument pointed at the
+    /// other list §4 keeps, in the round that rewrites both.
+    ///
+    /// It reads a row as *label* followed by `key`, which is a constraint on §4's prose and
+    /// a deliberate one: a list a test can read is a list that cannot drift. The groups are
+    /// checked as well as the order, because the maker's F3 ruling **is** the grouping — a
+    /// rule that moved silently would leave *Create* filed with Settings again.
+    #[test]
+    fn the_sidebar_rows_are_the_ones_core_lists() {
+        let flat = sidebar_paragraph();
+        let listed = rows_core_lists(&flat);
+
+        assert!(
+            !listed.is_empty(),
+            "CORE §4's sidebar paragraph did not parse — it no longer writes its rows as \
+             *label* followed by `key`, or the paragraph has moved"
+        );
+        assert_eq!(
+            listed.len(),
+            ROWS.len(),
+            "CORE §4 lists {} sidebar rows and the sidebar draws {}: {listed:?}",
+            listed.len(),
+            ROWS.len()
+        );
+        for (i, ((core_label, core_key), drawn)) in listed.iter().zip(ROWS.iter()).enumerate() {
+            assert_eq!(
+                core_label, drawn.label,
+                "row {i}: CORE says {core_label:?}, the sidebar draws {:?}",
+                drawn.label
+            );
+            assert_eq!(
+                core_key, drawn.key,
+                "row {i} ({core_label}): CORE says key {core_key:?}, the sidebar draws {:?}",
+                drawn.key
+            );
+        }
+
+        let rule = flat
+            .find("a rule")
+            .expect("CORE §4 puts a rule through the sidebar");
+        let foot = flat
+            .find("at the bottom")
+            .expect("CORE §4 puts a group at the bottom of the sidebar");
+        for drawn in ROWS {
+            let at = flat
+                .find(&format!("*{}*", drawn.label))
+                .expect("every drawn row is named in CORE §4");
+            let ok = match drawn.group {
+                1 => at < rule,
+                2 => at > rule && at < foot,
+                _ => at > foot,
+            };
+            assert!(
+                ok,
+                "{} is drawn in group {} and CORE §4 puts it elsewhere",
+                drawn.label, drawn.group
+            );
+        }
+    }
+
+    /// Every digit CORE §4's keyboard table offers selects a section, and the bare-key
+    /// `match` in `handle_keys` reads them from here rather than keeping its own copy.
+    #[test]
+    fn every_sidebar_digit_selects_the_section_core_puts_on_it() {
+        for drawn in ROWS {
+            let Does::Show(section) = &drawn.does else {
+                continue;
+            };
+            assert_eq!(
+                section_for_key(drawn.key),
+                Some(*section),
+                "{} is drawn on key {:?} and that key selects something else",
+                drawn.label,
+                drawn.key
+            );
+        }
+        assert_eq!(
+            section_for_key("N"),
+            None,
+            "a key that opens a popup must not also select a section"
+        );
+    }
 }

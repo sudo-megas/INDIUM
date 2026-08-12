@@ -411,6 +411,10 @@ pub mod icon {
         FOLDER_OPEN = "\u{f07c}";
         /// The ribbon, for *Bookmarks*.
         BOOKMARK = "\u{f02e}";
+        /// A list, for *Draft* — what the next archive will be made of. Not the drawer:
+        /// [`ARCHIVE`] means a file that exists, and the whole of P22 is that a draft is
+        /// not one yet.
+        DRAFT = "\u{f03a}";
         /// A clock, for *Recent files*.
         RECENT = "\u{f017}";
         /// A plus, for *New*.

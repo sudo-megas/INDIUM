@@ -455,7 +455,7 @@ impl Indium {
         self.archive_path = Some(recipe.path.clone());
         self.archive_bytes = 0;
         self.archive_info = None;
-        self.section = super::Section::Archive;
+        self.section = super::Section::File;
 
         // **Re-staging keeps the queue.** Until P21 this method cleared it unconditionally,
         // which was invisible while the popup could not be reached a second time: pressing
