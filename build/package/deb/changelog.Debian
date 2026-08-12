@@ -1,3 +1,14 @@
+indium (1.2.0-4) unstable; urgency=medium
+
+  * The line under the name in the About window, and the description these packages
+    carry, now read "The Most Verbose Archive Manager for Linux on Wayland." -- the
+    sentence the project's front page and its repository already led with. The four
+    places that state a description move together: About, Cargo.toml, the Arch
+    package's pkgdesc, and this package's own synopsis. Nothing else changed in the
+    program: no code, no formats, no behaviour.
+
+ -- sudo-megas <sudo-megas@users.noreply.github.com>  Wed, 12 Aug 2026 10:52:00 +0300
+
 indium (1.2.0-3) unstable; urgency=medium
 
   * The Debian package did not declare every library INDIUM needs. The program opens

@@ -62,18 +62,18 @@ nothing more: *"RAR is not supported."*
 
 ### 3.A Arch Linux
 
-Download `indium-1.2.0-3-x86_64.pkg.tar.zst` from the Releases page:
+Download `indium-1.2.0-4-x86_64.pkg.tar.zst` from the Releases page:
 
 ```sh
-sudo pacman -U indium-1.2.0-3-x86_64.pkg.tar.zst
+sudo pacman -U indium-1.2.0-4-x86_64.pkg.tar.zst
 ```
 
 ### 3.B Debian / Ubuntu
 
-Download `indium_1.2.0-3_amd64.deb` from the Releases page:
+Download `indium_1.2.0-4_amd64.deb` from the Releases page:
 
 ```sh
-sudo apt install ./indium_1.2.0-3_amd64.deb
+sudo apt install ./indium_1.2.0-4_amd64.deb
 ```
 
 **The two packages do not have the same floor, and it matters more than the file extension
@@ -84,7 +84,7 @@ right for the distribution it is for and wrong everywhere else.
 
 ### 3.C Anything else
 
-`indium-1.2.0-3-x86_64.tar.gz` is the `.deb`'s binary with no packaging around it, so it carries
+`indium-1.2.0-4-x86_64.tar.gz` is the `.deb`'s binary with no packaging around it, so it carries
 the lower of the two floors — glibc 2.35. Unpack it, put `indium` wherever you keep such
 things, and satisfy `libarchive.so.13`, `libwayland-client`, `libwayland-egl`, `libxkbcommon`
 and `libEGL` yourself. The last four are opened by name at runtime rather than linked, so `ldd`
