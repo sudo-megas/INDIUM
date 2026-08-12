@@ -1,0 +1,1017 @@
+//! The live estimator — CORE §7's **V2.0**, built by P21.
+//!
+//! §7 asked for "the live estimator: sample the actual input, run the real candidates on
+//! the real CPU, report measured time and ratio instead of folklore", and §5 marked the
+//! eight method sentences "static in v1.x" until it existed. This module is what makes
+//! that clause false.
+//!
+//! **It owns no format knowledge.** Every candidate is written through the same
+//! [`Sink`] Apply writes through — `arch::Writer` for tar and zip, `sevenz::Writer` for
+//! 7z — into a scratch file that is measured and deleted. Nothing here knows what a
+//! compressor is, which is why a method added to `METHODS` is measured without this file
+//! being touched.
+//!
+//! **What it is honest about.** Below [`BUDGET`] the whole input goes through the real
+//! writer in plan order, so the figure is not an estimate at all: it is the size Apply
+//! would produce, container overhead included. Above it the input is sampled and every
+//! figure is marked, because sampling ratio is not sound and pretending otherwise would
+//! be the folklore §7 sent this module to replace. Measured on the machine this was
+//! written on, sixteen 64 KiB chunks spread across a 4 MiB tarball predicted gzip within
+//! 1.1 points and zstd within 6.8 — but xz by **13.7**, because LZMA's dictionary earns
+//! its ratio on long-range matches and chopping the stream is exactly what destroys
+//! them. Throughput samples honestly; ratio does not. Hence the mark.
+//!
+//! **What it never does.** It never encrypts: `sevenz::Writer` refuses `encrypt: true`
+//! without a passphrase, and CORE §9 keeps passwords typed per use and never held, so
+//! there is no passphrase at Measure time and asking for one to time a compressor would
+//! be an outrageous trade. AES-256 is a rounding error beside LZMA2 in any case. And it
+//! never writes beside the target — the scratch roots are `platform::scratch`'s, under
+//! [`Kind::Estimate`](crate::platform::scratch::Kind::Estimate).
+//!
+//! Copyright © sudo-megas. GPL-3.0-only.
+
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Sender;
+use std::sync::Arc;
+use std::time::Instant;
+
+use crate::arch::Entry;
+use crate::secret::Secret;
+use crate::tasks::{Container, Meta, Method, Recipe, Sink, METHODS};
+
+/// The measuring budget, and the line between an exact figure and an estimate.
+///
+/// Two mebibytes because the candidates run **in sequence** — CORE §3 fixes threading at
+/// "the UI thread and one worker", so there is no pool to spread them over.
+///
+/// Measured rather than guessed, by `the_eight_candidates_run_in_sequence_over_a_real_input`
+/// against this repository's own `src/` on a Ryzen 5 3450U: **1365 ms for 813 KiB**, of
+/// which xz (571) and LZMA2 (566) are 83%. That scales to roughly **3.5 s** at this budget,
+/// and doubling the budget doubles that wait for a figure nobody reads twice.
+pub const BUDGET: u64 = 2 * 1024 * 1024;
+
+/// One chunk of a stratified sample. Thirty-two of these fill [`BUDGET`].
+const CHUNK: u64 = 64 * 1024;
+
+/// How much of an open archive the walk will decompress before it stops.
+///
+/// Stratifying staged files is free — a file seeks. An archive does not: libarchive
+/// decompresses sequentially and even `skip_data` on a solid stream does the work, so
+/// spreading a sample across a 2 GiB `.tar.xz` means decompressing 2 GiB before the first
+/// candidate runs. The walk therefore takes entries spread across the *list* and stops
+/// here regardless. Without this the feature is unusable on exactly the archives that are
+/// worth re-compressing.
+pub const WALK_CAP: u64 = 64 * 1024 * 1024;
+
+/// What the estimator says when the flag went up mid-member.
+const CANCELLED: &str = "cancelled";
+
+// ---------------------------------------------------------------------------
+// What gets compressed
+// ---------------------------------------------------------------------------
+
+/// One member on its way into a candidate archive.
+pub struct Member {
+    pub meta: Meta,
+    pub body: Body,
+}
+
+/// Where a member's bytes come from. Directories, symlinks and empty files have none.
+pub enum Body {
+    None,
+    /// Read from disk when the candidate runs, so a staged add is never held in memory.
+    File(PathBuf),
+    /// Already in hand — an archive's entries, which cannot be re-read cheaply.
+    Bytes(Vec<u8>),
+}
+
+/// The bytes a measurement rests on, and whether they are all of them.
+pub enum Input {
+    /// Every member, in the order Apply would write them. The figures are exact.
+    Whole(Vec<Member>),
+    /// One synthetic member holding chunks drawn from across the input. Figures from it
+    /// are estimates and are marked as such everywhere they appear.
+    ///
+    /// A single member rather than truncated real ones on purpose: it holds container
+    /// overhead constant across the eight candidates, so even where the absolute ratio
+    /// drifts the *comparison* between methods stays fair, which is what the popup is
+    /// actually asked to help with.
+    Sampled(Vec<u8>),
+}
+
+impl Input {
+    /// Is every figure drawn from this an estimate?
+    pub fn sampled(&self) -> bool {
+        matches!(self, Input::Sampled(_))
+    }
+
+    /// How many bytes the candidates will be handed.
+    pub fn len(&self) -> u64 {
+        match self {
+            Input::Whole(members) => members.iter().map(|m| m.meta.size).sum(),
+            Input::Sampled(bytes) => bytes.len() as u64,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+// ---------------------------------------------------------------------------
+// What comes back
+// ---------------------------------------------------------------------------
+
+/// One candidate, measured.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Measurement {
+    pub method: Method,
+    pub level: u32,
+    /// Wall-clock for the whole build: opening the writer, every member, and the flush.
+    pub millis: u64,
+    /// What the finished candidate weighed.
+    pub bytes: u64,
+    /// What went in, so the ratio can be recomputed without trusting a stored float.
+    pub input_bytes: u64,
+}
+
+impl Measurement {
+    /// Compressed size as a percentage of the input. Smaller is better; `Store` is 100.
+    pub fn ratio(&self) -> f32 {
+        if self.input_bytes == 0 {
+            return 0.0;
+        }
+        (self.bytes as f32 / self.input_bytes as f32) * 100.0
+    }
+}
+
+/// What the worker sends back, in this order: one `Began`, then a `One` or `Failed` per
+/// method as each lands, then one `Done`. `Fatal` replaces the lot when the input itself
+/// could not be read.
+pub enum Msg {
+    /// The input resolved. Sent before the first candidate so the window can say what it
+    /// is measuring while it measures it.
+    Began {
+        describe: String,
+        sampled: bool,
+        bytes: u64,
+    },
+    One(Measurement),
+    /// One candidate failed. The rest still run — a method libarchive refuses on this
+    /// build is a row that says so, not a dead window.
+    Failed {
+        method: Method,
+        why: String,
+    },
+    Done,
+    Fatal(String),
+}
+
+// ---------------------------------------------------------------------------
+// Resolving the input
+// ---------------------------------------------------------------------------
+
+/// The members a staged queue contributes, in the order Apply would write them.
+///
+/// `expand_add` is the same walk Apply uses, so a staged directory contributes the same
+/// tree here as it will there — the estimator does not get to see a different archive
+/// from the one it is describing.
+pub fn from_staged(adds: &[(PathBuf, String)]) -> Result<(Vec<Member>, u64), String> {
+    let mut members = Vec::new();
+    let mut total = 0u64;
+    for (source, dest) in adds {
+        let items = crate::tasks::expand_add(source, dest)
+            .map_err(|e| format!("could not read {}: {e}", source.display()))?;
+        for item in items {
+            let meta = crate::tasks::meta_from_fs(&item.source, &item.out_path)?;
+            total += meta.size;
+            let body = if meta.is_dir || meta.symlink.is_some() || meta.size == 0 {
+                Body::None
+            } else {
+                Body::File(item.source.clone())
+            };
+            members.push(Member { meta, body });
+        }
+    }
+    Ok((members, total))
+}
+
+/// Turn a member list into what will actually be compressed.
+///
+/// Under budget every member goes through untouched. Over it, the members are replaced by
+/// one synthetic member holding chunks lifted from across them — which is why this reads
+/// files rather than merely listing them.
+pub fn narrow(members: Vec<Member>, total: u64) -> Result<Input, String> {
+    if total <= BUDGET {
+        return Ok(Input::Whole(members));
+    }
+
+    // Where in the virtual concatenation each chunk is taken from. An even stride rather
+    // than the first N bytes: the head of a tarball is source text and its tail is
+    // already-compressed images, and a head sample of this repository's own tarball
+    // predicted zstd at 28.5% where the truth was 54.0%. Sampling the head does not
+    // measure the input, it measures the input's first chapter.
+    let want = BUDGET / CHUNK;
+    let stride = (total / want).max(1);
+
+    let mut out: Vec<u8> = Vec::with_capacity(BUDGET as usize);
+    let mut cursor = 0u64; // virtual offset of the current member's first byte
+    let mut next = 0u64; // virtual offset of the next chunk to take
+
+    for m in &members {
+        if out.len() as u64 >= BUDGET {
+            break;
+        }
+        let size = m.meta.size;
+        if size == 0 {
+            continue;
+        }
+        let end = cursor + size;
+        while next < end && (out.len() as u64) < BUDGET {
+            let within = next - cursor;
+            let take = CHUNK.min(size - within).min(BUDGET - out.len() as u64);
+            read_into(&m.body, within, take, &mut out)?;
+            next += stride;
+        }
+        cursor = end;
+    }
+
+    Ok(Input::Sampled(out))
+}
+
+/// Lift `len` bytes at `offset` out of one member's body.
+fn read_into(body: &Body, offset: u64, len: u64, out: &mut Vec<u8>) -> Result<(), String> {
+    match body {
+        Body::None => Ok(()),
+        Body::Bytes(b) => {
+            let start = (offset as usize).min(b.len());
+            let end = (start + len as usize).min(b.len());
+            out.extend_from_slice(&b[start..end]);
+            Ok(())
+        }
+        Body::File(p) => {
+            use std::io::Seek;
+            let mut f = std::fs::File::open(p)
+                .map_err(|e| format!("could not read {}: {e}", p.display()))?;
+            f.seek(std::io::SeekFrom::Start(offset))
+                .map_err(|e| format!("could not read {}: {e}", p.display()))?;
+            let before = out.len();
+            out.resize(before + len as usize, 0);
+            let mut got = 0usize;
+            while got < len as usize {
+                match f.read(&mut out[before + got..]) {
+                    Ok(0) => break,
+                    Ok(n) => got += n,
+                    Err(e) => return Err(format!("could not read {}: {e}", p.display())),
+                }
+            }
+            out.truncate(before + got);
+            Ok(())
+        }
+    }
+}
+
+/// The members an already-open archive contributes.
+///
+/// One sequential pass, because that is the only kind libarchive offers. `entries` is the
+/// listing the window already holds, so this does not pay for a second walk to discover
+/// what it is about to read.
+///
+/// Over budget the *entry list* is strided rather than the byte stream, and the walk stops
+/// at [`WALK_CAP`] however much it has collected — see that constant for why.
+pub fn from_archive(
+    path: &Path,
+    entries: &[Entry],
+    passphrase: Option<&Secret>,
+    cancel: &AtomicBool,
+) -> Result<(Vec<Member>, u64), String> {
+    /// The same predicate `Meta::has_data` applies, against a listing rather than a
+    /// member: a directory, a link and an empty file all carry no stream to compress.
+    fn carries_data(e: &Entry) -> bool {
+        !e.is_dir && e.symlink.is_none() && e.hardlink.is_none() && e.size > 0
+    }
+
+    let files: Vec<&Entry> = entries.iter().filter(|e| carries_data(e)).collect();
+    let total: u64 = files.iter().map(|e| e.size).sum();
+
+    // How much is taken from any one selected member. Splitting the budget evenly across
+    // the selection is what stops a single enormous file from spending all of it on
+    // itself, and it is what makes the arithmetic below add up to the budget rather than
+    // to whatever the first few members happened to weigh.
+    let want = (BUDGET / CHUNK).min(files.len().max(1) as u64).max(1) as usize;
+    let per = if total <= BUDGET {
+        BUDGET // under budget nothing is truncated: every member goes in whole
+    } else {
+        (BUDGET / want as u64).max(1)
+    };
+
+    // **Which** members to open, by position rather than by name — a tar may legally hold
+    // two members with the same stored name, and matching on the name would read whichever
+    // came first, twice.
+    //
+    // `i * len / want` rather than `step_by`: a stride of `len / want` rounds *down*, and
+    // with 40 members and a want of 32 that rounds to 1, selecting members 0..31 and
+    // calling it a spread. It is not a spread — it is a head sample of the entry list,
+    // which is the exact defect this module exists to avoid, arrived at from the other
+    // direction. Mapping the index instead reaches the last member by construction.
+    let wanted: Vec<usize> = if total <= BUDGET {
+        (0..files.len()).collect()
+    } else {
+        (0..want).map(|i| i * files.len() / want).collect()
+    };
+
+    let mut reader = crate::arch::Reader::open(path, passphrase).map_err(|e| e.to_string())?;
+    let mut members = Vec::new();
+    let mut held = 0u64;
+    let mut walked = 0u64;
+    let mut index = 0usize;
+
+    while let Some(entry) = reader.next_entry().map_err(|e| e.to_string())? {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(CANCELLED.to_string());
+        }
+        if walked >= WALK_CAP || held >= BUDGET {
+            break;
+        }
+        if !carries_data(&entry) {
+            reader.skip_data();
+            continue;
+        }
+        let at = index;
+        index += 1;
+        if wanted.binary_search(&at).is_err() {
+            reader.skip_data();
+            continue;
+        }
+        // A whole small member, or the head of a large one. Truncating inside a member is
+        // the same compromise the selection makes between members.
+        let take = entry.size.min(per).min(BUDGET - held);
+        let mut buf = Vec::with_capacity(take as usize);
+        crate::arch::EntryData::new(&mut reader)
+            .take(take)
+            .read_to_end(&mut buf)
+            .map_err(|e| e.to_string())?;
+        walked += entry.size;
+        held += buf.len() as u64;
+        let mut meta = Meta::from_entry(&entry, &entry.path, None);
+        meta.size = buf.len() as u64;
+        members.push(Member {
+            meta,
+            body: Body::Bytes(buf),
+        });
+    }
+
+    Ok((members, total))
+}
+
+// ---------------------------------------------------------------------------
+// Measuring
+// ---------------------------------------------------------------------------
+
+/// A reader that stops dead when the flag goes up.
+///
+/// Cancellation is otherwise only checked between members, and one 2 MiB member under
+/// xz is over a second of uninterruptible work — long enough that closing the popup would
+/// visibly fail to close it. Returning `Ok(0)` ends the stream early; the candidate is
+/// abandoned and its file deleted, so a short read never becomes a reported figure.
+struct Cancellable<'a, R> {
+    inner: R,
+    cancel: &'a AtomicBool,
+}
+
+impl<R: Read> Read for Cancellable<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.cancel.load(Ordering::Relaxed) {
+            return Ok(0);
+        }
+        self.inner.read(buf)
+    }
+}
+
+/// The level a candidate is measured at.
+///
+/// Each method at what the popup would actually build with it — its own default — except
+/// the one currently selected, which is measured at the level the slider is on. Anything
+/// else would report a figure for a build the user cannot ask for.
+pub fn level_for(method: Method, selected: Option<(Method, u32)>) -> u32 {
+    match selected {
+        Some((m, level)) if m == method => method.clamp_level(level),
+        _ => method.default_level(),
+    }
+}
+
+/// Build one candidate and time it. The scratch file is removed before returning,
+/// whatever happened.
+fn measure(
+    input: &Input,
+    method: Method,
+    level: u32,
+    dir: &Path,
+    cancel: &AtomicBool,
+) -> Result<Measurement, String> {
+    let path = dir.join("candidate");
+    let _ = std::fs::remove_file(&path);
+
+    let recipe = Recipe {
+        path: path.clone(),
+        method,
+        level,
+        // Never encrypted. See this module's own note: there is no password at Measure
+        // time by CORE §9's design, and AES-256 is not what the figures are about.
+        encrypt: false,
+    };
+
+    let started = Instant::now();
+    let outcome = build(input, &recipe, &path, cancel);
+    let millis = started.elapsed().as_millis() as u64;
+
+    let result = outcome.and_then(|()| {
+        std::fs::metadata(&path)
+            .map(|md| md.len())
+            .map_err(|e| format!("the candidate went missing: {e}"))
+    });
+    let _ = std::fs::remove_file(&path);
+
+    Ok(Measurement {
+        method,
+        level,
+        millis,
+        bytes: result?,
+        input_bytes: input.len(),
+    })
+}
+
+/// Drive one `Sink` to completion over the input.
+fn build(input: &Input, recipe: &Recipe, path: &Path, cancel: &AtomicBool) -> Result<(), String> {
+    let mut sink: Box<dyn Sink> = match recipe.container() {
+        Container::SevenZ => Box::new(crate::sevenz::Writer::create(path, recipe, None)?),
+        _ => Box::new(crate::arch::Writer::create(path, recipe)?),
+    };
+
+    let fed = match input {
+        Input::Whole(members) => feed(sink.as_mut(), members, cancel),
+        Input::Sampled(bytes) => {
+            let meta = Meta {
+                out_path: "sample".to_string(),
+                size: bytes.len() as u64,
+                is_dir: false,
+                mode: 0o644,
+                mtime: None,
+                atime: None,
+                ctime: None,
+                uid: 0,
+                gid: 0,
+                uname: None,
+                gname: None,
+                symlink: None,
+                hardlink: None,
+            };
+            let mut body = Cancellable {
+                inner: std::io::Cursor::new(&bytes[..]),
+                cancel,
+            };
+            sink.put(&meta, Some(&mut body))
+        }
+    };
+
+    if let Err(e) = fed {
+        sink.abandon();
+        return Err(e);
+    }
+    if cancel.load(Ordering::Relaxed) {
+        sink.abandon();
+        return Err(CANCELLED.to_string());
+    }
+    sink.finish()
+}
+
+fn feed(sink: &mut dyn Sink, members: &[Member], cancel: &AtomicBool) -> Result<(), String> {
+    for m in members {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(CANCELLED.to_string());
+        }
+        match &m.body {
+            Body::None => sink.put(&m.meta, None)?,
+            Body::Bytes(b) => {
+                let mut body = Cancellable {
+                    inner: std::io::Cursor::new(&b[..]),
+                    cancel,
+                };
+                sink.put(&m.meta, Some(&mut body))?;
+            }
+            Body::File(p) => {
+                let f = std::fs::File::open(p)
+                    .map_err(|e| format!("could not read {}: {e}", p.display()))?;
+                let mut body = Cancellable { inner: f, cancel };
+                sink.put(&m.meta, Some(&mut body))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The worker. One thread, eight candidates, **in sequence** — CORE §3 has one worker and
+/// this is what keeps it to one — sending each figure the moment it lands so the rows fill
+/// as they are earned rather than all at once at the end.
+/// `wake` is called after every send. A worker holds no `egui::Context` and an idle
+/// INDIUM repaints nothing (CORE §3), so without it the rows would appear only when the
+/// mouse happened to move. It is a closure rather than a `Context` so this module goes on
+/// knowing nothing about the window.
+pub fn run(
+    input: Input,
+    describe: String,
+    dir: PathBuf,
+    selected: Option<(Method, u32)>,
+    tx: &Sender<Msg>,
+    cancel: &Arc<AtomicBool>,
+    wake: &dyn Fn(),
+) {
+    let _ = tx.send(Msg::Began {
+        describe,
+        sampled: input.sampled(),
+        bytes: input.len(),
+    });
+    wake();
+
+    for method in METHODS {
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        let level = level_for(method, selected);
+        match measure(&input, method, level, &dir, cancel) {
+            Ok(m) => {
+                let _ = tx.send(Msg::One(m));
+            }
+            Err(why) if why == CANCELLED => return,
+            Err(why) => {
+                let _ = tx.send(Msg::Failed { method, why });
+            }
+        }
+        wake();
+    }
+    let _ = tx.send(Msg::Done);
+    wake();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A directory of this test's own.
+    ///
+    /// Not `temp_dir()` itself: `measure` writes and deletes a file called `candidate`,
+    /// and two tests sharing that name delete each other's — which is the very collision
+    /// P8 fixed in `platform::scratch` by putting the process id in the name, arrived at
+    /// here the same way, by watching one test remove the other's file.
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("indium-p21-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a temp directory can be made");
+        dir
+    }
+
+    /// A member list whose bodies are held, for the tests that do not touch the disk.
+    fn held(sizes: &[usize]) -> (Vec<Member>, u64) {
+        let mut members = Vec::new();
+        let mut total = 0u64;
+        for (i, &n) in sizes.iter().enumerate() {
+            // Each member is filled with its own index, so a sample can be read back and
+            // asked *which* members it came from.
+            let bytes = vec![i as u8; n];
+            total += n as u64;
+            members.push(Member {
+                meta: Meta {
+                    out_path: format!("m{i}"),
+                    size: n as u64,
+                    is_dir: false,
+                    mode: 0o644,
+                    mtime: None,
+                    atime: None,
+                    ctime: None,
+                    uid: 0,
+                    gid: 0,
+                    uname: None,
+                    gname: None,
+                    symlink: None,
+                    hardlink: None,
+                },
+                body: Body::Bytes(bytes),
+            });
+        }
+        (members, total)
+    }
+
+    #[test]
+    fn an_input_within_the_budget_is_measured_whole_and_is_not_an_estimate() {
+        let (members, total) = held(&[1024, 2048]);
+        let input = narrow(members, total).expect("narrowing a small input cannot fail");
+        assert!(!input.sampled(), "under budget, nothing is an estimate");
+        assert_eq!(input.len(), total);
+    }
+
+    #[test]
+    fn an_input_over_the_budget_is_sampled_and_says_so() {
+        let (members, total) = held(&[BUDGET as usize + 1]);
+        let input = narrow(members, total).expect("narrowing cannot fail");
+        assert!(input.sampled(), "over budget, every figure is an estimate");
+    }
+
+    #[test]
+    fn the_sample_never_exceeds_the_budget() {
+        for over in [BUDGET + 1, BUDGET * 4, BUDGET * 64] {
+            let (members, total) = held(&[over as usize]);
+            let input = narrow(members, total).expect("narrowing cannot fail");
+            assert!(
+                input.len() <= BUDGET,
+                "a {over}-byte input sampled {} bytes, over the {BUDGET} budget",
+                input.len()
+            );
+        }
+    }
+
+    /// The finding P21 was designed around, pinned so it cannot quietly regress.
+    ///
+    /// Each member is filled with its own index, so the sample's *contents* say which
+    /// members it was drawn from. A sampler that took the head would return bytes from
+    /// the first member only and this fails; the stride reaches the last one.
+    #[test]
+    fn the_sample_is_drawn_from_across_the_input_and_not_from_its_head() {
+        let count = 40usize;
+        let (members, total) = held(&vec![BUDGET as usize / 8; count]);
+        let input = narrow(members, total).expect("narrowing cannot fail");
+        let Input::Sampled(bytes) = input else {
+            panic!("an input this size must be sampled");
+        };
+
+        let mut seen: Vec<u8> = bytes.clone();
+        seen.sort_unstable();
+        seen.dedup();
+        assert!(
+            seen.len() > 1,
+            "the sample came from one member — that is a head sample, not a stratified one"
+        );
+        assert!(
+            seen.iter().any(|&m| m as usize >= count / 2),
+            "nothing was drawn from the second half of the input: saw members {seen:?}"
+        );
+    }
+
+    #[test]
+    fn every_method_the_popup_offers_is_measured_at_a_level_that_method_allows() {
+        for method in METHODS {
+            let level = level_for(method, None);
+            assert_eq!(
+                level,
+                method.clamp_level(level),
+                "{} would be measured at a level it does not accept",
+                method.label()
+            );
+        }
+    }
+
+    /// The selected method is measured at the slider's value; the other seven are not.
+    #[test]
+    fn the_selected_method_is_measured_at_the_level_the_window_is_showing() {
+        let selected = Some((Method::Zstd, 19));
+        assert_eq!(level_for(Method::Zstd, selected), 19);
+        assert_eq!(
+            level_for(Method::Gzip, selected),
+            Method::Gzip.default_level(),
+            "an unselected method is measured at what the popup would build with it"
+        );
+    }
+
+    /// CORE §9 keeps passwords typed per use and never held, so there is none to measure
+    /// with. A candidate that asked for one could not run at all.
+    #[test]
+    fn a_candidate_is_never_encrypted() {
+        let dir = scratch_dir("never-encrypted");
+        let (members, total) = held(&[64]);
+        let input = narrow(members, total).expect("narrowing cannot fail");
+        let cancel = AtomicBool::new(false);
+        // Lzma2 is the one method that *can* encrypt, and the one whose writer refuses to
+        // open at all when asked to encrypt with no password. That it measures proves the
+        // recipe this module builds carries `encrypt: false`.
+        let m = measure(
+            &input,
+            Method::Lzma2,
+            Method::Lzma2.default_level(),
+            &dir,
+            &cancel,
+        )
+        .expect("a 7z candidate builds without a password");
+        assert!(m.bytes > 0, "the candidate weighed nothing");
+        assert!(
+            !dir.join("candidate").exists(),
+            "the scratch file outlived the measurement"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_cancelled_measurement_reports_nothing_and_leaves_no_scratch_file() {
+        let dir = scratch_dir("cancelled");
+        let (members, total) = held(&[4096]);
+        let input = narrow(members, total).expect("narrowing cannot fail");
+        let cancel = AtomicBool::new(true);
+        // A figure from a candidate that was abandoned part-built would be a smaller
+        // archive than the method actually produces — the most flattering possible lie
+        // about it. So cancellation refuses to report at all rather than reporting early.
+        let outcome = measure(&input, Method::Gzip, 6, &dir, &cancel);
+        assert!(
+            outcome.is_err(),
+            "a cancelled measurement reported a figure: {outcome:?}"
+        );
+        assert!(
+            !dir.join("candidate").exists(),
+            "the scratch file outlived a cancellation"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The round's central claim, checked against the program rather than against a shell
+    /// pipe: **under budget, the figure is not an estimate.**
+    ///
+    /// It is supposed to be the size Apply would produce, container overhead and all. So
+    /// the same members are written twice — once by `measure`, once straight through the
+    /// writer — and the two sizes must agree to the byte. What this catches is everything
+    /// `measure` wraps around the writer: a candidate weighed before its flush, a stale
+    /// file left from the previous method and measured again, a timing wrapper that
+    /// truncates. What it does not claim to catch is a fault in the writer itself, which
+    /// is the write path's own tests' business.
+    ///
+    /// It also drives the directory branch of `from_staged`, which is the one that has to
+    /// walk a tree rather than stat a file.
+    #[test]
+    fn an_exact_measurement_is_the_size_the_writer_actually_produces() {
+        let dir = scratch_dir("exact");
+        let src = dir.join("tree");
+        std::fs::create_dir_all(src.join("nested")).expect("a tree can be made");
+        for i in 0..8usize {
+            // Compressible, and different per file, so the result is not a fixed-size
+            // header that would match by accident.
+            let body = "the quick brown fox jumps over the lazy dog ".repeat(200 + i * 30);
+            let at = if i % 2 == 0 {
+                src.join(format!("f{i}.txt"))
+            } else {
+                src.join("nested").join(format!("f{i}.txt"))
+            };
+            std::fs::write(at, body).expect("a fixture file can be written");
+        }
+
+        let (members, total) =
+            from_staged(&[(src.clone(), "tree".to_string())]).expect("the tree is readable");
+        assert!(
+            total > 0 && total <= BUDGET,
+            "the fixture must have bytes and fit the budget to be exact; it is {total}"
+        );
+        let input = narrow(members, total).expect("narrowing cannot fail");
+        assert!(
+            !input.sampled(),
+            "a fixture this size must be measured whole"
+        );
+
+        let cancel = AtomicBool::new(false);
+        let measured =
+            measure(&input, Method::Gzip, 6, &dir, &cancel).expect("gzip measures a real tree");
+
+        // The same members again, by hand, through the writer Apply uses.
+        let out = dir.join("by-hand.tar.gz");
+        let recipe = Recipe {
+            path: out.clone(),
+            method: Method::Gzip,
+            level: 6,
+            encrypt: false,
+        };
+        {
+            let Input::Whole(ref ms) = input else {
+                unreachable!("asserted above")
+            };
+            let mut sink = crate::arch::Writer::create(&out, &recipe).expect("the writer opens");
+            feed(&mut sink, ms, &cancel).expect("the members are written");
+            sink.finish().expect("the archive flushes");
+        }
+        let by_hand = std::fs::metadata(&out).expect("the archive exists").len();
+
+        assert_eq!(
+            measured.bytes, by_hand,
+            "the measured size is not the size the writer produces"
+        );
+        assert!(
+            measured.ratio() > 0.0 && measured.ratio() < 100.0,
+            "text this repetitive must compress: got {}%",
+            measured.ratio()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The whole worker, end to end, over a real input — and the harness the figures in
+    /// P21.md were taken with.
+    ///
+    /// Ignored by default because it is the one test that costs what the feature costs:
+    /// eight candidates in sequence, which is the point, and several seconds even in
+    /// release. Run it deliberately:
+    ///
+    /// ```text
+    /// cargo test --release --lib the_eight_candidates -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "measures eight real candidates; run with --release --ignored --nocapture"]
+    fn the_eight_candidates_run_in_sequence_over_a_real_input() {
+        let dir = scratch_dir("eight");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+        // This repository's own source, which is what an estimator is for: real text, real
+        // repetition, and a size that has to be sampled rather than weighed whole.
+        let (members, total) = from_staged(&[(root.join("src"), "src".to_string())])
+            .expect("this repository's own src/ is readable");
+        let sampled = total > BUDGET;
+        let input = narrow(members, total).expect("narrowing cannot fail");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        run(
+            input,
+            "src/".to_string(),
+            dir.clone(),
+            None,
+            &tx,
+            &cancel,
+            &|| {},
+        );
+        drop(tx);
+
+        println!(
+            "\n  input {} ({}), {}\n",
+            crate::util::format_bytes(total),
+            if sampled { "sampled" } else { "whole" },
+            root.display()
+        );
+        let mut seen = 0usize;
+        let mut done = false;
+        for msg in rx {
+            match msg {
+                Msg::One(m) => {
+                    seen += 1;
+                    println!("  {:<8} {}", m.method.label(), figure_line(&m, sampled));
+                }
+                Msg::Failed { method, why } => {
+                    println!("  {:<8} unavailable: {why}", method.label())
+                }
+                Msg::Done => done = true,
+                Msg::Fatal(why) => panic!("the estimator gave up: {why}"),
+                Msg::Began { .. } => {}
+            }
+        }
+        println!();
+
+        assert!(done, "the worker never reported Done");
+        assert_eq!(seen, METHODS.len(), "not every method reported a figure");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The same shape the popup's lane shows, so the harness prints what the window prints.
+    fn figure_line(m: &Measurement, sampled: bool) -> String {
+        let mark = if sampled { '~' } else { ' ' };
+        format!(
+            "level {:>2} · {:>6} ms · {mark}{:>5.1}%",
+            m.level,
+            m.millis,
+            m.ratio()
+        )
+    }
+
+    /// The archive source, over budget: read across the entry list and never past it.
+    ///
+    /// The fixture is **built here rather than committed** — every fixture in the tree is
+    /// kilobytes, and a walk that wrongly took the first entries would pass against all of
+    /// them. Writing this test is what found exactly that: a stride of `len / want` rounds
+    /// down to 1 at forty members, which selects the first thirty-two and calls it a
+    /// spread. The index mapping in `from_archive` is the fix, and this is what holds it.
+    #[test]
+    fn an_archive_over_the_budget_is_read_across_its_members_and_not_from_its_first_few() {
+        let dir = scratch_dir("archive-walk");
+        let path = dir.join("big.tar.gz");
+
+        // Forty members at an eighth of the budget each: five mebibytes, comfortably over,
+        // and each filled with its own index so what comes back says where it came from.
+        let count = 40usize;
+        let (members, _) = held(&vec![(BUDGET / 16) as usize; count]);
+        let recipe = Recipe {
+            path: path.clone(),
+            method: Method::Gzip,
+            level: 1,
+            encrypt: false,
+        };
+        {
+            let cancel = AtomicBool::new(false);
+            let mut sink = crate::arch::Writer::create(&path, &recipe).expect("the writer opens");
+            feed(&mut sink, &members, &cancel).expect("the members are written");
+            sink.finish().expect("the archive flushes");
+        }
+
+        let entries = crate::arch::list_all(&path, None).expect("the archive lists");
+        let cancel = AtomicBool::new(false);
+        let (got, total) =
+            from_archive(&path, &entries, None, &cancel).expect("the archive is readable");
+
+        assert_eq!(
+            total,
+            count as u64 * (BUDGET / 16),
+            "the reported total is the archive's, not the sample's"
+        );
+        let bytes: u64 = got.iter().map(|m| m.meta.size).sum();
+        assert!(
+            bytes <= BUDGET,
+            "the walk held {bytes} bytes, over the {BUDGET} budget"
+        );
+        assert!(
+            got.len() < count,
+            "the walk read every member of an archive far over budget"
+        );
+
+        // And it **spanned** the list rather than filling from the front. Reaching "the
+        // second half" is not the test: a floor-rounded stride of 1 over forty members
+        // selects members 0..31 and satisfies that while never seeing the last eight. What
+        // separates a spread from a head sample is how far the *last* selection sits.
+        let reached: Vec<usize> = got
+            .iter()
+            .filter_map(|m| m.meta.out_path.strip_prefix('m')?.parse::<usize>().ok())
+            .collect();
+        let furthest = *reached.iter().max().expect("something was read");
+        assert!(
+            furthest >= count - count / 8,
+            "the walk stopped at member {furthest} of {count} — that is a head sample of \
+             the entry list, not a spread across it: {reached:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An archive that fits the budget is read whole, and is not an estimate.
+    #[test]
+    fn an_archive_within_the_budget_is_read_whole() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/basic.tar.gz");
+        let entries = crate::arch::list_all(&root, None).expect("the fixture lists");
+        let cancel = AtomicBool::new(false);
+        let (members, total) =
+            from_archive(&root, &entries, None, &cancel).expect("the fixture is readable");
+
+        let bytes: u64 = members.iter().map(|m| m.meta.size).sum();
+        assert_eq!(bytes, total, "a fixture this small must be read whole");
+        assert!(!narrow(members, total)
+            .expect("narrowing cannot fail")
+            .sampled());
+    }
+
+    /// CORE §9 refuses in-place archive writes, and a measurement is not an exception.
+    /// Everything a candidate touches lives inside the directory it was handed.
+    #[test]
+    fn measuring_writes_nothing_outside_the_directory_it_was_given() {
+        let dir = scratch_dir("contained");
+        let beside = dir.join("beside");
+        std::fs::create_dir_all(&beside).expect("a sibling directory can be made");
+        let target = beside.join("photos.tar.gz");
+        std::fs::write(&target, b"an archive that must not be touched")
+            .expect("the decoy can be written");
+
+        let work = dir.join("work");
+        std::fs::create_dir_all(&work).expect("a work directory can be made");
+        let (members, total) = held(&[8192]);
+        let input = narrow(members, total).expect("narrowing cannot fail");
+        let cancel = AtomicBool::new(false);
+        for method in METHODS {
+            let _ = measure(&input, method, level_for(method, None), &work, &cancel);
+        }
+
+        assert_eq!(
+            std::fs::read(&target).expect("the decoy still exists"),
+            b"an archive that must not be touched",
+            "a measurement wrote over a file beside it"
+        );
+        assert_eq!(
+            std::fs::read_dir(&beside).expect("readable").count(),
+            1,
+            "a measurement left something in a directory that was not its own"
+        );
+        // And its own directory is left empty: every candidate cleans up after itself.
+        assert_eq!(
+            std::fs::read_dir(&work).expect("readable").count(),
+            0,
+            "a candidate file outlived the measurement that made it"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_ratio_is_a_percentage_of_what_went_in() {
+        let m = Measurement {
+            method: Method::Zstd,
+            level: 3,
+            millis: 17,
+            bytes: 540,
+            input_bytes: 1000,
+        };
+        assert!((m.ratio() - 54.0).abs() < 0.001);
+    }
+}

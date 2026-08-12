@@ -98,6 +98,7 @@ One binary crate, `indium`, with modules. No workspace, no premature abstraction
 | `sevenz` | The 7z half, over `sevenz-rust2`: AES-256 writing, which libarchive cannot do, and the detail the generic reader does not expose — solid blocks, the per-entry method, and headers that are themselves encrypted. It sits beside `arch` rather than inside it because `arch`'s own first sentence is hand-written FFI over the system libarchive, and a crate-backed backend does not belong inside that sentence. |
 | `model` | Archive state: entries, selection, the open archive's identity. |
 | `tasks` | The staging engine. Every mutation — add, remove, rename, create — is a task in a queue. **Apply** builds the new archive in a temp file beside the target, verifies it by walking its entries, then atomically renames over the original. The original is never touched until the replacement is proven. |
+| `estimate` | Measures instead of asserting. It runs the real writers over the real input on the real CPU, so §5's eight sentences stand beside a time and a ratio from *this* machine rather than from folklore. It owns no format knowledge of its own — it drives the same `Sink` Apply drives, into a scratch file it deletes — and it is the one module in the program allowed to be wrong out loud: at or under its budget it measures the whole input and the figure is exact, above it the input is sampled and every figure says so, because chopping a stream costs LZMA the long-range matches its dictionary lives on and no amount of arithmetic gets them back. |
 | `ui` | The window: sidebar, table, Inspector, tray, status bar, and every popup. |
 | `platform` | The Linux specifics: clipboard, `.desktop` parsing for Open With, default-app registration, XDG paths, the second window — on this platform a window is a process, and opening one is a Linux specific like the rest — and handing a directory to the desktop's file manager, which is the portal's job for the same reason the picker is. |
 | `cli` | The terminal half — `list`, `extract`, `cat`, their arguments, their output and their exit codes. It reads the archive through `arch` exactly as the window does, and it opens no window: the dispatch returns before `main` asks `eframe` for anything, so a subcommand on a machine with no compositor is an ordinary program reading a file. It touches nothing in `ui`, deliberately, because that is the way the previous sentence stops being true by accident. |
@@ -190,9 +191,13 @@ bar has a hierarchy, and it is part of this document rather than a matter of tas
    should compress. If unsure, keep the default."). Four preset chips — *Fastest*,
    *Balanced* (default), *Smallest*, *Encrypted* — each highlighting a row in the method
    list below, where **every method
-   carries its one-sentence verdict** (§5). An *Advanced* disclosure holds the level
-   slider. At the foot, a live sentence states exactly what will be built:
-   *"Building photos-2026.7z — 7z, LZMA2:19, AES-256."*
+   carries its one-sentence verdict** (§5). Beside the heading, **Measure** — V2.0's
+   estimator — runs the eight real candidates over the real input and writes each one's
+   level, time and ratio into a column of its own beside the verdict, filling one row at a
+   time as they land. The figures are told in text and never in colour, a `~` marks a ratio
+   the sample could not promise, and the popup always states what it weighed. An *Advanced*
+   disclosure holds the level slider. At the foot, a live sentence states exactly what will
+   be built: *"Building photos-2026.7z — 7z, LZMA2:19, AES-256."*
 2. **Pending tasks** (`W`, or clicking the tray). The full task list: one row per staged
    operation with its own remove ✕, then *Discard all* and **Apply**.
 3. **Extract** (`E`). A popover: *Extract here*, *Extract to `<name>/`*, a path field with
@@ -259,8 +264,15 @@ refuses. ACE is absent for the same family of reasons and its security history.
 
 ### The method verdicts
 
-This copy ships in the New Archive popup, one honest sentence each, static in v1.x — the
-live estimator that measures *your* data on *your* CPU is V2.0.
+This copy ships in the New Archive popup, one honest sentence each. **They no longer stand
+alone: since V2.0 the estimator sets a measured level, time and ratio beside every one of
+them** — this data, this CPU, this moment. The sentences stay because they say what a
+method is *for*, which a number cannot, and because a figure is only ever about the input
+that was measured. Where that input was too large to weigh whole the figure is marked `~`
+and is an estimate in the strict sense: a stratified sample predicts throughput well and
+gzip and zstd's ratios closely, but it cannot predict LZMA's, whose dictionary earns its
+ratio on exactly the long-range matches that chopping a stream destroys. The program says
+which kind of figure it is showing rather than hoping nobody asks.
 
 | Method | The sentence |
 | --- | --- |
@@ -416,6 +428,7 @@ repair to it.
 | P18 | The record round: the claims nothing could check, and the gates that now read them | **`v1.2.0-2`** |
 | P19 | The front page read against the tree: a library three of four packages never declared, a panel's third group, and a password refused as the wrong one | **`v1.2.0-3`** |
 | P20 | The yazi plugin, in a repository of its own because `contrib/` could never have been installed, and the description settled in all four places that state one | **`v1.2.0-4`** |
+| P21 | V2.0, the live estimator: eight real candidates on the real CPU, exact under its budget and marked above it, and the popup made re-openable so there is something to measure | **`v2.0`** |
 
 The P-table is a plan, not scripture; P-documents may split or merge steps, but scope
 only moves *out* of v1.0 by the maker's decision recorded here.
@@ -478,7 +491,15 @@ finds that sentence in one of them is owed this paragraph rather than a puzzle.
 **brought forward and shipped in P15**, by the maker's decision, because a gate that fires
 only on a tag is not a gate; it stays listed here so the road reads as what happened.
 **V2.0** the live estimator: sample the actual input, run the real candidates on the
-real CPU, report measured time and ratio instead of folklore.
+real CPU, report measured time and ratio instead of folklore — **shipped in P21**, as
+`estimate` (§3) and the Measure action in §4.1's first popup. It came out narrower than
+the line above reads in one respect and wider in another. Narrower: the candidates run in
+sequence, because §3 fixes threading at the UI thread and one worker, so eight of them cost
+around three and a half seconds at the budget — xz and LZMA2 are five sixths of it — and
+Measure is therefore a button rather than something the popup does on opening. Wider: at or under its budget it does not sample at all — it compresses the whole
+input through the same writers Apply uses, so the figure is not an estimate but the size
+Apply would produce. Only above the budget is anything sampled, and then it says so. §5
+records what that mark means and why LZMA is the method it means it most about.
 
 Second language: shelved for an undefined time. English is the language of v1.
 

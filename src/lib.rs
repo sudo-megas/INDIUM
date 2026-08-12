@@ -7,6 +7,7 @@
 
 pub mod arch;
 pub mod cli;
+pub mod estimate;
 pub mod model;
 pub mod platform;
 pub mod secret;

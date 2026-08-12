@@ -28,6 +28,12 @@ pub const RAM_LIMIT: u64 = 1024 * 1024 * 1024; // 1 GiB
 pub enum Kind {
     CopyOut,
     OpenWith,
+    /// P21: where the estimator compresses its candidates. Nothing here is ever handed
+    /// to the outside world — each file is measured and deleted within the same worker
+    /// — but it belongs under the same roots for the same two reasons the other kinds
+    /// do: the routing rule below decides RAM or disk once, for everybody, and a window
+    /// that dies mid-measurement leaves a name the sweep can recognise as abandoned.
+    Estimate,
 }
 
 impl Kind {
@@ -35,6 +41,7 @@ impl Kind {
         match self {
             Kind::CopyOut => "co",
             Kind::OpenWith => "ow",
+            Kind::Estimate => "es",
         }
     }
 
@@ -42,6 +49,7 @@ impl Kind {
         match self {
             Kind::CopyOut => 0,
             Kind::OpenWith => 1,
+            Kind::Estimate => 2,
         }
     }
 }
@@ -67,7 +75,7 @@ pub struct Scratch {
     /// directory one window makes carries one number.
     pid: u32,
     counter: u32,
-    current: [Option<PathBuf>; 2],
+    current: [Option<PathBuf>; 3],
 }
 
 impl Scratch {
@@ -84,7 +92,7 @@ impl Scratch {
             limit,
             pid: std::process::id(),
             counter: 0,
-            current: [None, None],
+            current: [None, None, None],
         }
     }
 
@@ -175,7 +183,7 @@ pub fn owner(name: &str) -> Owner {
     let Some((prefix, rest)) = name.split_once('-') else {
         return Owner::Stranger;
     };
-    if !matches!(prefix, "co" | "ow") {
+    if !matches!(prefix, "co" | "ow" | "es") {
         return Owner::Stranger;
     }
     match rest.split_once('-') {
@@ -213,6 +221,7 @@ impl Drop for Scratch {
     fn drop(&mut self) {
         self.discard(Kind::CopyOut);
         self.discard(Kind::OpenWith);
+        self.discard(Kind::Estimate);
     }
 }
 
