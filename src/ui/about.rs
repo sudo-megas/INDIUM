@@ -51,69 +51,69 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 .max_height(theme::list_height(ctx, 120.0, f32::INFINITY))
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-            // "The mark, the maker, the version and date" — CORE §4.6, in that order. The
-            // mark was named in the document from P1 and drawn here for the first time in P6.
-            ui.vertical_centered(|ui| {
-                ui.add_space(4.0);
-                ui.add(theme::mark(150.0));
-                ui.add_space(10.0);
-                ui.label(
-                    egui::RichText::new("INDIUM")
-                        .size(28.0)
-                        .color(theme::TEXT)
-                        .family(theme::bold()),
-                );
-                ui.label(
-                    egui::RichText::new(
-                        "The Most Verbose Archive Manager for Linux on Wayland.",
-                    )
-                    .color(theme::TEXT_SECONDARY),
-                );
-            });
-            ui.add_space(14.0);
+                    // "The mark, the maker, the version and date" — CORE §4.6, in that order. The
+                    // mark was named in the document from P1 and drawn here for the first time in P6.
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(4.0);
+                        ui.add(theme::mark(150.0));
+                        ui.add_space(10.0);
+                        ui.label(
+                            egui::RichText::new("INDIUM")
+                                .size(28.0)
+                                .color(theme::TEXT)
+                                .family(theme::bold()),
+                        );
+                        ui.label(
+                            egui::RichText::new(
+                                "The Most Verbose Archive Manager for Linux on Wayland.",
+                            )
+                            .color(theme::TEXT_SECONDARY),
+                        );
+                    });
+                    ui.add_space(14.0);
 
-            egui::Grid::new("about-grid")
-                .num_columns(2)
-                .spacing([14.0, 4.0])
-                .show(ui, |ui| {
-                    field(ui, "Version", env!("CARGO_PKG_VERSION"));
-                    // CORE §4.6 asks for "the version and date", and the date was missing
-                    // from this grid from P1 until P6.
-                    field(ui, "Date", RELEASE_DATE);
-                    field(ui, "Maker", "sudo-megas");
-                    field(ui, "Licence", "GPL-3.0-only");
-                    ui.label(egui::RichText::new("Source").color(theme::TEXT_MUTED));
-                    // Selectable, never clickable.
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(SOURCE)
-                                .family(theme::MONO)
-                                .color(theme::TEXT),
+                    egui::Grid::new("about-grid")
+                        .num_columns(2)
+                        .spacing([14.0, 4.0])
+                        .show(ui, |ui| {
+                            field(ui, "Version", env!("CARGO_PKG_VERSION"));
+                            // CORE §4.6 asks for "the version and date", and the date was missing
+                            // from this grid from P1 until P6.
+                            field(ui, "Date", RELEASE_DATE);
+                            field(ui, "Maker", "sudo-megas");
+                            field(ui, "Licence", "GPL-3.0-only");
+                            ui.label(egui::RichText::new("Source").color(theme::TEXT_MUTED));
+                            // Selectable, never clickable.
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(SOURCE)
+                                        .family(theme::MONO)
+                                        .color(theme::TEXT),
+                                )
+                                .selectable(true),
+                            );
+                            ui.end_row();
+                        });
+
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new(
+                            "Addresses here are text you can select and copy. INDIUM opens no \
+                             browser and follows no link.",
                         )
-                        .selectable(true),
+                        .size(13.0)
+                        .color(theme::TEXT_MUTED),
                     );
-                    ui.end_row();
-                });
 
-            ui.add_space(6.0);
-            ui.label(
-                egui::RichText::new(
-                    "Addresses here are text you can select and copy. INDIUM opens no browser \
-                     and follows no link.",
-                )
-                .size(13.0)
-                .color(theme::TEXT_MUTED),
-            );
-
-            ui.add_space(10.0);
-            // The separator stays and belongs to the popup, not to the heading: it divides
-            // "who made this" from "what it is licensed under". The heading itself is
-            // `section_bare`, because CORE's rule is that a heading takes a rule when it
-            // opens a *list of siblings* and none when it names a single object — and the
-            // licence is one document, not a list. The centred "INDIUM" above is a value
-            // rather than a heading, so it keeps its own size and is left alone. P7 §4.
-            ui.separator();
-            theme::section_bare(ui, "The licence, in full");
+                    ui.add_space(10.0);
+                    // The separator stays and belongs to the popup, not to the heading: it divides
+                    // "who made this" from "what it is licensed under". The heading itself is
+                    // `section_bare`, because CORE's rule is that a heading takes a rule when it
+                    // opens a *list of siblings* and none when it names a single object — and the
+                    // licence is one document, not a list. The centred "INDIUM" above is a value
+                    // rather than a heading, so it keeps its own size and is left alone. P7 §4.
+                    ui.separator();
+                    theme::section_bare(ui, "The licence, in full");
 
                     // No scroll area of its own any more: the body above is already one, and
                     // a licence that scrolls inside a popup that scrolls is two wheels under
