@@ -122,6 +122,65 @@ fn every_basic_fixture_lists_the_same_four_entries() {
     }
 }
 
+/// PXX: `tar -cf x.tar -C dir .` stores a leading `./`, and until this round INDIUM
+/// could neither list nor extract any archive shaped that way.
+///
+/// `normalize_archive_path("./")` is the empty string, which is also what an entry whose
+/// name could not be read normalises to — so the listing grew a nameless row, and
+/// `extract`'s pre-flight refused the **whole archive** with *"this archive holds an
+/// entry whose name could not be read on this system"*. The name was `./`. It was plain
+/// ASCII and it was read perfectly.
+///
+/// It went unnoticed for twenty-two rounds because not one committed fixture was rooted
+/// that way, which is why `rooted.tar` now exists and carries the same payload as every
+/// `basic.*`. Both halves are asserted here: the root does not become a row, and the four
+/// real members all come out.
+#[test]
+fn a_dot_slash_rooted_tar_lists_and_extracts_like_any_other() {
+    let entries = arch::list_all(&fixture("rooted.tar"), None).expect("rooted.tar failed to list");
+
+    for e in &entries {
+        assert!(
+            !e.path.is_empty(),
+            "the archive root became a nameless row: {:?}",
+            paths_of(&entries)
+        );
+    }
+
+    let got: HashSet<&str> = paths_of(&entries).into_iter().collect();
+    let expect: HashSet<&str> = ["alpha.txt", "beta.txt", "sub", "sub/gamma.txt"]
+        .into_iter()
+        .collect();
+    assert_eq!(got, expect, "rooted.tar entry paths");
+    assert_eq!(entries.len(), 4, "the `./` root is not a fifth member");
+
+    // Sizes come through the stripped prefix unharmed.
+    assert_eq!(find(&entries, "alpha.txt").size, ALPHA.len() as u64);
+    assert_eq!(find(&entries, "sub/gamma.txt").size, GAMMA.len() as u64);
+
+    let dir = TempDir::new("rooted");
+    let n = arch::extract(
+        &fixture("rooted.tar"),
+        &wanted(&["alpha.txt", "beta.txt", "sub"]),
+        dir.path(),
+        None,
+        None,
+        &no_cancel(),
+    )
+    .expect("a `./`-rooted archive must extract like any other");
+
+    // The same four `extraction_reproduces_bytes_exactly` gets from `basic.zip` for the
+    // same selection — alpha, beta, sub/ and sub/gamma.txt. That equality is the claim.
+    assert_eq!(n, 4, "alpha, beta, sub/ and sub/gamma.txt");
+    assert_eq!(std::fs::read(dir.path().join("alpha.txt")).unwrap(), ALPHA);
+    assert_eq!(std::fs::read(dir.path().join("beta.txt")).unwrap(), BETA);
+    assert_eq!(
+        std::fs::read(dir.path().join("sub/gamma.txt")).unwrap(),
+        GAMMA,
+        "selecting the directory takes what is under it"
+    );
+}
+
 #[test]
 fn methods_are_reported_per_format() {
     let cases = [
@@ -283,6 +342,159 @@ fn a_traversal_entry_is_refused_and_writes_nothing() {
     );
 }
 
+/// One ustar member: a 512-byte header, the body, and the padding up to the next block.
+///
+/// Hand-built rather than shelled out to `tar`, for two reasons. `bsdtar` and GNU `tar`
+/// both refuse to *store* the names this test is about — that refusal is theirs, and a
+/// fixture that has to argue with its own generator is a fixture nobody will maintain. And
+/// written out here the hostile names are **visible in the test**, where a checked-in blob
+/// would make them opaque bytes that nothing in the tree explains.
+fn ustar_member(name: &str, body: &[u8]) -> Vec<u8> {
+    fn put(h: &mut [u8; 512], at: usize, s: &str) {
+        h[at..at + s.len()].copy_from_slice(s.as_bytes());
+    }
+
+    let mut h = [0u8; 512];
+    let nb = name.as_bytes();
+    assert!(nb.len() < 100, "every name here fits the ustar name field");
+    h[..nb.len()].copy_from_slice(nb);
+    put(&mut h, 100, "0000644\0"); // mode
+    put(&mut h, 108, "0000000\0"); // uid
+    put(&mut h, 116, "0000000\0"); // gid
+    put(&mut h, 124, &format!("{:011o}\0", body.len()));
+    put(&mut h, 136, "00000000000\0"); // mtime
+    h[156] = b'0'; // typeflag: a regular file
+    put(&mut h, 257, "ustar\0");
+    put(&mut h, 263, "00");
+
+    // The checksum is taken with its own field read as spaces, then written back into it
+    // as six octal digits, a NUL and a space. That trailing pair is the format's.
+    h[148..156].fill(b' ');
+    let sum: u32 = h.iter().map(|&b| b as u32).sum();
+    put(&mut h, 148, &format!("{sum:06o}\0 "));
+
+    let mut out = h.to_vec();
+    out.extend_from_slice(body);
+    out.resize(out.len().div_ceil(512) * 512, 0);
+    out
+}
+
+/// A whole tar: the members, then the two zero blocks that end one.
+fn ustar_tar(members: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (name, body) in members {
+        out.extend_from_slice(&ustar_member(name, body));
+    }
+    out.extend_from_slice(&[0u8; 1024]);
+    out
+}
+
+/// PXX, and it closes the gap the certification walk's step 3.13 left open.
+///
+/// The walk approved 3.13 on the refusal of the **first** traversal member, and the refusal
+/// is deliberately whole-archive — it returns on the first one it finds — so members 2, 3
+/// and 4 of that fixture were never reached, let alone judged. `path_escapes` has unit tests
+/// for all four shapes in isolation, but a shape refused by the predicate and a shape refused
+/// by `extract` are two different claims, and only the second one is the promise §3 makes.
+///
+/// So: one archive per shape, each with a harmless member **ahead** of the hostile one, which
+/// is what proves the loop actually reaches the member under test rather than stopping short.
+///
+/// **The absolute member aims inside the tempdir, not at `$HOME`.** That is the one deliberate
+/// departure from the fixture the walk used, and it is not a weakening: `path_escapes` takes
+/// the same `starts_with('/')` branch either way, and `dest.join()` replaces the destination
+/// wholesale for any absolute path, so the code under test cannot tell the difference. What
+/// changes is only where the damage lands if this test ever fails — inside a directory the
+/// test already owns, rather than in the home directory of whoever ran `cargo test`.
+#[test]
+fn every_traversal_shape_is_refused_end_to_end_and_writes_nothing() {
+    let dir = TempDir::new("traversal");
+    let inside = dir.path().join("dest");
+    std::fs::create_dir_all(&inside).unwrap();
+
+    // Absolute, and pointed somewhere this test is entitled to break.
+    let absolute = dir.path().join("escaped-absolute.txt");
+    let absolute = absolute
+        .to_str()
+        .expect("a tempdir path is UTF-8")
+        .to_string();
+
+    let shapes: Vec<(&str, String)> = vec![
+        ("one up", "../escaped-one-up.txt".to_string()),
+        ("two up", "../../escaped-two-up.txt".to_string()),
+        (
+            "via a middle component",
+            "safe/../../escaped-via-middle.txt".to_string(),
+        ),
+        ("absolute", absolute.clone()),
+    ];
+
+    for (what, hostile) in &shapes {
+        let tar = dir.path().join(format!("{}.tar", what.replace(' ', "-")));
+        std::fs::write(
+            &tar,
+            ustar_tar(&[
+                ("harmless.txt", b"in front of the hostile one\n".as_slice()),
+                (hostile.as_str(), b"should never be written\n".as_slice()),
+            ]),
+        )
+        .unwrap();
+
+        // Listing is not where the refusal belongs: the Inspector must be able to show a
+        // person what an archive claims to hold, including the parts of it that are a lie.
+        let entries = arch::list_all(&tar, None)
+            .unwrap_or_else(|e| panic!("the {what} archive must still list: {e}"));
+        assert_eq!(
+            paths_of(&entries).len(),
+            2,
+            "the {what} archive holds both members"
+        );
+
+        let result = arch::extract(
+            &tar,
+            &wanted(&["harmless.txt", hostile.as_str()]),
+            &inside,
+            None,
+            None,
+            &no_cancel(),
+        );
+        assert!(
+            result.is_err(),
+            "the {what} member must be refused, got {result:?}"
+        );
+
+        // And it must say so. A member silently dropped from an otherwise successful
+        // extraction is the failure mode §3 is written against — the user is told the
+        // archive came out, and one file of it quietly did not.
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains(hostile.as_str()),
+            "the refusal must name the {what} member; it said {msg:?}"
+        );
+    }
+
+    // Nothing reached any of the four targets. Checked after the whole loop rather than
+    // inside it, so a leak from an earlier shape cannot be masked by a later assertion.
+    for suffix in [
+        "escaped-one-up.txt",
+        "escaped-two-up.txt",
+        "escaped-via-middle.txt",
+    ] {
+        for base in [dir.path(), dir.path().parent().unwrap()] {
+            let leaked = base.join(suffix);
+            assert!(!leaked.exists(), "a file escaped to {}", leaked.display());
+        }
+    }
+    assert!(
+        !Path::new(&absolute).exists(),
+        "the absolute member was written to {absolute}"
+    );
+    assert!(
+        !inside.join("escaped-one-up.txt").exists(),
+        "nothing lands inside the destination either — the archive is refused whole"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // CRC32
 // ---------------------------------------------------------------------------
@@ -428,6 +640,48 @@ fn a_wrong_password_errors_and_writes_nothing() {
         leftover.is_empty(),
         "the destination must be untouched, found {leftover:?}"
     );
+}
+
+/// PXX 10.9: a wrong password on an **encrypted-header** 7z must say so.
+///
+/// The walk ran `indium cat secret.7z …`, gave the wrong password, and got
+/// `indium: Other("Broken or unsupported archive: no Header")` — a Rust enum, a crate's
+/// internal wording, and no hint that the password was the problem.
+///
+/// The mechanism is worth naming, because it is why this could not just be left to
+/// `MaybeBadPassword`. AES has nothing to check a key against: a wrong one decrypts the
+/// header to noise perfectly happily, and only the *parser* then objects — in whatever
+/// way that particular noise happens to break it. So the crate never reports a password
+/// problem at all here; it reports a broken file. `classify` reads it back as what it is.
+///
+/// The zip case above goes through libarchive and was already covered. This is the 7z
+/// header path, which is `sevenz-rust2`'s alone, and nothing had ever tested it.
+#[test]
+fn a_wrong_password_on_encrypted_headers_says_password_not_broken_archive() {
+    let path = fixture("secret-headers.7z");
+
+    let err = arch::list_all(&path, Some(&Secret::from_text("totallywrong")))
+        .expect_err("a wrong password must not list an encrypted-header archive");
+
+    assert!(
+        matches!(err, ArchiveError::WrongPassword),
+        "expected WrongPassword, got {err:?}"
+    );
+
+    // The sentence a person actually reads must name neither a Rust type nor the crate.
+    let shown = err.to_string();
+    for leak in ["Other(", "no Header", "Broken or unsupported"] {
+        assert!(
+            !shown.contains(leak),
+            "the message still leaks {leak:?}: {shown:?}"
+        );
+    }
+
+    // And the right password still works, so the mapping did not simply swallow every
+    // failure into "wrong password".
+    let entries = arch::list_all(&path, Some(&Secret::from_text("indium")))
+        .expect("the right password must still list");
+    assert!(!entries.is_empty(), "the fixture holds at least one member");
 }
 
 /// P2 §5's verify-before-writing step: three wrong attempts must cost nothing.

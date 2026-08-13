@@ -66,6 +66,35 @@ Two things to know before you write assertions:
 - `--uid 0 --gid 0 --uname root --gname root` normalises ownership so the fixtures do
   not encode whoever built them. 7z and zip do not carry uname/gname; tar does.
 
+## `rooted.tar` — the same payload, stored the ordinary way
+
+```sh
+bsdtar -c --format gnutar --uid 0 --gid 0 --uname root --gname root \
+       -f rooted.tar -C /tmp/payload .
+```
+
+Same four members as every `basic.*`, but named as `.` rather than one by one, which is
+how `tar -cf x.tar -C dir .` — the commonest tar invocation there is — stores them. That
+puts a **`./` entry first**:
+
+```
+./            ./beta.txt    ./alpha.txt    ./sub/    ./sub/gamma.txt
+```
+
+That leading `./` is the whole reason the fixture exists. `normalize_archive_path("./")`
+is the empty string, and so is the normalised path of an entry whose name could not be
+read at all — so until PXX, INDIUM grew a nameless row for it in the listing and
+`extract` refused **the entire archive**, reporting that a name "could not be read on
+this system". The name was `./`.
+
+Not one committed fixture was rooted this way, which is how that reached a release. Two
+tests hold it now: `a_dot_slash_rooted_tar_lists_and_extracts_like_any_other` in
+`tests/read_path.rs`, and `arch::tests::the_archive_root_is_told_apart_from_a_name_that_could_not_be_read`,
+which pins the other direction so the fix cannot decay into ignoring both.
+
+**Do not add `sub/gamma.txt` to the command.** `.` already recurses; naming it too stores
+it twice, exactly as the `basic.*` note above warns.
+
 ## `meta.tar`
 
 A symlink, a hardlink, explicit non-zero uid/gid with names, and old mtimes. GNU tar is

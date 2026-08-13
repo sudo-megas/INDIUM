@@ -805,6 +805,13 @@ pub fn list(
                     let _ = tx.send(ListMsg::Opened(reader.info()));
                     announced = true;
                 }
+                // The archive's own root is not one of its members: it is announced above
+                // and skipped here, so the table never grows a nameless row and Select-all
+                // never picks one up. See `is_archive_root`.
+                if is_archive_root(&entry) {
+                    reader.skip_data();
+                    continue;
+                }
                 count += 1;
                 if tx.send(ListMsg::Entry(Box::new(entry))).is_err() {
                     return; // the UI went away
@@ -840,7 +847,10 @@ fn list_via_libarchive(
     let mut reader = Reader::open(path, passphrase)?;
     let mut out = Vec::new();
     while let Some(e) = reader.next_entry()? {
-        out.push(e);
+        // The archive's own root is not one of its members. See `is_archive_root`.
+        if !is_archive_root(&e) {
+            out.push(e);
+        }
         reader.skip_data();
     }
     Ok(out)
@@ -926,6 +936,25 @@ pub fn selection_matches(entry_path: &str, wanted: &HashSet<String>) -> bool {
     })
 }
 
+/// Is this entry the archive's own root, rather than a member inside it?
+///
+/// `tar -cf x.tar -C dir .` — the commonest tar shape there is — stores a leading `./`
+/// for the directory being archived. `normalize_archive_path` reduces that to the empty
+/// string; an entry whose name could not be read reduces to the empty string as well.
+/// The two mean opposite things. One is the container every other member sits inside,
+/// and dropping it loses nothing, because the archive is already the container. The
+/// other is P11's locale defect, and dropping it loses a file silently.
+///
+/// `raw_path` is what tells them apart: it is what was stored, before any normalising,
+/// and it is empty **only** when the read itself failed.
+///
+/// PXX found this the expensive way. `v2.1` judged the normalised path, so it refused
+/// every `./`-rooted archive whole — telling the reader that a name "could not be read
+/// on this system" when the name was `./`, plain ASCII, and read perfectly.
+pub fn is_archive_root(entry: &Entry) -> bool {
+    entry.path.is_empty() && !entry.raw_path.is_empty()
+}
+
 /// Would this stored path write outside the destination?
 ///
 /// An archive member may name anything at all; an absolute path or any `..`
@@ -976,7 +1005,12 @@ pub fn extract(
     // selection, and before a single byte is written: an archive INDIUM cannot name every
     // member of is one it refuses to extract at all, rather than one it extracts almost
     // all of. `ensure_ctype_locale` should mean this is never reached.
-    if listing.iter().any(|e| e.path.is_empty()) {
+    //
+    // It reads `raw_path`, never `path`. PXX: the normalised path of a `./` archive root
+    // is also empty, so judging `path` here refused every archive made the ordinary way —
+    // `tar -cf x.tar -C dir .` — and blamed the reader's locale for it. See
+    // `is_archive_root`.
+    if listing.iter().any(|e| e.raw_path.is_empty()) {
         return Err(ArchiveError::Other(
             "this archive holds an entry whose name could not be read on this system; \
              nothing was extracted"
@@ -1803,6 +1837,59 @@ mod tests {
         // A filename that merely starts with dots is not a traversal.
         assert!(!path_escapes("..hidden.txt"));
         assert!(!path_escapes("sub/...weird"));
+    }
+
+    /// The two fields `is_archive_root` reads. Everything else is filler.
+    fn entry_named(raw_path: &str, path: &str) -> Entry {
+        Entry {
+            raw_path: raw_path.to_string(),
+            path: path.to_string(),
+            is_dir: false,
+            size: 0,
+            packed: None,
+            method: String::new(),
+            mtime: None,
+            atime: None,
+            ctime: None,
+            birthtime: None,
+            uid: 0,
+            gid: 0,
+            uname: None,
+            gname: None,
+            mode: 0,
+            filetype: 0,
+            symlink: None,
+            hardlink: None,
+            encrypted: false,
+        }
+    }
+
+    /// PXX, and the other half of `a_dot_slash_rooted_tar_lists_and_extracts_like_any_other`.
+    ///
+    /// Two entries normalise to the empty path and mean opposite things. Dropping the
+    /// first loses nothing, because the archive is already the container it names.
+    /// Dropping the second loses a file in silence, which is P11's defect exactly. Only
+    /// `raw_path` — what was stored, before any normalising — separates them, and this is
+    /// the test that says the fix did not simply teach the guard to ignore both.
+    #[test]
+    fn the_archive_root_is_told_apart_from_a_name_that_could_not_be_read() {
+        // What `tar -cf x.tar -C dir .` stores.
+        assert_eq!(util::normalize_archive_path("./"), "");
+        assert!(is_archive_root(&entry_named("./", "")));
+
+        // P11's locale defect: `entry_name` returned nothing at all, so `raw_path` is
+        // empty too. `extract`'s pre-flight must still refuse the whole archive for this.
+        assert!(
+            !is_archive_root(&entry_named("", "")),
+            "a name that could not be read must never pass as the archive root"
+        );
+
+        // Anything carrying a real name is neither.
+        assert!(!is_archive_root(&entry_named("./alpha.txt", "alpha.txt")));
+        assert!(!is_archive_root(&entry_named(
+            "sub/gamma.txt",
+            "sub/gamma.txt"
+        )));
     }
 
     #[test]

@@ -91,7 +91,8 @@ fn password_of(secret: Option<&Secret>) -> Result<Password, ArchiveError> {
 /// refuses outright.
 pub fn list_all(path: &Path, passphrase: Option<&Secret>) -> Result<Vec<Entry>, ArchiveError> {
     let password = password_of(passphrase)?;
-    let archive = Archive::open_with_password(path, &password).map_err(classify)?;
+    let archive = Archive::open_with_password(path, &password)
+        .map_err(|e| classify(e, passphrase.is_some()))?;
     Ok(entries_of(&archive))
 }
 
@@ -237,7 +238,7 @@ pub fn method_label(methods: &[EncoderMethod]) -> String {
 /// variant is named "maybe", and it never inspects *why* a decode failed. So an
 /// encrypted archive that will not open reports the password, which is the far more
 /// likely cause and the one the user can do something about.
-fn classify(error: sevenz_rust2::Error) -> ArchiveError {
+fn classify(error: sevenz_rust2::Error, had_password: bool) -> ArchiveError {
     use sevenz_rust2::Error as E;
     match error {
         E::PasswordRequired => ArchiveError::NeedPassword,
@@ -245,7 +246,38 @@ fn classify(error: sevenz_rust2::Error) -> ArchiveError {
         E::UnsupportedCompressionMethod(name) => ArchiveError::Other(format!(
             "this 7z uses {name}, which INDIUM's 7z reader does not decode"
         )),
-        other => ArchiveError::Other(format!("{other:?}")),
+
+        // PXX 10.9. With **encrypted headers** a wrong key does not fail the decryption:
+        // AES has nothing to check the key against, so it cheerfully hands the parser a
+        // block of noise, and the parser then fails in whatever way that particular noise
+        // happens to break it. The walk hit `Other("Broken or unsupported archive: no
+        // Header")` and had no way to know it had simply mistyped the password.
+        //
+        // Every arm below is a *structural* failure to parse a header. Reached with a
+        // password in hand, each one means the same thing, and it is the paragraph above
+        // this function's decision applied to the case that actually occurs — not a new
+        // policy. `BadSignature` is deliberately absent: the signature sits in plaintext
+        // ahead of any encryption, so a bad one means the file is not a 7z, and no
+        // password will ever help. `Io`, `FileOpen`, `FileNotFound` and `MaxMemLimited`
+        // are absent for the same reason — none of them is about the key.
+        E::Other(_)
+        | E::NextHeaderCrcMismatch
+        | E::ChecksumVerificationFailed
+        | E::UnsupportedVersion { .. }
+        | E::BadTerminatedStreamsInfo(_)
+        | E::BadTerminatedUnpackInfo
+        | E::BadTerminatedPackInfo(_)
+        | E::BadTerminatedSubStreamsInfo
+        | E::BadTerminatedHeader(_)
+            if had_password =>
+        {
+            ArchiveError::WrongPassword
+        }
+
+        // `Display`, never `Debug`. `{other:?}` is what printed the crate's own enum
+        // shape into a terminal — `indium: Other("…")` — naming an internal type at the
+        // one moment the reader needs a sentence.
+        other => ArchiveError::Other(other.to_string()),
     }
 }
 
@@ -271,8 +303,23 @@ impl Writer {
         recipe: &Recipe,
         passphrase: Option<&Secret>,
     ) -> Result<Writer, String> {
+        // PXX 9.5. Naming a destination folder that does not exist reported
+        // `could not open the 7z for writing: Io(Os { code: 2, kind: NotFound, … },
+        // "…/.archivesadfad.7z.indium-new")` — three failures in one line. It printed a
+        // Rust struct at a person; it named `.indium-new`, an internal temp file the user
+        // never asked for and cannot act on; and it never mentioned the one fact that
+        // would have fixed it, which is that the folder is not there. Checked before the
+        // open so the sentence can say so plainly.
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() && !parent.is_dir() {
+                return Err(format!(
+                    "{} does not exist, so there is nowhere to write the archive",
+                    parent.display()
+                ));
+            }
+        }
         let mut inner = ArchiveWriter::create(path)
-            .map_err(|e| format!("could not open the 7z for writing: {e:?}"))?;
+            .map_err(|e| format!("could not open the 7z for writing: {e}"))?;
 
         let level = recipe.method.clamp_level(recipe.level);
         let methods: Vec<EncoderConfiguration> = if recipe.encrypt {
@@ -350,11 +397,11 @@ impl Sink for Writer {
             None => writer
                 .push_archive_entry::<&[u8]>(entry, None)
                 .map(|_| ())
-                .map_err(|e| format!("could not write {}: {e:?}", meta.out_path)),
+                .map_err(|e| format!("could not write {}: {e}", meta.out_path)),
             Some(reader) => writer
                 .push_archive_entry(entry, Some(reader))
                 .map(|_| ())
-                .map_err(|e| format!("could not write {}: {e:?}", meta.out_path)),
+                .map_err(|e| format!("could not write {}: {e}", meta.out_path)),
         }
     }
 
@@ -400,7 +447,8 @@ pub fn read_entry(
     let password = password_of(passphrase)?;
     let mut source = std::fs::File::open(path)
         .map_err(|e| ArchiveError::Other(format!("could not open the archive: {e}")))?;
-    let archive = Archive::read(&mut source, &password).map_err(classify)?;
+    let archive =
+        Archive::read(&mut source, &password).map_err(|e| classify(e, passphrase.is_some()))?;
 
     // Which block holds it, so the other blocks are never decoded at all.
     let wanted = archive
@@ -439,7 +487,7 @@ pub fn read_entry(
             truncated = out.len() >= cap;
             Ok(false) // stop; nothing after this one needs decoding
         })
-        .map_err(classify)?;
+        .map_err(|e| classify(e, passphrase.is_some()))?;
 
     if !found {
         return Err(ArchiveError::Other(format!("no such entry: {entry_path}")));
