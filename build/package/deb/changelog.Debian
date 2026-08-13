@@ -1,3 +1,32 @@
+indium (2.1.0-1) unstable; urgency=medium
+
+  * Files first, Create last. Making an archive used to begin with the popup that asks
+    how to compress it -- before there were any files to compress, and before the
+    directory to add them from was even open, so the popup had to be answered blind and
+    then answered again. There is a Draft now: a second section of the entry table,
+    reached with 2 or from the sidebar, holding what the next archive will be made of.
+    Add files to it, then press N once. The Measure action is live on that popup's first
+    frame, because by then there are real bytes to weigh.
+  * Bring from archive copies the entries you have selected in the open archive straight
+    into the draft. They become real files at that moment, so the archive they came from
+    can be closed, renamed or rebuilt without touching them.
+  * An archive is something you can close. A Close control sits on the breadcrumb row,
+    beside Add files.... Opening another archive from inside INDIUM now takes the same
+    window, having closed the one it held -- a file manager or a command line naming a
+    second archive still gets a second window, because two programs asking for two
+    windows means two. Both doors say what closing cost: "Closed photos.zip - 4 staged
+    changes discarded." A staged creation is not one of those changes and survives, since
+    it names an archive the closed file was never the subject of.
+  * The sidebar is three groups rather than two, and the number keys follow the order
+    they are drawn in: File 1, Draft 2, Recent files 3, Bookmarks 4. Create moves up
+    beside the file and the draft it builds from; Open file moves down beside the lists.
+    The File view can be entered with nothing open, where it says so and offers the way
+    in.
+  * Nothing else changed in the program: the same eight formats, the same estimator and
+    its figures, the same rebuild, the same ten popups.
+
+ -- sudo-megas <sudo-megas@users.noreply.github.com>  Thu, 13 Aug 2026 12:00:00 +0300
+
 indium (2.0.0-1) unstable; urgency=medium
 
   * The New Archive popup measures instead of asserting. A Measure action runs all eight

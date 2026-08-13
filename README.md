@@ -6,7 +6,7 @@
 
 <p>
   <img alt="Display Server"     src="https://img.shields.io/badge/Display Server-Wayland-E95420?style=for-the-badge&logo=linux&logoColor=white">
-  <img alt="Version"      src="https://img.shields.io/badge/version-2.0.0-E95420?style=for-the-badge">
+  <img alt="Version"      src="https://img.shields.io/badge/version-2.1.0-E95420?style=for-the-badge">
   <img alt="Release date" src="https://img.shields.io/badge/released-2026--08--12-E95420?style=for-the-badge">
   <img alt="Licence"      src="https://img.shields.io/badge/licence-GPL--3.0--only-772953?style=for-the-badge">
 </p>
@@ -62,18 +62,18 @@ nothing more: *"RAR is not supported."*
 
 ### 3.A Arch Linux
 
-Download `indium-2.0.0-1-x86_64.pkg.tar.zst` from the Releases page:
+Download `indium-2.1.0-1-x86_64.pkg.tar.zst` from the Releases page:
 
 ```sh
-sudo pacman -U indium-2.0.0-1-x86_64.pkg.tar.zst
+sudo pacman -U indium-2.1.0-1-x86_64.pkg.tar.zst
 ```
 
 ### 3.B Debian / Ubuntu
 
-Download `indium_2.0.0-1_amd64.deb` from the Releases page:
+Download `indium_2.1.0-1_amd64.deb` from the Releases page:
 
 ```sh
-sudo apt install ./indium_2.0.0-1_amd64.deb
+sudo apt install ./indium_2.1.0-1_amd64.deb
 ```
 
 **The two packages do not have the same floor, and it matters more than the file extension
@@ -84,7 +84,7 @@ right for the distribution it is for and wrong everywhere else.
 
 ### 3.C Anything else
 
-`indium-2.0.0-1-x86_64.tar.gz` is the `.deb`'s binary with no packaging around it, so it carries
+`indium-2.1.0-1-x86_64.tar.gz` is the `.deb`'s binary with no packaging around it, so it carries
 the lower of the two floors — glibc 2.35. Unpack it, put `indium` wherever you keep such
 things, and satisfy `libarchive.so.13`, `libwayland-client`, `libwayland-egl`, `libxkbcommon`
 and `libEGL` yourself. The last four are opened by name at runtime rather than linked, so `ldd`
@@ -118,21 +118,27 @@ rather than made on your behalf.
 ## 4. HOW TO USE? WHAT IS THE APPLICATION SECTIONS?
 
 Open an archive by clicking it in your file manager, by passing it on the command line, or
-with `Ctrl+O` inside the program. **One archive per window** — opening a second one opens a
-second window, and there are no tabs. Name several archives on the command line and you get
-several windows. Every window stands on its own: close them in any order, and closing one
-never closes another.
+with `Ctrl+O` inside the program. **One archive per window, and there are no tabs** — but a
+window holds one archive *at a time*, not for its whole life. There is a **Close** control on
+the breadcrumb row, and opening another archive from inside INDIUM closes the one you have and
+takes the same window. Name several archives on the command line, or open a second from your
+file manager, and you get a window each: two programs asking for two windows means two. Every
+window stands on its own — close them in any order, and closing one never closes another.
+
+Both doors tell you what leaving cost: *"Closed photos.zip · 4 staged changes discarded."*
+There is no confirmation to dismiss, and nothing you had staged disappears quietly.
 
 ### The sections
 
 | Section | What it is for |
 |---|---|
 | **Open file** `O` | Raises your desktop's own file dialog, through `xdg-desktop-portal` — the picker you already know rather than one INDIUM draws. `Ctrl+O` still opens a path field with tab completion, for when you know where you are going. |
-| **Archive** `1` | The archive itself: one row per entry, with Name, Size, Packed and Method, and a breadcrumb path above. It handles a hundred thousand entries as smoothly as a hundred. `Enter` goes into a folder, `Backspace` comes back out, `Ctrl+F` filters. |
-| **Bookmarks** `2` | Folders you name once and reach thereafter by their name — mostly the places you extract to. They appear again inside the Extract popup, which is the point of them. |
+| **File** `1` | The archive itself: one row per entry, with Name, Size, Packed and Method, and a breadcrumb path above. It handles a hundred thousand entries as smoothly as a hundred. `Enter` goes into a folder, `Backspace` comes back out, `Ctrl+F` filters. *Close* and *Add files…* sit at the far end of the breadcrumb row. With nothing open the section still opens, and says so. |
+| **Draft** `2` | What your next archive will be made of, and where making one starts. *Add files…* raises the picker; *Bring from archive* copies the entries you have selected in the open archive straight in. Nothing here is written and nothing here is a change to anything — it becomes a real job only when you press `N`. Because the files are already in it by then, the **Measure** action is live the moment that popup opens. |
 | **Recent files** `3` | The archives you have opened before, newest first, so returning to one is a keypress rather than a hunt through folders. `Enter` opens the highlighted entry and `Del` forgets it. |
+| **Bookmarks** `4` | Folders you name once and reach thereafter by their name — mostly the places you extract to. They appear again inside the Extract popup, which is the point of them. |
 | **The Inspector** | The permanent pane on the right, and the reason the program exists. **Details** tells you everything knowable about what you have selected — select nothing and it describes the whole archive, select several and it adds them up. **Preview** shows text and images, judged by their bytes rather than their file extension — and anything that is neither, it shows as **hex**: sixteen bytes to a row with the offset down one side and the printable characters down the other, the way `xxd` prints them. The row stays sixteen bytes wide however wide you drag the pane, so a byte keeps its offset while you are looking at it. `Space` swaps the two. |
-| **New Archive** `N` | Builds a new archive. Pick one of four presets — *Fastest*, *Balanced*, *Smallest*, *Encrypted* — or choose a method from the list, where **every method carries one honest sentence** about what it costs you and what it saves. A line at the foot states exactly what is about to be built before anything is. |
+| **Create** `N` | Turns the draft into a real job, and it is the **last** step rather than the first. Pick one of four presets — *Fastest*, *Balanced*, *Smallest*, *Encrypted* — or choose a method from the list, where **every method carries one honest sentence** about what it costs you and what it saves. *Measure* runs all eight methods over the files you actually put in the draft, on this machine. A line at the foot states exactly what is about to be built before anything is. |
 | **Pending tasks** `W` | Everything you have changed but not yet committed. A strip appears above the status bar the moment you stage your first change; this is the full list behind it, one row per operation, each removable on its own, with *Discard all* and **Apply**. |
 | **Extract** `E` | Unpacks the selection, or the whole archive if nothing is selected. Offers *Extract here*, *Extract to a folder of the same name*, or any path you type, with your bookmarks underneath. |
 | **Open With** | Press `Enter` on a file and INDIUM offers the applications that can open it, best match first, filtered as you type. It opens a **copy** — anything you change there does not return to the archive. |
@@ -140,7 +146,7 @@ never closes another.
 | **About** `A` | The version and release date, the maker, the source address, and the licence in full. The address is text you can select and copy but not click — INDIUM opens no browser and follows no link, by design. |
 | **The status bar** | Three lines at the bottom of the window. The first says which archive this window holds and where it lives — the folder is shortened from the middle so both ends stay readable, hovering shows it whole, and clicking it opens that folder in your file manager; the second the entry count, the real and packed sizes, and whatever INDIUM last had to say to you, in yellow when something went wrong; the third the phase, the count and its **Cancel** while something long is running, with the proportion done drawn as a line along the bar's top edge. |
 
-![The New Archive popup: four presets, every method with its one-sentence verdict, and a line at the foot stating exactly what will be built.](build/screenshot-new.png)
+![The Create popup: four presets, every method with its one-sentence verdict, and a line at the foot stating exactly what will be built.](build/screenshot-new.png)
 
 ![The Extract popup: extract here, extract into a named folder, or type a path. Bookmarks sit underneath.](build/screenshot-extract.png)
 
@@ -148,9 +154,9 @@ never closes another.
 
 | Key | Does |
 | --- | --- |
-| `1` `2` `3` | Sidebar sections |
-| `O` / `I` | Open file · Add files — both raise the desktop's own picker |
-| `N` `W` `E` `A` `,` | New Archive · Pending tasks · Extract · About · Settings |
+| `1` `2` `3` `4` | Sidebar sections — File, Draft, Recent files, Bookmarks |
+| `O` / `I` | Open file · Add files — both raise the desktop's own picker. `I` adds to whichever section is showing: the draft, or the directory the breadcrumb names |
+| `N` `W` `E` `A` `,` | Create · Pending tasks · Extract · About · Settings |
 | `F1` | Keys — this table, in the window |
 | Arrows, `PgUp/PgDn`, `Home/End` | Move in the table |
 | `Enter` / `Backspace` | Descend / go up |

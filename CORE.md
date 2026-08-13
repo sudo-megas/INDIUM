@@ -481,6 +481,7 @@ repair to it.
 | P19 | The front page read against the tree: a library three of four packages never declared, a panel's third group, and a password refused as the wrong one | **`v1.2.0-3`** |
 | P20 | The yazi plugin, in a repository of its own because `contrib/` could never have been installed, and the description settled in all four places that state one | **`v1.2.0-4`** |
 | P21 | V2.0, the live estimator: eight real candidates on the real CPU, exact under its budget and marked above it, the popup made re-openable so there is something to measure, and — once it had been seen on screen — a tenth popup to draw the figures in | **`v2.0`** |
+| P22 | Files first and *Create* last: a draft to put them in, entries brought across from the archive as copies, and an archive you can close — with §1 amended so that opening another takes this window | **`v2.1`** |
 
 The P-table is a plan, not scripture; P-documents may split or merge steps, but scope
 only moves *out* of v1.0 by the maker's decision recorded here.
