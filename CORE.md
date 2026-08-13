@@ -143,11 +143,11 @@ holding. The rule is a rule and not a gap; §6 fixes what it has to be to be see
 it, with *Close* and then *Add files…* at the far end of that row — the picker adds into the
 directory the breadcrumb names, which is the one placement that needs no explanation, and
 *Close* is beside it because leaving the file is an act on the file and belongs where the
-file is. *Add files…* keeps the outer edge it has held since P11: the control pressed often
-does not move so that the control that throws work away can have the place the hand knows. `Enter` descends into a directory, `Backspace` goes up. `Ctrl+F` opens a filter bar
-— there is deliberately no type-to-jump, because bare letters are shortcuts. With nothing
-open the table says so and offers the way in: it is a zone that is always there, not one
-that appears with an archive.
+file is. *Add files…* keeps the outer edge it has held since P11: the frequent control keeps
+its place, and the one that throws work away is the one that moved. `Enter` descends into a
+directory, `Backspace` goes up. `Ctrl+F` opens a filter bar — there is deliberately no
+type-to-jump, because bare letters are shortcuts. With nothing open the table says so and
+offers the way in: it is a zone that is always there, not one that appears with an archive.
 
 **The Draft** is what this same zone shows when the second section is chosen — one row per
 item with its own remove ✕, and two controls: *Add files…*, which is the same picker, and

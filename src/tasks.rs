@@ -273,8 +273,10 @@ fn method_for(info: &ArchiveInfo) -> Option<Method> {
 
 /// The live sentence at the foot of the Create popup.
 ///
-/// CORE §4.1: "a live sentence states exactly what will be built: *"Building
-/// photos-2026.7z — 7z, LZMA2:19, AES-256."*"
+/// CORE §4.1: "a live sentence states exactly what will be built". The example the document
+/// prints there is read back out of it by `the_footer_sentence_reads_exactly_as_core_writes_it`
+/// rather than copied down here — this doc carried `LZMA2:19` from P4 to P22 for want of that,
+/// and so did §4.1 itself.
 pub fn recipe_sentence(recipe: &Recipe) -> String {
     let name = recipe
         .path
@@ -2027,8 +2029,43 @@ mod tests {
     }
 
     /// CORE §4.1: "a live sentence states exactly what will be built".
+    ///
+    /// The name has claimed *exactly as CORE writes it* since P4 while the sentence was typed
+    /// here by hand, and that is how §4.1 came to read `LZMA2:19` — a level this program cannot
+    /// be set to — with the suite green over it for eighteen rounds. P22 fixes the figure and
+    /// this test, which is the half that matters: the document's own example is now parsed and
+    /// compared, so the next such slip fails the build instead of shipping.
+    ///
+    /// Only the example CORE prints is read from the document. The two below it hold branches
+    /// §4.1 does not exemplify — a method with no levels, and no encryption — and stay written
+    /// out, because a test cannot read what the document does not say.
     #[test]
     fn the_footer_sentence_reads_exactly_as_core_writes_it() {
+        let core = include_str!("../CORE.md");
+        let popups = core
+            .split_once("### The popups")
+            .expect("CORE §4 has a 'The popups' heading")
+            .1;
+        // Bounded at the next heading, as §5's gate is: without it a deleted §4.1 walks the
+        // search into §5 and reports on a sentence written somewhere else entirely. Flattened
+        // because §4.1 wraps this sentence across two lines — the newline is wrapping, not
+        // structure.
+        let popups: String = popups
+            .lines()
+            .take_while(|l| !l.starts_with('#'))
+            .flat_map(str::split_whitespace)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let quoted = popups
+            .split_once("a live sentence states exactly what will be built: *\"")
+            .expect("CORE §4.1 says what the live sentence reads, and gives an example")
+            .1
+            .split_once("\"*")
+            .expect("CORE §4.1's example is closed with \"*")
+            .0;
+
+        // Every field read off that example: the name it prints, the `7z` its extension gives,
+        // the codec and level of `LZMA2:9`, and `AES-256.` for the encryption.
         let recipe = Recipe {
             path: PathBuf::from("/home/megas/photos-2026.7z"),
             method: Method::Lzma2,
@@ -2037,7 +2074,8 @@ mod tests {
         };
         assert_eq!(
             recipe_sentence(&recipe),
-            "Building photos-2026.7z — 7z, LZMA2:9, AES-256."
+            quoted,
+            "CORE §4.1 writes the live sentence as {quoted:?}"
         );
 
         let plain = Recipe {
