@@ -154,6 +154,12 @@ there because `path_escapes` (`arch.rs:940-946`) has never been fed a hostile pa
 its own unit test. **New step 3.13** extracts them, names its throwaway target twice, and denies on
 any file landing outside it. It is the only step in the plan that could write outside its target.
 
+All four aim at paths this user can really write, and the absolute one at `$HOME` rather than at
+`/`. That is the same trap the `nosuid` rule above avoids from the other direction: a member
+aimed at `/absolute-escape.txt` is stopped by `EACCES` on any non-root run whether or not
+`path_escapes` refuses it, so the step would pass without ever testing the check. A security
+fixture that cannot fail for the right reason has proved nothing.
+
 ### The sheet
 
 `build/make-checksheet.py` reads `TESTPLAN.md` and emits `build/docs/checksheet.html` — one row
@@ -172,3 +178,13 @@ Published as a private artifact for the walk:
 
 **The gate (R3).** Every denial becomes work in this round — fixed, re-verified and re-ticked.
 Phase 3 does not begin until the sheet is clean.
+
+Two rules for closing one, both learned from what generating the sheet costs rather than from
+running it. **Step numbers are the storage keys**, so a denial is closed by editing what a row
+says and never by renumbering — inserting `3.14` is safe, promoting one to `3.10` silently
+reattaches every later answer to the wrong step. If a renumber ever becomes unavoidable the
+storage key `indium-pxx-checksheet-v1` is bumped with it and the walk restarts. And **the sheet is
+regenerated and republished with every plan edit**, because tracking a generated file next to its
+source creates exactly the drift this round was built to find; Phase 4 verifies
+`checksheet.html` is byte-identical to a fresh regeneration, in the spirit of the nine
+doc-as-tests.

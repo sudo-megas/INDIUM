@@ -254,10 +254,10 @@ fi
 
 step "deep.tar — pathological nesting and names [TESTPLAN 3.12]"
 if skip_or_build deep.tar; then
-	python3 - "$DIR/deep.tar" <<-'PY'
+	python3 - "$DIR/deep.tar" "$HOME" <<-'PY'
 		import io, sys, tarfile
 
-		out = sys.argv[1]
+		out, home = sys.argv[1], sys.argv[2].rstrip("/")
 
 		def add(tar, name, body=b"x\n", mode=0o644):
 		    info = tarfile.TarInfo(name)
@@ -292,7 +292,12 @@ if skip_or_build deep.tar; then
 		    add(tar, "../escaped-one-up.txt", b"should never be written\n")
 		    add(tar, "../../escaped-two-up.txt", b"should never be written\n")
 		    add(tar, "safe/../../escaped-via-middle.txt", b"should never be written\n")
-		    add(tar, "/absolute-escape.txt", b"should never be written\n")
+		    # The absolute member points into $HOME rather than at /absolute-escape.txt.
+		    # A non-root INDIUM cannot write to / whatever path_escapes decides, so EACCES
+		    # would mask the hole and the step would pass for the wrong reason — the same
+		    # trap as running the setuid fixture on a nosuid mount. Aimed somewhere the
+		    # process really can write, only a refusal stops it.
+		    add(tar, f"{home}/escaped-absolute.txt", b"should never be written\n")
 	PY
 	say "$(du -h "$DIR/deep.tar" | cut -f1) — 60 levels, hostile names, and four traversal members"
 	say "WARNING: extract deep.tar into a throwaway directory and nowhere else."
