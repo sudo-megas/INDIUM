@@ -15,6 +15,15 @@ use crate::util;
 
 const ROW_HEIGHT: f32 = 20.0;
 
+/// The four column widths of CORE §4's entry table — `Name`, `Size`, `Packed`, `Method`.
+///
+/// Named because a second file depends on them and used to depend on a copy. `Name` is a
+/// `remainder` that never goes under its first entry and the other three are `exact`, so the
+/// sum is the width this table cannot be argued below — before `egui_extras` charges for the
+/// gaps between them and for the scrollbar's lane, which is why it is only the first term of
+/// [`super::inspector::CENTRE_MIN`] rather than the whole of it.
+pub const COLUMNS: [f32; 4] = [120.0, 84.0, 84.0, 72.0];
+
 /// The padding of one Recents or Bookmarks line. Both lists wear the same one, because they
 /// are the same shape of thing and the sidebar switches between them.
 const LIST_PAD: egui::Margin = egui::Margin::symmetric(12, 7);
@@ -122,10 +131,10 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
             // is `Sense::hover()`, which is not. This one line is what switches row hover on.
             .sense(egui::Sense::click())
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::remainder().at_least(120.0).clip(true))
-            .column(Column::exact(84.0))
-            .column(Column::exact(84.0))
-            .column(Column::exact(72.0));
+            .column(Column::remainder().at_least(COLUMNS[0]).clip(true))
+            .column(Column::exact(COLUMNS[1]))
+            .column(Column::exact(COLUMNS[2]))
+            .column(Column::exact(COLUMNS[3]));
 
         // Only when the keyboard moved it, and only for the one frame the flag is up.
         // Asking every frame would fight the wheel: scroll away to read something and the
@@ -751,14 +760,21 @@ fn draft_view(app: &mut Indium, ui: &mut egui::Ui) {
         {
             pull = true;
         }
-        if let Some(reason) = refusal {
-            ui.label(
-                egui::RichText::new(reason)
-                    .size(13.0)
-                    .color(theme::TEXT_MUTED),
-            );
-        }
     });
+    // Under the buttons, not beside them, and that is the whole of the 6.3 fix on this line.
+    // A `ui.horizontal` lays its contents out on a row of unbounded width, and an
+    // `egui::Label` given unbounded width does not wrap — so in there the sentence ran off
+    // the panel's right edge and was cut mid-word, which it did even at 1180 wide, never
+    // mind the 560 the walk denied. Out here the layout is vertical, the label wraps at the
+    // panel's own width, and the reason stays whole at every size the window can take.
+    if let Some(reason) = refusal {
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(reason)
+                .size(13.0)
+                .color(theme::TEXT_MUTED),
+        );
+    }
     ui.add_space(6.0);
     if pick {
         app.request_picker(ui.ctx(), PickerFor::Draft);

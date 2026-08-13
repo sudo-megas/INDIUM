@@ -3399,7 +3399,15 @@ impl Indium {
 /// comfort is not a floor's job — they are the size under which nothing can be done at all.
 /// Every zone gives way on its own long before here: the sidebar's rows scroll under a bar
 /// that floats over them instead of displacing them, the table clips its columns, the
-/// Inspector has its own minimum. (The bar floats rather than standing in a permanent track,
+/// Inspector has its own minimum — **and, since PXX, a ceiling that makes it reach that
+/// minimum**. The last clause is not a flourish. A `Panel::right` keeps whatever width it
+/// holds and the `CentralPanel` after it absorbs the whole difference, so a `min_size` alone
+/// buys nothing: the Inspector sailed through 560 at its full 330 and left the table sixteen
+/// points to draw four columns into, which is what step 6.3 of the walk denied. This sentence
+/// was true of the other two zones and merely plausible of the third for six rounds.
+/// `inspector::CENTRE_MIN` is what makes it true of all three.
+///
+/// (The bar floats rather than standing in a permanent track,
 /// and `sidebar.rs` says why at the line that chooses it — this comment claimed the opposite
 /// from P14 until P15, which is the fault `b0baa52` was written to stop making.)
 pub const MIN_W: f32 = 560.0;

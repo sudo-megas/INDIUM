@@ -16,6 +16,7 @@
 
 use eframe::egui;
 
+use super::table;
 use super::{Indium, InspectorTab};
 use crate::arch::Entry;
 use crate::model::{self, Row};
@@ -29,6 +30,39 @@ const ZONE_PAD: egui::Margin = egui::Margin::same(12);
 const CONTENT: f32 = 306.0;
 const MIN_CONTENT: f32 = 236.0;
 
+/// What the table must be left with before this pane may keep another point of width.
+///
+/// The centre is the one zone that cannot give, and that asymmetry is the whole reason this
+/// number exists. The sidebar's rows scroll under a bar that floats over them; this pane has
+/// [`MIN_CONTENT`]; the table has [`table::COLUMNS`], whose widths are a specification rather
+/// than a preference. Summed, that is **360** that no amount of narrowing will reduce — and it
+/// is summed here rather than written down, because a copy of it is exactly what drifted.
+///
+/// Three costs sit on top of it, none of them guessable from the column list, and all three
+/// are pinned by `the_centre_floor_is_the_sum_it_claims` rather than trusted:
+/// `egui_extras` puts `item_spacing.x` between the columns — `to_lengths` charges
+/// `spacing * (n − 1)`, so 8.0 × 3 = **24**; it subtracts the scrollbar's lane from what it
+/// lays out into whenever `vscroll` is on, shown or not, which `ScrollStyle::solid` makes
+/// `bar_inner_margin + bar_width + bar_outer_margin` = 4 + 6 + 0 = **10**; and the
+/// `CentralPanel`'s own frame takes **20**, because `Frame::total_margin` is
+/// `inner_margin + stroke.width + outer_margin` and `table::show` pays 4 + 2 + 4 a side.
+///
+/// 360 + 24 + 10 + 20 = **414**.
+pub const CENTRE_MIN: f32 = table::COLUMNS[0]
+    + table::COLUMNS[1]
+    + table::COLUMNS[2]
+    + table::COLUMNS[3]
+    + GAPS
+    + SCROLLBAR
+    + CHROME;
+
+/// `item_spacing.x` × (`COLUMNS.len()` − 1), per `egui_extras`' `sizing.rs`.
+const GAPS: f32 = 24.0;
+/// `ScrollStyle::solid().allocated_width()`, subtracted whenever the table has `vscroll`.
+const SCROLLBAR: f32 = 10.0;
+/// `table::show`'s `CentralPanel` frame: 4 inner + 2 stroke + 4 outer, a side.
+const CHROME: f32 = 20.0;
+
 pub fn show(app: &mut Indium, root: &mut egui::Ui, rows: &[Row]) {
     // Both sizes are the panel's *outer* width, so both pay for the whole frame. Asked of
     // the frame rather than written down, for the reason `sidebar::show` gives at length:
@@ -36,10 +70,35 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui, rows: &[Row]) {
     // forgets the 2px edge is four pixels wrong on a pane CORE §1 calls the main event.
     let frame = theme::zone(theme::PANEL).inner_margin(ZONE_PAD);
     let chrome = frame.total_margin().sum().x;
+
+    // And a ceiling, which the pane went without until PXX. A side panel keeps whatever width
+    // it holds; only the `CentralPanel` after it absorbs the difference when the window
+    // narrows. So without this line the pane sails through 560 wide at its full 330 and the
+    // table is left with about sixteen points to draw four columns into — the state the walk
+    // denied at step 6.3. The clamp is on *this* pane rather than on `MIN_W` because a floor
+    // on the window forbids a size the maker may legitimately want; a ceiling here simply
+    // makes the widest zone yield first, which is what a reader dragging an edge expects.
+    //
+    // `.max()` is load-bearing and not defensive: below `CENTRE_MIN + MIN_CONTENT + chrome`
+    // of available width the subtraction goes under the minimum, and egui resolves a range
+    // whose max is under its min by taking the max — so the pane would collapse past
+    // [`MIN_CONTENT`] instead of stopping at it. Past that point the window is simply too
+    // narrow for both, and the table clips, which is the failure it is built to survive.
+    //
+    // One consequence, stated rather than discovered: `Panel::outer_size` clamps the width it
+    // loads from `PanelState` and then stores the clamped result, so a pane squeezed by a
+    // narrow window stays narrow when the window widens again. It is a drag away from where it
+    // was, and buying the spring-back would mean holding a second remembered width in `Indium`
+    // and deciding when it goes stale — which is more machinery than this defect is worth on
+    // the eve of a freeze.
+    let ceiling =
+        (root.available_rect_before_wrap().width() - CENTRE_MIN).max(MIN_CONTENT + chrome);
+
     egui::Panel::right("inspector")
         .resizable(true)
         .default_size(CONTENT + chrome)
         .min_size(MIN_CONTENT + chrome)
+        .max_size(ceiling)
         .frame(frame)
         // The card's own 2px edge is the boundary; egui's panel hairline would stack with it.
         .show_separator_line(false)
@@ -714,4 +773,78 @@ fn note(ui: &mut egui::Ui, text: &str) {
             .italics()
             .color(theme::TEXT_MUTED),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// PXX 6.3: the centre's floor is arithmetic, and every term of it lives in another file.
+    ///
+    /// [`CENTRE_MIN`] sums [`table::COLUMNS`] directly, so the columns cannot drift from it.
+    /// The other three terms can: they are egui's numbers, not INDIUM's, and an upgrade may
+    /// change any of them without a word. That is precisely how this defect was born — the
+    /// pane carried a `min_size` it never reached and a floor nobody had multiplied out — so
+    /// the three are read back off a real style here rather than trusted.
+    ///
+    /// A failure is not a bug in the clamp. It means egui now charges a different price for
+    /// the same layout and `CENTRE_MIN` owes the table more width than it is asking for.
+    #[test]
+    fn the_centre_floor_is_the_sum_it_claims() {
+        let ctx = egui::Context::default();
+        theme::install_visuals(&ctx);
+        let spacing = ctx.style_of(egui::Theme::Dark).spacing.clone();
+
+        assert_eq!(
+            spacing.item_spacing.x * (table::COLUMNS.len() - 1) as f32,
+            GAPS,
+            "egui_extras charges `item_spacing * (n - 1)` between columns",
+        );
+        assert_eq!(
+            spacing.scroll.allocated_width(),
+            SCROLLBAR,
+            "a solid scrollbar takes its lane out of the table's width, shown or not",
+        );
+
+        // The same frame `table::show` builds, asked rather than restated — the four-plus-two
+        // -plus-four a side that its own comment insists is 20 and not 16.
+        let chrome = theme::zone(theme::WINDOW)
+            .inner_margin(egui::Margin::same(4))
+            .total_margin()
+            .sum()
+            .x;
+        assert_eq!(chrome, CHROME, "the CentralPanel's frame costs 20, not 16");
+
+        assert_eq!(CENTRE_MIN, 414.0, "360 of columns + 24 + 10 + 20");
+    }
+
+    /// The `.max()` in `show`'s ceiling is load-bearing, and this is the arithmetic that says so.
+    ///
+    /// `Panel::max_size` sets the range to `(min.at_most(max), max)` — it *lowers the minimum*
+    /// to meet a smaller maximum rather than refusing one. So a ceiling allowed to fall below
+    /// [`MIN_CONTENT`] would not clamp the pane at its floor; it would carry the floor down
+    /// with it and let the pane collapse to nothing.
+    #[test]
+    fn the_ceiling_never_falls_through_the_pane_s_own_floor() {
+        let chrome = 24.0; // ZONE_PAD 12 a side + the 2px edge, as `show` computes it.
+        let floor = MIN_CONTENT + chrome;
+        let ceiling = |available: f32| (available - CENTRE_MIN).max(floor);
+
+        // Wide: the pane keeps its default and the ceiling is not the binding constraint.
+        assert!(
+            ceiling(978.0) > CONTENT + chrome,
+            "1180 wide leaves room for both"
+        );
+        // Narrow: the pane is pinned at its own minimum, never under it.
+        assert_eq!(
+            ceiling(358.0),
+            floor,
+            "560 wide: at the floor, not through it"
+        );
+        assert_eq!(
+            ceiling(0.0),
+            floor,
+            "and it stays there however narrow it gets"
+        );
+    }
 }
