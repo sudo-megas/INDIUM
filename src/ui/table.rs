@@ -7,7 +7,7 @@
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 
-use super::{filter, Indium, Section, Status};
+use super::{filter, pull_refusal_for, restage_note, Indium, Section, Status};
 use crate::model::Row;
 use crate::platform::picker::PickerFor;
 use crate::theme;
@@ -728,6 +728,12 @@ fn draft_view(app: &mut Indium, ui: &mut egui::Ui) {
     ui.add_space(6.0);
 
     let mut pick = false;
+    let mut pull = false;
+    // Why the second control cannot run, asked once and used twice — for whether the button
+    // is live, and for the sentence beside it. A disabled button reports no click, so the
+    // reason has to be drawn rather than waited for; the same discipline Measure has
+    // followed since P21b.
+    let refusal = pull_refusal_for(!app.has_archive(), app.selection.is_empty());
     ui.horizontal(|ui| {
         if theme::small_button(ui, egui::RichText::new("Add files…"), true)
             .on_hover_text("Choose files to put in the draft")
@@ -735,10 +741,30 @@ fn draft_view(app: &mut Indium, ui: &mut egui::Ui) {
         {
             pick = true;
         }
+        if theme::small_button(
+            ui,
+            egui::RichText::new("Bring from archive"),
+            refusal.is_none(),
+        )
+        .on_hover_text("Copy the entries selected in the open archive into the draft")
+        .clicked()
+        {
+            pull = true;
+        }
+        if let Some(reason) = refusal {
+            ui.label(
+                egui::RichText::new(reason)
+                    .size(13.0)
+                    .color(theme::TEXT_MUTED),
+            );
+        }
     });
     ui.add_space(6.0);
     if pick {
         app.request_picker(ui.ctx(), PickerFor::Draft);
+    }
+    if pull {
+        app.bring_from_archive(ui.ctx());
     }
 
     if app.draft.is_empty() {
@@ -797,8 +823,9 @@ fn draft_view(app: &mut Indium, ui: &mut egui::Ui) {
     if let Some(i) = focus {
         app.draft_cursor = i;
     }
+    let note = restage_note(app.tasks.creation().is_some());
     if let Some(gone) = remove.and_then(|i| app.draft.remove(i)) {
-        app.status = format!("Removed {} from the draft.", gone.dest).into();
+        app.status = format!("Removed {} from the draft.{note}", gone.dest).into();
     }
 }
 

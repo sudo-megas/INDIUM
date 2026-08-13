@@ -34,6 +34,16 @@ pub enum Kind {
     /// do: the routing rule below decides RAM or disk once, for everybody, and a window
     /// that dies mid-measurement leaves a name the sweep can recognise as abandoned.
     Estimate,
+    /// P22: where *Bring from archive* puts the entries it pulls out of the open archive,
+    /// so that the draft holds **files** and can outlive the archive they came from.
+    ///
+    /// The odd one of the four, and every rule below that reads `Kind` reads it for this.
+    /// The other three are momentary — one copy-out, one Open With, one measurement, each
+    /// superseding the last. A draft *accumulates*: it is built up over many pulls, it
+    /// survives a Close, and it outlives the tray's Discard. So its directory is opened
+    /// once and added to rather than replaced ([`Scratch::ensure`]), and it goes to disk
+    /// whatever it weighs ([`Kind::on_disk_always`]).
+    Draft,
 }
 
 impl Kind {
@@ -42,6 +52,7 @@ impl Kind {
             Kind::CopyOut => "co",
             Kind::OpenWith => "ow",
             Kind::Estimate => "es",
+            Kind::Draft => "dr",
         }
     }
 
@@ -50,7 +61,24 @@ impl Kind {
             Kind::CopyOut => 0,
             Kind::OpenWith => 1,
             Kind::Estimate => 2,
+            Kind::Draft => 3,
         }
+    }
+
+    /// Does this kind belong on disk whatever it weighs?
+    ///
+    /// Only the accumulating one, and not as a preference. [`Scratch::route`] weighs a
+    /// selection *once*, and for a directory opened once and added to for the rest of a
+    /// draft's life that single answer would be about the first pull and no other — a
+    /// 10 MB first pull followed by an 8 GB second would put eight gigabytes in tmpfs
+    /// having never decided anything about them. Per-size routing is meaningless for a
+    /// total that keeps growing, so the only root that can be right is the one with no
+    /// ceiling.
+    ///
+    /// It is also the only root [`Scratch::sweep_stale`] reads, which a directory that can
+    /// outlive a crash by a whole session wants rather more than a copy-out does.
+    fn on_disk_always(self) -> bool {
+        matches!(self, Kind::Draft)
     }
 }
 
@@ -75,7 +103,7 @@ pub struct Scratch {
     /// directory one window makes carries one number.
     pid: u32,
     counter: u32,
-    current: [Option<PathBuf>; 3],
+    current: [Option<PathBuf>; 4],
 }
 
 impl Scratch {
@@ -92,7 +120,7 @@ impl Scratch {
             limit,
             pid: std::process::id(),
             counter: 0,
-            current: [None, None, None],
+            current: [None, None, None, None],
         }
     }
 
@@ -113,7 +141,15 @@ impl Scratch {
     pub fn begin(&mut self, kind: Kind, total_bytes: u64) -> std::io::Result<Placement> {
         self.discard(kind);
 
-        let (root, on_disk) = self.route(total_bytes);
+        let (root, on_disk) = if kind.on_disk_always() {
+            // Not `on_disk` in P3 §1's sense, and so no notice is owed: that sentence
+            // reports a *selection too large for RAM*, and a three-file draft pull is not
+            // one. The caller hands over its real total all the same, so the figure is
+            // already there the day this policy wants to read it.
+            (self.cache_root.clone(), false)
+        } else {
+            self.route(total_bytes)
+        };
         self.counter += 1;
         let dir = root.join(format!("{}-{}-{}", kind.prefix(), self.pid, self.counter));
         std::fs::create_dir_all(&dir)?;
@@ -130,6 +166,25 @@ impl Scratch {
 
     pub fn current(&self, kind: Kind) -> Option<&Path> {
         self.current[kind.slot()].as_deref()
+    }
+
+    /// The directory for a kind that **accumulates**, opening one if there is none yet.
+    ///
+    /// [`begin`](Self::begin) supersedes, and for three of the four kinds that is exactly
+    /// right: a second copy-out is a different copy-out, and the first one's files are of
+    /// no further use to anybody. A draft is the opposite. Every pull joins the last, and a
+    /// `begin` per pull would remove the files the draft's own items are pointing at — the
+    /// draft would still list them, and Apply would fail on a source that is not there.
+    /// So this opens the directory once and hands back the same one from then on.
+    ///
+    /// Callers keep their pulls apart *inside* it, one subdirectory each, because two
+    /// archives can both hold `docs/notes.txt` and the second pull must not write over
+    /// bytes the first pull's item already names.
+    pub fn ensure(&mut self, kind: Kind, total_bytes: u64) -> std::io::Result<PathBuf> {
+        if let Some(dir) = self.current(kind) {
+            return Ok(dir.to_path_buf());
+        }
+        Ok(self.begin(kind, total_bytes)?.dir)
     }
 
     /// Sweep leftovers from a previous run. P3 §1: "Stale `scratch/` cache entries are
@@ -183,7 +238,7 @@ pub fn owner(name: &str) -> Owner {
     let Some((prefix, rest)) = name.split_once('-') else {
         return Owner::Stranger;
     };
-    if !matches!(prefix, "co" | "ow" | "es") {
+    if !matches!(prefix, "co" | "ow" | "es" | "dr") {
         return Owner::Stranger;
     }
     match rest.split_once('-') {
@@ -222,6 +277,7 @@ impl Drop for Scratch {
         self.discard(Kind::CopyOut);
         self.discard(Kind::OpenWith);
         self.discard(Kind::Estimate);
+        self.discard(Kind::Draft);
     }
 }
 
@@ -341,6 +397,51 @@ mod tests {
         assert!(ow.exists());
         assert!(co.file_name().unwrap().to_string_lossy().starts_with("co-"));
         assert!(ow.file_name().unwrap().to_string_lossy().starts_with("ow-"));
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The whole of what `ensure` is for, and the reason the draft can be built up rather
+    /// than only filled in one go.
+    ///
+    /// `begin` would have removed the first pull's directory to make the second one — and
+    /// the draft's items point *into* it, so the files would be gone while the rows that
+    /// name them stayed, and Apply would fail on a source that is not there. The failure
+    /// this asserts against is not hypothetical: it is what the other three kinds do on
+    /// purpose, and what a refactor "simplifying" this back to one call would restore.
+    #[test]
+    fn a_second_pull_leaves_the_first_one_standing() {
+        let base = tmp("draft-pulls");
+        let mut s = Scratch::with_roots(Some(base.join("run")), base.join("cache"), 1000);
+
+        let root = s.ensure(Kind::Draft, 1).unwrap();
+        let first = root.join("1");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::write(first.join("notes.txt"), b"from the first pull").unwrap();
+
+        let again = s.ensure(Kind::Draft, 1).unwrap();
+        assert_eq!(again, root, "a second pull must be handed the same root");
+        assert_eq!(
+            std::fs::read(first.join("notes.txt")).unwrap(),
+            b"from the first pull",
+            "the second pull deleted the first pull's files"
+        );
+
+        // And the subdirectories are what keep two pulls of the same name apart.
+        let second = root.join("2");
+        std::fs::create_dir_all(&second).unwrap();
+        std::fs::write(second.join("notes.txt"), b"from the second pull").unwrap();
+        assert_eq!(
+            std::fs::read(first.join("notes.txt")).unwrap(),
+            b"from the first pull"
+        );
+
+        // Disk, whatever it weighs: `1` byte is far under the limit given above, and the
+        // runtime root exists, so anything but the accumulating rule would put it in RAM.
+        assert!(
+            root.starts_with(base.join("cache")),
+            "a draft must not accumulate in tmpfs: {root:?}"
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -469,5 +570,25 @@ mod tests {
         assert!(!is_ours("xx-1"));
         assert!(!is_ours("co-1a"));
         assert!(!is_ours("important-data"));
+    }
+
+    /// Every prefix a `Kind` can produce must be one the sweep recognises as ours.
+    ///
+    /// The gap this closes was P22's to open: the draft is the one kind forced to the cache
+    /// root *because* that is the root the sweep reads, and a prefix missing from `owner`
+    /// reads as `Stranger` — never swept, whatever else is true of it. So the routing would
+    /// have created the leak it exists to prevent, in the one root nothing else ever clears.
+    /// Asserted over the kinds rather than over a list of strings, so a fifth kind cannot be
+    /// added without this test asking about it.
+    #[test]
+    fn every_kind_makes_a_name_the_sweep_knows_is_ours() {
+        for kind in [Kind::CopyOut, Kind::OpenWith, Kind::Estimate, Kind::Draft] {
+            let name = format!("{}-4321-7", kind.prefix());
+            assert_eq!(
+                owner(&name),
+                Owner::Process(4321),
+                "{name} is not read as ours, so it would never be swept"
+            );
+        }
     }
 }

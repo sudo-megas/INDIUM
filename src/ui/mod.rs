@@ -196,6 +196,13 @@ pub enum PendingAction {
     Crc { entry: String },
     /// Copy the current selection out to the clipboard.
     CopyOut,
+    /// Pull the current selection across into the draft.
+    ///
+    /// Carries nothing, and could not usefully: the resume re-calls
+    /// [`Indium::bring_from_archive`], which reads the selection off the window exactly as
+    /// the first press did. That is the same shape as `CopyOut` and for the same reason —
+    /// a password prompt does not change what is selected.
+    Draft,
     /// Extract one entry and offer it to an application.
     OpenWith { entry: String },
     /// Read one entry's head for the Preview tab.
@@ -220,6 +227,14 @@ enum PostExtract {
     /// `Enter` on a file — find what came out and open the picker on it. Boxed for the
     /// same reason `ListMsg::Entry` is: an `Entry` dwarfs the other two variants.
     OpenWith { entry: Box<Entry> },
+    /// *Bring from archive* — put what came out into the draft, under the names it had
+    /// inside the archive.
+    ///
+    /// The only one of the four that carries its directory. The other outward path finds
+    /// its files by asking `Scratch` for the current directory of its kind, which for a
+    /// draft answers with the root shared by every pull — so this pull's own subdirectory
+    /// has to travel, both to find the files and to strip the right prefix off them.
+    Draft { dir: PathBuf },
 }
 
 /// How much of an entry Preview will read.
@@ -328,6 +343,13 @@ pub struct Indium {
     /// The draft section's own cursor. Every section has kept its own since P11, so leaving
     /// one and coming back lands where you were.
     pub draft_cursor: usize,
+    /// How many pulls this window has made, ever — the number each gets its own
+    /// subdirectory under.
+    ///
+    /// Never reset, and that is the whole design: its only job is that no two pulls collide
+    /// under one root, and a counter that only goes up gives that with no reset logic to get
+    /// wrong. A fresh root after Apply carrying on at `7` costs nothing and is not a bug.
+    draft_pulls: u32,
     /// `Some(path)` while a name is being edited in place. CORE §4 numbers the popups, and
     /// rename is not among them: it is the Name cell becoming a text field.
     pub rename_target: Option<String>,
@@ -491,6 +513,7 @@ impl Indium {
             staged_against: Vec::new(),
             draft: Draft::new(),
             draft_cursor: 0,
+            draft_pulls: 0,
             rename_target: None,
             rename_input: String::new(),
             new_name: String::new(),
@@ -797,13 +820,14 @@ impl Indium {
                         if written == 1 { "entry" } else { "entries" }
                     )
                     .into();
-                    // The password's job is over. Neither post-step below needs it: one
-                    // reads the scratch directory, the other reads `.desktop` files.
+                    // The password's job is over. No post-step below needs it: two read a
+                    // scratch directory, the third reads `.desktop` files.
                     self.passphrase = None;
                     match std::mem::replace(&mut self.post_extract, PostExtract::None) {
                         PostExtract::None => {}
                         PostExtract::Clipboard { on_disk } => self.finish_copy_out(on_disk),
                         PostExtract::OpenWith { entry } => self.finish_open_with(&entry),
+                        PostExtract::Draft { dir } => self.finish_draft_pull(&dir),
                     }
                 }
                 ExtractMsg::Cancelled { written } => {
@@ -958,6 +982,11 @@ impl Indium {
                         // it is emptied, and the reason *Discard* can leave it standing.
                         self.draft.clear();
                         self.draft_cursor = 0;
+                        // And with it the copies *Bring from archive* made, which have just
+                        // been written into the archive and are of no further use to anyone.
+                        // The one `discard` of this kind there is: everything else about a
+                        // draft's scratch is `ensure`, which removes nothing.
+                        self.scratch.discard(scratch::Kind::Draft);
                     }
                     let pass = self.passphrase.take();
                     if let Some(path) = path {
@@ -1828,12 +1857,13 @@ impl Indium {
             }
         }
         let s = |n: usize| if n == 1 { "" } else { "s" };
+        let note = restage_note(self.tasks.creation().is_some());
         self.status = match (added, replaced.len()) {
             (0, 0) => return,
-            (n, 0) => format!("Draft: {n} file{} added.", s(n)).into(),
-            (0, 1) => format!("Draft: {} replaced.", replaced[0]).into(),
-            (0, r) => format!("Draft: {r} files replaced.").into(),
-            (n, r) => format!("Draft: {n} file{} added, {r} replaced.", s(n)).into(),
+            (n, 0) => format!("Draft: {n} file{} added.{note}", s(n)).into(),
+            (0, 1) => format!("Draft: {} replaced.{note}", replaced[0]).into(),
+            (0, r) => format!("Draft: {r} files replaced.{note}").into(),
+            (n, r) => format!("Draft: {n} file{} added, {r} replaced.{note}", s(n)).into(),
         };
     }
 
@@ -2198,6 +2228,121 @@ impl Indium {
         );
     }
 
+    /// *Bring from archive* — extract the selected entries to scratch, and put what lands
+    /// into the draft.
+    ///
+    /// The one new capability of P22, and the answer to a question the draft otherwise could
+    /// not answer: **an entry inside an archive is not a file.** A draft holds files, so
+    /// something has to make one first, and this is the route `copy_out` already walks —
+    /// only what comes out is handed to the draft rather than to the clipboard.
+    ///
+    /// What it makes are **copies**, deliberately, and that is what makes F6's *"the draft
+    /// survives a Close"* true rather than a promise the engine could not keep: the files
+    /// exist on their own from the moment they land, and closing the archive they came from
+    /// does not touch them.
+    pub fn bring_from_archive(&mut self, ctx: &egui::Context) {
+        if let Some(refusal) = pull_refusal_for(!self.has_archive(), self.selection.is_empty()) {
+            self.status = Status::bad(refusal);
+            return;
+        }
+        // The selection, and nothing else — no cursor fallback the way `subject_paths` has
+        // one. The button lives on the Draft view, where the cursor is over draft rows and
+        // has nothing to say about the archive.
+        let wanted: std::collections::HashSet<String> = self.selection.iter().cloned().collect();
+
+        if self.passphrase.is_none() && self.any_encrypted(&wanted) {
+            self.pending = Some(PendingAction::Draft);
+            self.popup = Some(Popup::Password);
+            self.password_input.clear();
+            self.password_attempts = 0;
+            return;
+        }
+
+        let Some(archive) = self.archive_path.clone() else {
+            return;
+        };
+        // Asked before the scratch directory is touched, as `copy_out` does — though here
+        // `ensure` would not remove a running worker's directory, because it removes
+        // nothing. What it guards is the one worker CORE §3 allows.
+        if self.work_running() {
+            return;
+        }
+        let total = self.uncompressed_total(&wanted);
+
+        let root = match self.scratch.ensure(scratch::Kind::Draft, total) {
+            Ok(dir) => dir,
+            Err(e) => {
+                self.status = Status::bad(format!("Could not make a scratch directory: {e}"));
+                return;
+            }
+        };
+        self.draft_pulls += 1;
+        let dir = root.join(self.draft_pulls.to_string());
+        // Made here rather than left to the worker so that a root that cannot be written is
+        // a sentence now, in the same press, instead of an extraction error later.
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            self.status = Status::bad(format!("Could not make a scratch directory: {e}"));
+            return;
+        }
+
+        self.status = "Bringing files across…".to_string().into();
+        self.spawn_extract(
+            ctx,
+            archive,
+            wanted,
+            dir.clone(),
+            PostExtract::Draft { dir },
+        );
+    }
+
+    /// The other half of `bring_from_archive`, run when the worker reports.
+    ///
+    /// Each file's name in the draft is the path it had **inside the archive**, recovered by
+    /// stripping this pull's directory off the front. `add_to_draft` takes a disk file's
+    /// `file_name` for the same reason in reverse: a file on disk has an absolute path that
+    /// means nothing inside an archive, and an entry has one that means everything. Each
+    /// keeps the name it actually has. Pulling a *directory* needs no special case — the
+    /// extraction expanded it, and stripping the prefix recovers `docs/notes.txt` for a file
+    /// that was never named in the selection.
+    ///
+    /// **A cancelled or failed pull needs no cleanup.** Nothing was added to the draft, so
+    /// nothing dangles, and the orphaned subdirectory goes with the root — at the Drop guard
+    /// on a clean exit, at the launch sweep otherwise.
+    fn finish_draft_pull(&mut self, dir: &std::path::Path) {
+        let files = collect_files(dir);
+        if files.is_empty() {
+            self.status = Status::bad("Nothing came across.");
+            return;
+        }
+
+        let mut added = 0usize;
+        let mut replaced = 0usize;
+        for file in files {
+            let Ok(rel) = file.strip_prefix(dir) else {
+                continue;
+            };
+            let dest = rel.to_string_lossy().to_string();
+            if self.draft.add(file.clone(), dest).is_some() {
+                replaced += 1;
+            } else {
+                added += 1;
+            }
+        }
+
+        let s = |n: usize| if n == 1 { "" } else { "s" };
+        let note = restage_note(self.tasks.creation().is_some());
+        self.status = match (added, replaced) {
+            (0, 0) => Status::bad("Nothing came across."),
+            (n, 0) => format!("Draft: {n} file{} brought across.{note}", s(n)).into(),
+            (0, r) => format!("Draft: {r} file{} replaced.{note}", s(r)).into(),
+            (n, r) => format!(
+                "Draft: {n} file{} brought across, {r} replaced.{note}",
+                s(n)
+            )
+            .into(),
+        };
+    }
+
     /// The other half of `copy_out`, run when the worker reports.
     ///
     /// The directory comes back off `self.scratch` rather than being carried through the
@@ -2487,6 +2632,44 @@ fn clipboard_chords(events: &[egui::Event]) -> (bool, bool) {
 ///
 /// Free rather than a method, for [`estimate_refusal_for`]'s reason: `Indium` cannot be built
 /// in a unit test, and a sentence nobody can reach is a sentence nobody checks.
+/// What a change to the draft owes the person when a creation is already staged.
+///
+/// The projection is recomputed when *Create* is pressed and at no other time, which is what
+/// lets the draft be edited without the queue moving underneath it — but it means a file
+/// added after a Create is in the draft and *not* in the creation the tray is offering to
+/// build. Silently is the one way that must not happen: Apply would succeed, and the archive
+/// would simply not contain the file the person watched themselves add.
+///
+/// A sentence rather than an automatic restage, because CORE §4 says the projection is
+/// recomputed on a press and a queue that rebuilt itself under a staged recipe would make
+/// that false. Empty when nothing is staged, so it costs the ordinary case nothing.
+pub fn restage_note(creation_staged: bool) -> &'static str {
+    if creation_staged {
+        " Press N again to restage the creation."
+    } else {
+        ""
+    }
+}
+
+/// Why *Bring from archive* cannot run, or `None` if it can.
+///
+/// Free, and drawn beside the dead button rather than pushed to the status bar by a click,
+/// which is the discipline Measure has followed since P21b and Create since P22: a disabled
+/// button reports no click, so a sentence that waits for one is a sentence nobody reads.
+///
+/// The archive comes first because it is the larger absence — with nothing open there is
+/// nothing to select from, so *"select some entries"* would be advice about a window that
+/// is not there.
+pub fn pull_refusal_for(no_archive: bool, nothing_selected: bool) -> Option<&'static str> {
+    if no_archive {
+        return Some("Open an archive first — this brings entries across from one.");
+    }
+    if nothing_selected {
+        return Some("Select entries in the archive first, on the File view.");
+    }
+    None
+}
+
 /// How much closing an archive throws away — the whole of what leaving one costs.
 ///
 /// **A staged creation is not a change against the archive being closed, and does not go
@@ -2980,8 +3163,9 @@ impl Indium {
                 // a row here is a file that will go in, and the only thing to say about it
                 // is that it will not.
                 if del {
+                    let note = restage_note(self.tasks.creation().is_some());
                     if let Some(gone) = self.draft.remove(self.draft_cursor) {
-                        self.status = format!("Removed {} from the draft.", gone.dest).into();
+                        self.status = format!("Removed {} from the draft.{note}", gone.dest).into();
                     }
                 }
             }
@@ -3812,6 +3996,50 @@ mod tests {
         assert_eq!(
             archive_name(std::path::Path::new("/x/other.zip")),
             "other.zip"
+        );
+    }
+
+    /// *Bring from archive* is dead in two states, and says which — the archive before the
+    /// selection, because with nothing open *"select some entries"* is advice about a window
+    /// that is not there.
+    #[test]
+    fn the_pull_says_which_of_the_two_things_it_is_missing() {
+        assert_eq!(pull_refusal_for(false, false), None, "it must be live here");
+
+        let no_archive = pull_refusal_for(true, true).expect("nothing open must refuse");
+        assert!(
+            no_archive.contains("Open an archive"),
+            "{no_archive:?} does not name the larger absence"
+        );
+        assert_eq!(
+            pull_refusal_for(true, false),
+            Some(no_archive),
+            "a selection cannot outrank the archive it would be a selection in"
+        );
+
+        let nothing_picked = pull_refusal_for(false, true).expect("no selection must refuse");
+        assert!(
+            nothing_picked.contains("Select entries"),
+            "{nothing_picked:?} does not say what to do"
+        );
+    }
+
+    /// A file added to the draft after *Create* is in the draft and not in the creation the
+    /// tray is offering to build, because the projection is recomputed on a press and at no
+    /// other time. Apply would succeed and the archive would simply not hold it — the one
+    /// loss in this round that no sentence would otherwise report.
+    #[test]
+    fn changing_the_draft_under_a_staged_creation_says_so() {
+        assert_eq!(restage_note(false), "", "the ordinary case pays nothing");
+
+        let staged = restage_note(true);
+        assert!(
+            staged.starts_with(' '),
+            "the note is appended to a finished sentence and must carry its own space"
+        );
+        assert!(
+            staged.contains('N'),
+            "{staged:?} does not say which key restages it"
         );
     }
 

@@ -60,6 +60,14 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     Some(PendingAction::CopyOut) => {
                         "This selection is encrypted. A password is needed to copy it out."
                     }
+                    // Its own arm because the `_` below would otherwise have taken it and
+                    // said "extract", which is what a person pressing *Bring from archive*
+                    // has not asked for. The compiler catches the dispatch at the foot of
+                    // this file and cannot catch this: a catch-all is never a missing arm.
+                    Some(PendingAction::Draft) => {
+                        "This selection is encrypted. A password is needed to bring it into \
+                     the draft."
+                    }
                     Some(PendingAction::Apply) => {
                         "Choose the password for this archive. INDIUM never stores it, so \
                      there is no way to recover it if you forget it."
@@ -218,6 +226,14 @@ fn attempt(app: &mut Indium, ctx: &egui::Context) {
             app.passphrase = Some(secret);
             let rows = app.rows();
             app.copy_out(ctx, &rows);
+            app.passphrase = None;
+        }
+        Some(PendingAction::Draft) => {
+            // Carries nothing, and needs to carry nothing: the selection it acts on is
+            // still on the window, because a password prompt does not change what is
+            // selected. So the resume is the first press, repeated with the secret in hand.
+            app.passphrase = Some(secret);
+            app.bring_from_archive(ctx);
             app.passphrase = None;
         }
         Some(PendingAction::OpenWith { entry }) => {

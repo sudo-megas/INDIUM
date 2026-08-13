@@ -2241,6 +2241,50 @@ mod tests {
         assert_eq!(queue.len(), 2, "a displaced task is still in the queue");
     }
 
+    /// What *Bring from archive* pulls are **copies**, and this is the sentence that turns on.
+    ///
+    /// CORE §4 promises "the archive they came from can be closed without touching them", and
+    /// F6 rules that the draft survives a Close untouched. Both are only true because a pull
+    /// makes files: an entry inside an archive is not one, so a draft that held references
+    /// into the archive would be a list of promises the engine could not keep the moment the
+    /// archive was closed, renamed or rebuilt.
+    ///
+    /// Written against the real filesystem because that is the whole claim. The archive is
+    /// deleted outright here — a harsher test than closing it — and what the draft projects
+    /// is still readable afterwards.
+    #[test]
+    fn a_draft_survives_the_archive_it_was_drawn_from() {
+        let dir =
+            std::env::temp_dir().join(format!("indium-draft-survives-{}", std::process::id()));
+        let pull = dir.join("1").join("docs");
+        std::fs::create_dir_all(&pull).unwrap();
+
+        let archive = dir.join("photos.zip");
+        std::fs::write(&archive, b"not really an archive").unwrap();
+        let pulled = pull.join("notes.txt");
+        std::fs::write(&pulled, b"brought across").unwrap();
+
+        // The dest a pull derives: the path the entry had *inside* the archive.
+        let mut draft = Draft::new();
+        draft.add(pulled.clone(), "docs/notes.txt".to_string());
+
+        std::fs::remove_file(&archive).unwrap();
+
+        let mut queue = Queue::new();
+        draft.project_onto(&mut queue, a_recipe(Method::Zstd));
+        let Task::Add { source, dest } = &queue.tasks()[1] else {
+            panic!("the draft did not project an Add");
+        };
+        assert_eq!(dest, "docs/notes.txt", "a pull flattened the entry's path");
+        assert_eq!(
+            std::fs::read(source).unwrap(),
+            b"brought across",
+            "the draft's file went with the archive it came from"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Projecting does not consume the draft, and that is what makes *Discard* safe: it
     /// clears the queue, and the basket a person built is still there to build from.
     #[test]

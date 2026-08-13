@@ -159,7 +159,10 @@ files from that moment and the archive they came from can be closed without touc
 Nothing in the draft is a mutation of anything and nothing in it is written; it becomes tasks
 when *Create* is pressed, and not before. A *staged* creation survives a close for the same
 reason the draft does — it names an archive the closed file was never the subject of — so what
-closing discards is changes against the file being closed, and it says how many went.
+closing discards is changes against the file being closed, and it says how many went. Changing
+the draft while a creation is staged says so and names the key that restages it: the projection
+is made on the press and not after it, and a file added afterwards would otherwise be missing
+from an archive that built without complaint.
 
 **Inspector** (right, permanent): two tabs, *Details* and *Preview*, toggled with `Space`.
 Details shows everything the reader can know about the selection; multi-select shows
