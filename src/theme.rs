@@ -196,7 +196,7 @@ pub const R_ZONE: u8 = 0;
 /// Hand-rolled rows, text fields, checkboxes, and any button not built through [`button`] —
 /// the two raw `ui.button()` calls in the tray still land here. Buttons and chips made the
 /// theme's way take [`R_PILL`] instead. The status bar's progress track used this until P13
-/// moved the proportion to a square-ended 2px line on the panel's edge.
+/// moved the proportion to a square-ended line on the panel's edge, which PXX thickened.
 pub const R_CTRL: u8 = 3;
 /// Popups, menus, the modal.
 pub const R_POPUP: u8 = 10;

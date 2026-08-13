@@ -945,6 +945,110 @@ pub trait Sink {
     fn abandon(&mut self);
 }
 
+/// A [`Read`](std::io::Read) that counts what passes through it, says so, and can refuse
+/// to go on.
+///
+/// PXX, and it closes both halves of one defect. Progress and cancel were **both
+/// per-member**: the only `tx.send` and the only `cancel.load` in the build loop sit
+/// *between* members, which is exactly right for an archive of nine files and useless for
+/// one of one. The certification walk built a single encrypted 7z and got a bar that never
+/// moved off zero and a Cancel that did nothing for ten minutes. Neither run was stuck —
+/// systemd's own accounting puts one at 68% of a core sustained over 10m13s and the other
+/// at 106% over 2m25s — they were computing in silence until the maker gave up on them.
+/// The button was drawn and the flag was set; nothing read the flag until the member
+/// finished, and the member was the whole job.
+///
+/// Wrapping the reader is what puts a report and a check *inside* the member without
+/// either writer having to know: both pump a member through a `Read` in a loop —
+/// libarchive's own at 64 KiB, `sevenz-rust2`'s at 4 KiB — so the wrapper is called
+/// hundreds of thousands of times over a large one, and every call is an opportunity for
+/// both.
+struct Metered<'a> {
+    inner: &'a mut dyn std::io::Read,
+    tx: &'a Sender<ApplyMsg>,
+    cancel: &'a Arc<AtomicBool>,
+    /// Bytes through, and the count the last message carried.
+    done: u64,
+    sent: u64,
+    total: u64,
+    /// How far `done` must move past `sent` before it is worth saying again.
+    step: u64,
+}
+
+impl<'a> Metered<'a> {
+    fn new(
+        inner: &'a mut dyn std::io::Read,
+        total: u64,
+        tx: &'a Sender<ApplyMsg>,
+        cancel: &'a Arc<AtomicBool>,
+    ) -> Metered<'a> {
+        Metered {
+            inner,
+            tx,
+            cancel,
+            done: 0,
+            sent: 0,
+            total,
+            // A percentage point of the member, floored at a mebibyte. The floor is what
+            // keeps a directory of small files quiet — under a MiB nothing is sent at all,
+            // and the per-member `Progress` already covers those — and the percentage is
+            // what stops a 4 GiB member sending a million messages down a channel the UI
+            // drains once a frame. A hundred either way.
+            step: (total / 100).max(1 << 20),
+        }
+    }
+}
+
+impl std::io::Read for Metered<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        // Before the read rather than after, so a cancel arriving while the last chunk of
+        // a member is in flight stops the *next* member from starting rather than being
+        // noticed a whole member later.
+        if self.cancel.load(Ordering::Relaxed) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "cancelled",
+            ));
+        }
+        let n = self.inner.read(buf)?;
+        self.done += n as u64;
+        if self.done - self.sent >= self.step {
+            self.sent = self.done;
+            let _ = self.tx.send(ApplyMsg::Within {
+                done: self.done,
+                total: self.total,
+            });
+        }
+        Ok(n)
+    }
+}
+
+/// [`Sink::put`], with a cancel told apart from a failure.
+///
+/// `Ok(false)` means the flag was set. A [`Metered`] refusing to read surfaces here as an
+/// ordinary write error — the writers cannot tell a cancelled read from a disk going away
+/// and should not have to, and neither can be identified by its message without matching
+/// on error strings, which is worse than asking. So the flag is consulted before the error
+/// is believed, and it is the flag rather than the error that decides. Getting this wrong
+/// would report a cancel as *"could not write …"* in yellow, which is a failure the user
+/// did not have.
+fn put_member(
+    sink: &mut dyn Sink,
+    meta: &Meta,
+    data: Option<&mut dyn std::io::Read>,
+    cancel: &Arc<AtomicBool>,
+) -> Result<bool, String> {
+    match sink.put(meta, data) {
+        Ok(()) => Ok(true),
+        Err(e) if cancel.load(Ordering::Relaxed) => {
+            let _ = e;
+            sink.abandon();
+            Ok(false)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Verification — P4 §2 step 6
 // ---------------------------------------------------------------------------
@@ -1189,6 +1293,16 @@ pub enum ApplyMsg {
         phase: Phase,
         done: usize,
         total: usize,
+    },
+    /// How far into the member currently being written the worker has read.
+    ///
+    /// A separate variant rather than two more fields on `Progress`, because `done` and
+    /// `total` there are **members** — the status bar prints them as "3/9" and that must
+    /// stay true — while one member can be the whole archive. The window folds this into
+    /// the bar's fraction and never into the count.
+    Within {
+        done: u64,
+        total: u64,
     },
     Done {
         entries: usize,
@@ -1486,8 +1600,15 @@ fn build_and_verify(
                     Some(Disposition::Keep { out_path, hardlink }) => {
                         let meta = Meta::from_entry(&entry, out_path, hardlink.as_deref());
                         if meta.has_data() {
+                            // Metered here as well as over the adds below, and for the
+                            // same reason: rebuilding a 3 GB archive to rename one member
+                            // copies every byte of it, and that is the same ten minutes of
+                            // silence whether the bytes are new or kept.
                             let mut data = crate::arch::EntryData::new(&mut reader);
-                            sink.put(&meta, Some(&mut data))?;
+                            let mut metered = Metered::new(&mut data, meta.size, tx, cancel);
+                            if !put_member(sink.as_mut(), &meta, Some(&mut metered), cancel)? {
+                                return Ok(None);
+                            }
                         } else {
                             reader.skip_data();
                             sink.put(&meta, None)?;
@@ -1515,7 +1636,10 @@ fn build_and_verify(
             if meta.has_data() {
                 let mut file = std::fs::File::open(&item.source)
                     .map_err(|e| format!("could not read {}: {e}", item.source.display()))?;
-                sink.put(&meta, Some(&mut file))?;
+                let mut metered = Metered::new(&mut file, meta.size, tx, cancel);
+                if !put_member(sink.as_mut(), &meta, Some(&mut metered), cancel)? {
+                    return Ok(None);
+                }
             } else {
                 sink.put(&meta, None)?;
             }
@@ -1562,6 +1686,24 @@ fn build_and_verify(
         done: total,
         total,
     });
+
+    // PXX. The flag is consulted once more, and this is not belt-and-braces: the check
+    // above is the *last* one before the verify pass, and that pass is the longest
+    // uninterruptible stretch in the whole of Apply — `list_all` is a full decompress of
+    // what was just written, which on a 3 GB rebuild is minutes. Without this a Cancel
+    // pressed at any point during Verifying was not merely ignored; `Ok(Some)` returned,
+    // the caller renamed, and the replacement committed. The window promises "Nothing was
+    // written" on the Cancelled arm, so committing there is the one outcome worse than
+    // doing nothing — it is the opposite of what was asked for.
+    //
+    // Honoured at the boundary rather than inside `list_all`: threading a flag through it
+    // would touch the listing, the CLI and the package tests to shorten a wait, where this
+    // keeps the promise exactly. The cost is that the press is acted on when the pass ends
+    // rather than at once, and the built temp is thrown away after being proven good —
+    // which is the correct trade, because the alternative spends the user's archive.
+    if cancel.load(Ordering::Relaxed) {
+        return Ok(None);
+    }
 
     Ok(Some(written))
 }
@@ -2165,6 +2307,143 @@ mod tests {
             "beside the target, not in a scratch directory"
         );
         assert!(is_our_temp(".photos.tar.gz.indium-new"));
+    }
+
+    /// PXX finding 4. `Indium::on_exit` removes the in-flight temp on a deliberate close
+    /// **without joining the worker**, because joining would hold the window on screen
+    /// after the user asked it to go. That rests on one POSIX guarantee, and a guarantee
+    /// asserted only in a comment is folklore — so it is checked here instead.
+    ///
+    /// The 159 MB the certification walk found was left by exactly this: an `exit(0)` one
+    /// second after the temp last grew, with nothing on the way out that would take it back.
+    #[test]
+    fn removing_a_temp_a_worker_still_holds_open_takes_only_the_name() {
+        use std::io::Write;
+
+        let dir = std::env::temp_dir().join("indium-pxx-orphan");
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let temp = temp_path_for(&dir.join("archive.7z"));
+
+        let mut worker = std::fs::File::create(&temp).expect("the worker opens its temp");
+        worker
+            .write_all(b"half an archive")
+            .expect("and starts writing");
+
+        // The same two guards `on_exit` applies, in the same order.
+        let name = temp.file_name().and_then(|n| n.to_str()).expect("a name");
+        assert!(is_our_temp(name), "{name} must be provably ours to remove");
+        std::fs::remove_file(&temp).expect("removed while the worker still holds it");
+
+        assert!(!temp.exists(), "the name goes the instant it is unlinked");
+        // And the worker never finds out — it is between reads, not being killed. If this
+        // ever fails, `on_exit` is racing a live write instead of quietly outliving it.
+        worker
+            .write_all(b", which nobody will ever read")
+            .expect("the writer's own handle keeps working");
+        worker.sync_all().expect("and still syncs");
+        drop(worker);
+        assert!(
+            !temp.exists(),
+            "and nothing reappears when the handle closes"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Collect what a [`Metered`] said, in order.
+    fn within_sent(rx: &std::sync::mpsc::Receiver<ApplyMsg>) -> Vec<u64> {
+        rx.try_iter()
+            .filter_map(|m| match m {
+                ApplyMsg::Within { done, .. } => Some(done),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The half of 12.8 that made Cancel look dead.
+    ///
+    /// The flag was set the moment the button was pressed; nothing read it until the member
+    /// finished, and the walk's member was the whole job. This pins the new latency at one
+    /// chunk — 4 KiB under `sevenz-rust2`, 64 KiB under libarchive — rather than one member.
+    #[test]
+    fn a_cancelled_metered_read_stops_at_the_very_next_chunk() {
+        use std::io::Read;
+
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let data = vec![7u8; 64 * 1024];
+        let mut src = &data[..];
+        let mut m = Metered::new(&mut src, data.len() as u64, &tx, &cancel);
+
+        let mut buf = [0u8; 4096];
+        assert_eq!(m.read(&mut buf).expect("reads before the cancel"), 4096);
+
+        cancel.store(true, Ordering::Relaxed);
+        let e = m
+            .read(&mut buf)
+            .expect_err("a cancelled read must not succeed");
+        assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::Interrupted,
+            "and it must be an error the writer will propagate rather than a short read, \
+             which every writer treats as end-of-member and would commit"
+        );
+    }
+
+    /// The other half: it reports, and it does not flood.
+    ///
+    /// 400 MiB read at the 4 KiB `sevenz-rust2` uses is 102,400 calls to `read`. A message
+    /// per call would put a hundred thousand of them down a channel the window drains once
+    /// a frame; a message per member is what the walk got, which was none. The step lands it
+    /// at a hundred, which is one per percentage point and one more than the bar can show.
+    #[test]
+    fn a_large_metered_member_reports_a_hundred_times_and_not_a_hundred_thousand() {
+        use std::io::Read;
+
+        const TOTAL: u64 = 400 << 20;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut src = std::io::repeat(0u8).take(TOTAL);
+        let mut m = Metered::new(&mut src, TOTAL, &tx, &cancel);
+
+        let mut buf = [0u8; 4096];
+        while m.read(&mut buf).expect("a repeat reader does not fail") > 0 {}
+
+        let sent = within_sent(&rx);
+        assert_eq!(sent.len(), 100, "one per percentage point of the member");
+        assert!(
+            sent.windows(2).all(|w| w[0] < w[1]),
+            "a bar that goes backwards is worse than one that does not move: {sent:?}"
+        );
+        assert_eq!(
+            *sent.last().expect("a hundred of them"),
+            TOTAL,
+            "and the last one lands on the whole member, so the bar reaches the end of it"
+        );
+    }
+
+    /// And a small member says nothing at all, which is the right amount.
+    ///
+    /// The per-member `Progress` already covers an archive of small files exactly. The floor
+    /// under the step is what stops the wrapper turning a folder of ten thousand thumbnails
+    /// into ten thousand redundant messages.
+    #[test]
+    fn a_small_metered_member_says_nothing_the_member_count_has_not_already_said() {
+        use std::io::Read;
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let data = vec![0u8; 900 * 1024];
+        let mut src = &data[..];
+        let mut m = Metered::new(&mut src, data.len() as u64, &tx, &cancel);
+
+        let mut buf = [0u8; 4096];
+        while m.read(&mut buf).expect("reads to the end") > 0 {}
+
+        assert!(
+            within_sent(&rx).is_empty(),
+            "under the floor the member count is the whole report"
+        );
     }
 
     // `restaging_a_creation_keeps_the_files_already_added` and its companion stood here

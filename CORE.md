@@ -189,9 +189,14 @@ that folder to the desktop's file manager. *The numbers and the voice* — entry
 real → packed with ratio, the selection count, and whatever INDIUM is currently saying, drawn
 whether or not something is running. *Progress* — the phase, the count and its cancel during
 long work; a hairline when nothing is running, because an empty row must still say something.
-**The proportion done is drawn as a 2px line along the bar's own top edge**, not as a track
-inside the row: it is the one measurement in the window that wants the whole width, and the
-edge is already there. The line carries no text of its own — `#EEEEEC` on Ubuntu Orange
+**The proportion done is drawn as a 6px bar along the bar's own top edge, growing upward out
+of it**, not as a track inside the row: it is the one measurement in the window that wants the
+whole width, and the edge is already there. It was 2px, borrowing the edge weight §6 already
+owned, until the first certification walk asked for it three times thicker — a measurement
+nobody notices is a measurement nobody reads, and the same walk denied a long job for saying
+nothing at all. **Upward** is what makes the extra weight free: it is spent on the panel's own
+edge and on the gutter above it, so nothing in the three rows moves and the floor still cannot
+rise the instant work starts. The bar carries no text of its own — `#EEEEEC` on Ubuntu Orange
 measures 2.4:1 — so the phase and the count are read beside it and never on it.
 
 Three rows of fixed height is not the same as three rows anyone can read, and the first testing
@@ -353,7 +358,7 @@ contrast where a surface has to be told apart from the surface it covers, not de
 | Accent | Ubuntu Orange `#E95420` — reserved for exactly three meanings: the current selection, staged changes, and Apply/progress. Orange means *something will happen.* |
 | Text | `#EEEEEC` primary · `#BDBDBB` secondary · `#999997` muted |
 | Warning | `#FFD800` — and only where something has gone wrong: a wrong password, two passwords that differ, a settings file that would not parse. It is not an accent and never decorates. |
-| Lines | Two weights and no third. **Inside** a zone, a 1px rule — beneath a heading, above a footer, between the archive and the lists. **Around** a zone, a popup or a control, a 2px edge at 22% white, rising to 40% white under the pointer or while a control is held. Nothing thicker than 2px, anywhere. A rule is 1px so that it does not compete with an edge, **not so that it cannot be seen**: at 8% white it measured 1.2:1 on a raised zone, which is to say it measured nothing, and two separate testing notes said so. A rule clears **1.6:1 against the ground it is drawn on**, and that floor is a test, not an intention. |
+| Lines | Two weights and no third. **Inside** a zone, a 1px rule — beneath a heading, above a footer, between the archive and the lists. **Around** a zone, a popup or a control, a 2px edge at 22% white, rising to 40% white under the pointer or while a control is held. No rule and no edge is thicker than 2px, anywhere. The one thing in the window that is, is not a line at all: §4's proportion-done bar is a **measurement**, and it is 6px because it has to be read across the whole width from across the room — it borrowed the edge weight until a certification round said so. A rule is 1px so that it does not compete with an edge, **not so that it cannot be seen**: at 8% white it measured 1.2:1 on a raised zone, which is to say it measured nothing, and two separate testing notes said so. A rule clears **1.6:1 against the ground it is drawn on**, and that floor is a test, not an intention. |
 | Cursor | The keyboard's position in a list is **a line, not a colour** — the 2px edge above, at its 40% weight, drawn around the row. Orange already means the selection, and the cursor row is almost always also the selected row, so a cursor painted in Orange is Orange on Orange: it measured 2.06:1 and a testing round reported it as simply absent. A line and a wash can be read at the same time; two washes cannot. The cursor is also **kept on screen** — a row scrolled out of view is a cursor nobody can see, by a different route. |
 
 **Controls are capsules.** A button, a chip, *Cancel* — anything you press — is drawn as a

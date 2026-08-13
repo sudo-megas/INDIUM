@@ -146,12 +146,93 @@ fn write_payload(path: &Path, recipe: &Recipe) {
     writer.finish().expect("could not finish the archive");
 }
 
+/// PXX. An archive with one member large enough that verifying it takes real time, and a
+/// small one beside it for Apply to remove.
+///
+/// Zeros, deliberately, and that is the whole trick: gzip stores 64 MiB of them in a few
+/// kilobytes, so the fixture costs almost nothing on disk and builds in a moment — while
+/// `list_all` must still inflate every one of those bytes to walk to the end, because a
+/// gzip stream cannot be seeked past. A cheap fixture with an expensive verify is exactly
+/// what a test aiming at the verify window needs.
+fn write_big_and_small(path: &Path, recipe: &Recipe, bytes: usize) {
+    fn meta(out_path: &str, size: u64) -> Meta {
+        Meta {
+            out_path: out_path.to_string(),
+            size,
+            is_dir: false,
+            mode: 0o644,
+            mtime: Some(1_704_164_645),
+            atime: None,
+            ctime: None,
+            uid: 0,
+            gid: 0,
+            uname: Some("root".to_string()),
+            gname: Some("root".to_string()),
+            symlink: None,
+            hardlink: None,
+        }
+    }
+
+    let mut writer = arch::Writer::create(path, recipe).expect("could not open the writer");
+    let mut zeros = Cursor::new(vec![0u8; bytes]);
+    writer
+        .put(&meta("big.bin", bytes as u64), Some(&mut zeros))
+        .expect("could not write the big member");
+    let mut small = Cursor::new(ALPHA.to_vec());
+    writer
+        .put(&meta("small.txt", ALPHA.len() as u64), Some(&mut small))
+        .expect("could not write the small member");
+    writer.finish().expect("could not finish the archive");
+}
+
 fn recipe(path: &Path, method: Method) -> Recipe {
     Recipe {
         path: path.to_path_buf(),
         method,
         level: method.default_level(),
         encrypt: false,
+    }
+}
+
+/// PXX 9.5: naming a folder that is not there must say so, in a sentence.
+///
+/// The walk chose `~/indium-test/large/` as the destination, which did not exist, and got
+/// back:
+///
+/// ```text
+/// could not open the 7z for writing: Io(Os { code: 2, kind: NotFound,
+///   message: "No such file or directory" }, "…/large/.archivesadfad.7z.indium-new")
+/// ```
+///
+/// Three faults in one line. It printed a Rust struct at a person. It named
+/// `.indium-new` — an internal temp file nobody asked for and nobody can act on. And it
+/// never mentioned the one thing that would have fixed it: the folder is missing.
+#[test]
+fn a_missing_destination_folder_is_named_plainly() {
+    let dir = TempDir::new("nodir");
+    let missing = dir.join("not-there");
+    let target = missing.join("archive.7z");
+
+    // 7z is a *container*, chosen by the extension; `Lzma2` is the coder inside it, which
+    // is what `recipe.container()` reads back as `Container::SevenZ`.
+    let recipe = recipe(&target, Method::Lzma2);
+
+    // `Writer` carries a live archive handle and deliberately implements no `Debug`, so
+    // this cannot be an `expect_err`.
+    let err = match indium::sevenz::Writer::create(&target, &recipe, None) {
+        Err(e) => e,
+        Ok(_) => panic!("writing into a folder that does not exist must fail"),
+    };
+
+    assert!(
+        err.contains(&missing.display().to_string()),
+        "the message must name the missing folder: {err:?}"
+    );
+    for leak in ["Io(", "Os {", "code: 2", ".indium-new"] {
+        assert!(
+            !err.contains(leak),
+            "the message still leaks {leak:?}: {err:?}"
+        );
     }
 }
 
@@ -703,6 +784,103 @@ fn a_cancelled_apply_leaves_the_original_untouched_and_says_so() {
     assert!(
         !tasks::temp_path_for(&path).exists(),
         "a cancelled Apply must remove its temp file"
+    );
+}
+
+/// PXX. Its sibling above cancels before the first member is written. This one cancels
+/// while Apply is **verifying**, which until this round committed the replacement anyway.
+///
+/// `build_and_verify` consulted the flag for the last time *before* the verify pass, and
+/// that pass is a full decompress of what was just written — on a GB-scale rebuild,
+/// minutes, and precisely the stretch during which someone who has changed their mind
+/// reaches for the button. It returned `Ok(Some)` regardless and `apply` renamed, so the
+/// archive was replaced while the window's Cancelled arm said "Nothing was written".
+/// Ignoring a Cancel is a defect; doing the opposite of one is a worse defect.
+///
+/// The synchronisation is stated rather than hidden. `Phase::Verifying`'s first message
+/// is sent *after* the pre-verify check and *before* the decompress, so a thread already
+/// blocked on the channel is woken inside the window by construction — not by luck. What
+/// remains is whether the flag is set before that decompress ends, and the margin is four
+/// orders of magnitude: a thread wakeup in microseconds against the hundreds of
+/// milliseconds it takes to inflate 64 MiB. That margin is why the fixture is large
+/// rather than convenient, and it is the only reason this test is not flaky.
+#[test]
+fn a_cancel_arriving_during_verification_does_not_replace_the_archive() {
+    let dir = TempDir::new("cancel-verify");
+    let path = dir.join("out.tar.gz");
+    write_big_and_small(&path, &recipe(&path, Method::Gzip), 64 << 20);
+
+    let original = fs::read(&path).expect("could not snapshot the original");
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = channel();
+
+    // Something to do, so the rebuild is real: with an empty task list Apply still
+    // rebuilds, but a removal makes the "did it commit?" question visible in the listing
+    // as well as in the bytes.
+    let input = input_for(
+        &path,
+        vec![Task::Remove {
+            path: "small.txt".to_string(),
+        }],
+    );
+
+    let (result, mut seen) = std::thread::scope(|scope| {
+        let handle = scope.spawn(|| tasks::apply(&input, &tx, &cancel));
+
+        let mut seen = Vec::new();
+        for msg in &rx {
+            let verifying = matches!(
+                msg,
+                ApplyMsg::Progress {
+                    phase: tasks::Phase::Verifying,
+                    ..
+                }
+            );
+            seen.push(msg);
+            if verifying {
+                break;
+            }
+        }
+        cancel.store(true, Ordering::Relaxed);
+
+        (
+            handle.join().expect("the apply thread must not panic"),
+            seen,
+        )
+    });
+    drop(tx);
+    seen.extend(rx);
+
+    assert_eq!(
+        result.expect("a cancelled Apply is not an error"),
+        0,
+        "a cancelled Apply reports nothing written"
+    );
+    assert!(
+        seen.iter().any(|m| matches!(m, ApplyMsg::Cancelled)),
+        "the cancel must be reported as a cancel"
+    );
+    assert!(
+        !seen.iter().any(|m| matches!(m, ApplyMsg::Done { .. })),
+        "a cancelled Apply must never also report Done — the window would show the \
+         replacement as finished"
+    );
+    assert_eq!(
+        fs::read(&path).expect("the original must still be readable"),
+        original,
+        "the original archive must be byte-identical: the Cancelled arm promises \
+         'Nothing was written'"
+    );
+    assert!(
+        arch::list_all(&path, None)
+            .expect("the original must still list")
+            .iter()
+            .any(|e| e.path == "small.txt"),
+        "the entry the cancelled Apply would have removed must still be in the archive"
+    );
+    assert!(
+        !tasks::temp_path_for(&path).exists(),
+        "a cancelled Apply must remove its temp file, however late the cancel arrived"
     );
 }
 

@@ -267,6 +267,15 @@ pub struct Progress {
     pub done: usize,
     pub total: usize,
     pub label: String,
+    /// How far into the member being written, as a fraction of that one member.
+    ///
+    /// PXX. `done` and `total` are **members**, because row 3 prints them as a count and a
+    /// count that said "0/1" while claiming 40% would be a worse lie than the one this
+    /// fixes. So the within-member part is carried separately and spent only on the bar,
+    /// which is a proportion and can hold it honestly. Zero for everything that reports
+    /// per-member only — the listing, the extraction, the estimator — and that is the right
+    /// answer for them rather than a missing one.
+    pub within: f32,
 }
 
 /// Everything the window is.
@@ -364,6 +373,18 @@ pub struct Indium {
     pub new_advanced: bool,
     pub new_encrypt: bool,
     apply_rx: Option<Receiver<ApplyMsg>>,
+    /// What the Apply that is out right now is building, so that [`Indium::on_exit`] can
+    /// find the temp beside it. `Some` exactly while `apply_rx` is.
+    ///
+    /// PXX's finding 4. `tasks::apply` cleans up after itself on every path it can reach —
+    /// failure, cancellation, success — and `temp_path_for`'s determinism covers the crash:
+    /// one leftover per archive, cleared by the next Apply. What neither covers is the
+    /// window being closed while a write is in flight. The process then takes its **own**
+    /// exit path, at a moment when the worker is between reads and will never run another
+    /// line, and 159 MB is left on the user's disk under a dotted name they never chose.
+    /// A killed process cannot clean up after itself; one that exits deliberately can, and
+    /// until now did not.
+    apply_target: Option<PathBuf>,
     /// Paths read off the clipboard by a worker. Reading blocks until the program that
     /// owns the selection finishes writing, so it never happens on the UI thread.
     paste_rx: Option<Receiver<Result<Vec<PathBuf>, String>>>,
@@ -524,6 +545,7 @@ impl Indium {
             new_advanced: false,
             new_encrypt: false,
             apply_rx: None,
+            apply_target: None,
             paste_rx: None,
             picker_rx: None,
             reveal_rx: None,
@@ -807,6 +829,7 @@ impl Indium {
                     self.progress = Some(Progress {
                         done,
                         total,
+                        within: 0.0,
                         label: "Extracting".to_string(),
                     });
                 }
@@ -949,15 +972,35 @@ impl Indium {
         for msg in apply_msgs {
             match msg {
                 ApplyMsg::Progress { phase, done, total } => {
+                    // A new member has started, so whatever fraction of the last one was
+                    // on the bar is spent. Resetting here rather than in the `Within` arm
+                    // is what keeps the two in step without either knowing about the
+                    // other: `Progress` is the only thing that moves `done`, and `within`
+                    // measures the member after it.
                     self.progress = Some(Progress {
                         done,
                         total,
+                        within: 0.0,
                         label: phase.label().to_string(),
                     });
+                }
+                ApplyMsg::Within { done, total } => {
+                    if let Some(p) = self.progress.as_mut() {
+                        // Guarded both ways. A zero-length member never gets here — it has
+                        // no data to read — but a `total` of zero would divide by it if one
+                        // ever did, and a reader handing back more than the size the
+                        // metadata promised must not push the bar into the member after it.
+                        p.within = if total == 0 {
+                            0.0
+                        } else {
+                            (done as f32 / total as f32).clamp(0.0, 1.0)
+                        };
+                    }
                 }
                 ApplyMsg::Done { entries } => {
                     self.progress = None;
                     self.apply_rx = None;
+                    self.apply_target = None;
                     self.status = format!(
                         "Applied. The archive now holds {entries} entr{}.",
                         if entries == 1 { "y" } else { "ies" }
@@ -996,6 +1039,7 @@ impl Indium {
                 ApplyMsg::Cancelled => {
                     self.progress = None;
                     self.apply_rx = None;
+                    self.apply_target = None;
                     self.passphrase = None;
                     // The queue survives a cancel: nothing was written, so the changes
                     // the user staged are still exactly what they asked for.
@@ -1005,6 +1049,7 @@ impl Indium {
                 ApplyMsg::Failed(msg) => {
                     self.progress = None;
                     self.apply_rx = None;
+                    self.apply_target = None;
                     self.passphrase = None;
                     self.status = Status::bad(msg);
                 }
@@ -1803,6 +1848,7 @@ impl Indium {
         self.progress = Some(Progress {
             done: 0,
             total: self.tasks.len(),
+            within: 0.0,
             label: tasks::Phase::Building.label().to_string(),
         });
 
@@ -1820,6 +1866,10 @@ impl Indium {
                 None
             },
         };
+
+        // Recorded before the worker exists, from the same value the worker will build
+        // into, so `on_exit` cannot be told a target this Apply never had.
+        self.apply_target = Some(input.target.clone());
 
         let cancel = Arc::clone(&self.cancel);
         let ctx = ctx.clone();
@@ -1844,6 +1894,8 @@ impl Indium {
         if paths.is_empty() {
             return;
         }
+        let (paths, folders) = split_out_folders(paths);
+        let left_out = folders_note(folders);
         let mut added = 0usize;
         let mut replaced: Vec<String> = Vec::new();
         for path in paths {
@@ -1859,11 +1911,18 @@ impl Indium {
         let s = |n: usize| if n == 1 { "" } else { "s" };
         let note = restage_note(self.tasks.creation().is_some());
         self.status = match (added, replaced.len()) {
-            (0, 0) => return,
-            (n, 0) => format!("Draft: {n} file{} added.{note}", s(n)).into(),
-            (0, 1) => format!("Draft: {} replaced.{note}", replaced[0]).into(),
-            (0, r) => format!("Draft: {r} files replaced.{note}").into(),
-            (n, r) => format!("Draft: {n} file{} added, {r} replaced.{note}", s(n)).into(),
+            // Nothing landed. Silent when nothing was offered either — but when folders were,
+            // that is exactly the case 6.2 was denied for, and it is the one that must speak.
+            (0, 0) if folders == 0 => return,
+            (0, 0) => format!("Draft: nothing added.{left_out}").into(),
+            (n, 0) => format!("Draft: {n} file{} added.{left_out}{note}", s(n)).into(),
+            (0, 1) => format!("Draft: {} replaced.{left_out}{note}", replaced[0]).into(),
+            (0, r) => format!("Draft: {r} files replaced.{left_out}{note}").into(),
+            (n, r) => format!(
+                "Draft: {n} file{} added, {r} replaced.{left_out}{note}",
+                s(n)
+            )
+            .into(),
         };
     }
 
@@ -1872,6 +1931,8 @@ impl Indium {
         if paths.is_empty() {
             return;
         }
+        let (paths, folders) = split_out_folders(paths);
+        let mut staged = 0usize;
         for path in paths {
             let Some(name) = path.file_name().map(|n| n.to_string_lossy().to_string()) else {
                 continue;
@@ -1882,6 +1943,21 @@ impl Indium {
                 format!("{}/{}", self.cwd, name)
             };
             self.stage(Task::Add { source: path, dest });
+            staged += 1;
+        }
+        // `stage` has already said what it staged, one task at a time; this only speaks when
+        // there is something it could not know about. Overwriting rather than appending is
+        // deliberate — the last task's summary is the least interesting of the batch, and
+        // what the walker needs to read is why the folder they named is not in the list.
+        // The refusal check is what keeps this from talking over a worse problem: when
+        // staging is refused nothing was pushed, `stage` has already said why, and a folder
+        // that was left out is the smaller half of that news.
+        if folders > 0 && self.staging_refusal().is_none() {
+            let s = |n: usize| if n == 1 { "" } else { "s" };
+            self.status = match staged {
+                0 => format!("Nothing staged.{}", folders_note(folders)).into(),
+                n => format!("Staged {n} add{}.{}", s(n), folders_note(folders)).into(),
+            };
         }
     }
 
@@ -1975,11 +2051,26 @@ impl Indium {
         }
     }
 
+    /// Walk out of the current directory, landing on the one just left.
+    ///
+    /// PXX 3.2: this used to drop the cursor at row 0, so backing out of `a/b/c` put you
+    /// at the top of `a/b` with `c` somewhere below — and climbing two levels meant
+    /// finding your place twice. The row to land on is the directory being left, which
+    /// `rows()` can be asked for directly: it is a pure function of `entries` and `cwd`,
+    /// so reading it here, after the change, gives the new listing rather than the old.
+    ///
+    /// `unwrap_or(0)` keeps the old behaviour for the case it was right for — a filter is
+    /// showing, or the parent does not list the child — rather than leaving the cursor
+    /// past the end.
     pub fn ascend(&mut self) {
-        if let Some(parent) = model::parent_of(&self.cwd) {
-            self.cwd = parent;
-            self.cursor = 0;
-        }
+        let Some(parent) = model::parent_of(&self.cwd) else {
+            return;
+        };
+        let left = std::mem::replace(&mut self.cwd, parent);
+        self.cursor = self.rows().iter().position(|r| r.path == left).unwrap_or(0);
+        // A deep directory can put that row well off screen, and a cursor nobody can see
+        // is the defect this was reported as in the first place.
+        self.scroll_to_cursor = true;
     }
 
     /// Is long work already running? Then say so, and start nothing.
@@ -2037,6 +2128,7 @@ impl Indium {
         self.progress = Some(Progress {
             done: 0,
             total: wanted.len(),
+            within: 0.0,
             label: "Extracting".to_string(),
         });
 
@@ -2651,6 +2743,42 @@ pub fn restage_note(creation_staged: bool) -> &'static str {
     }
 }
 
+/// Split what arrived into the files INDIUM will take, and a count of the folders it will not.
+///
+/// PXX's certification walk denied 6.2 over a silence: *Add files…* raises the portal, the
+/// portal is asked for files and hands back only files, so a walker who tried to name a
+/// folder watched nothing at all happen and had no way to know why. The other two routes are
+/// worse than silent — a drop on X11 and the path field *can* both produce a directory, and
+/// taking one used to stage an `Add` whose source is not a file at all.
+///
+/// One split, at the one place every route converges, so the answer is the same wherever the
+/// path came from. **This is not a recursive add**: that is a feature, and PXX ships none. The
+/// round's job here is to end the silence, not to grow the program.
+///
+/// A path that does not exist is *not* a folder and is passed through deliberately — the
+/// staged task then fails by name, which says more than being quietly dropped here would.
+pub fn split_out_folders(paths: Vec<PathBuf>) -> (Vec<PathBuf>, usize) {
+    let mut folders = 0;
+    let files = paths
+        .into_iter()
+        .filter(|p| {
+            let dir = p.is_dir();
+            folders += usize::from(dir);
+            !dir
+        })
+        .collect();
+    (files, folders)
+}
+
+/// What [`split_out_folders`] left behind, as a clause to append — empty when it left none.
+pub fn folders_note(n: usize) -> String {
+    match n {
+        0 => String::new(),
+        1 => " 1 folder left out: INDIUM adds files, not folders.".to_string(),
+        n => format!(" {n} folders left out: INDIUM adds files, not folders."),
+    }
+}
+
 /// Why *Bring from archive* cannot run, or `None` if it can.
 ///
 /// Free, and drawn beside the dead button rather than pushed to the status bar by a click,
@@ -2771,6 +2899,43 @@ impl eframe::App for Indium {
             c.b() as f32 / 255.0,
             1.0,
         ]
+    }
+
+    /// The one chance a deliberate exit gets to take back what it left lying about.
+    ///
+    /// PXX's finding 4, and the evidence for it is a journal record rather than a theory:
+    /// unit `ad3e76c9…` went from `Started` to `Consumed` with no signal and no non-zero
+    /// code — an ordinary `exit(0)` — one second after `.archiveadfadsf.7z.indium-new`
+    /// last grew. 159 MB, under a name nobody chose, from a window that had simply been
+    /// closed mid-write. From the user's chair a window that vanishes is a crash; from the
+    /// process table it is this.
+    ///
+    /// **Unlink, do not wait.** Joining the worker would hold the window on screen after
+    /// the user asked it to go, which is the one thing a close must never do. Unlinking a
+    /// file another thread still holds open is exactly what POSIX makes safe: the name goes
+    /// now, the worker writes on into an inode nobody can reach, and the blocks are freed
+    /// when the process ends a moment later. The original archive is never touched — Apply
+    /// builds beside it and renames at the end, so what is removed here is only ever the
+    /// half-built temp.
+    ///
+    /// `is_our_temp` guards the removal for the same reason `tasks::apply` guards its own:
+    /// nothing is deleted on a loose match, ever.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // The worker may be between reads rather than mid-write; telling it to stop costs
+        // nothing and occasionally saves it a few megabytes of pointless work.
+        self.cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let Some(target) = self.apply_target.take() else {
+            return;
+        };
+        let temp = tasks::temp_path_for(&target);
+        if temp
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(tasks::is_our_temp)
+        {
+            let _ = std::fs::remove_file(&temp);
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -3249,6 +3414,17 @@ pub const MIN_H: f32 = 400.0;
 /// until P13 raised `SB_ROW` to carry an icon at `ICON_SCALE`.
 const SB_HEIGHT: f32 = 112.0;
 
+/// How thick the proportion-done bar is, and the reason [`SB_HEIGHT`] is not affected by it.
+///
+/// It was 2 — the edge weight §6 already owned — until the certification walk asked for it
+/// three times thicker. **It grows upward**, from the underside the 2px line already had, so
+/// all four of the new pixels are spent on the panel's own 2px stroke and on the half-gutter
+/// above it: space this panel is already allocated and nothing else paints into. Which is
+/// what keeps the change free. Nothing in the three rows below moves, the arithmetic above
+/// still adds to 112, and `the_status_bar_is_as_tall_as_it_says` still holds. Growing it
+/// *downward* would have cost 4px of a lane that has none to give.
+const PROGRESS_H: f32 = 6.0;
+
 /// The status bar's frame, named so the height above can be checked against it.
 fn sb_frame() -> egui::Frame {
     theme::zone(theme::STATUS_BAR).inner_margin(egui::Margin::symmetric(12, 10))
@@ -3314,30 +3490,40 @@ fn status_bar(app: &mut Indium, ui: &mut egui::Ui) {
                 );
             }
 
-            // CORE §4: "The proportion done is drawn as a 2px line along the bar's own top
-            // edge." Painted for the same reason the two hairlines above are painted and
-            // never allocated — `exact_size` means this panel cannot grow to absorb
-            // anything new, and a widget here would push row 3 out of the window.
-            //
-            // 2px is the edge weight §6 already owns, and Orange is already Apply/progress,
-            // so this measurement costs the document no new vocabulary at all.
+            // CORE §4: "The proportion done is drawn as a [`PROGRESS_H`]px bar along the
+            // bar's own top edge, growing upward out of it." Painted for the same reason the
+            // two hairlines above are painted and never allocated — `exact_size` means this
+            // panel cannot grow to absorb anything new, and a widget here would push row 3
+            // out of the window.
             if let Some(p) = &app.progress {
+                // `done + within`, not `done`: the count beside it is members and stays
+                // members, but the bar is a proportion and can say what the count cannot.
+                // Before PXX an archive of one large member drew a bar that sat at zero
+                // until it jumped to full, which is a bar that has told you nothing at the
+                // only moment you wanted it to.
                 let frac = if p.total == 0 {
                     0.0
                 } else {
-                    (p.done as f32 / p.total as f32).clamp(0.0, 1.0)
+                    ((p.done as f32 + p.within) / p.total as f32).clamp(0.0, 1.0)
                 };
                 // Out to the frame's own edge rather than the content lane's: the inner
                 // margin is where the padding starts, so backing out by it lands on the
                 // line the 2px stroke draws.
                 let pad = sb_frame().inner_margin;
                 let edge = lane.expand2(egui::vec2(pad.left as f32, pad.top as f32));
+                // **Upward**, and the anchor is the underside rather than the top: the bar
+                // still ends exactly where the 2px line ended, and every one of the extra
+                // pixels is spent above it. The clip has to be let up by the same amount or
+                // it would crop back the growth it was widened for.
+                let up = PROGRESS_H - 2.0;
                 let run = egui::Rect::from_min_size(
-                    edge.left_top(),
-                    egui::vec2(edge.width() * frac, 2.0),
+                    edge.left_top() - egui::vec2(0.0, up),
+                    egui::vec2(edge.width() * frac, PROGRESS_H),
                 );
+                let mut clip = edge;
+                clip.min.y -= up;
                 ui.painter()
-                    .with_clip_rect(edge)
+                    .with_clip_rect(clip)
                     .rect_filled(run, 0.0, theme::ORANGE);
             }
         });
@@ -3614,9 +3800,10 @@ fn sb_the_numbers(app: &Indium, ui: &mut egui::Ui) {
 /// The lane is laid out right-to-left so Cancel and the count take their space from the
 /// right edge first and the phase fills whatever is left.
 ///
-/// **There is no track in this row any more.** P13 moved the proportion to a 2px line along
-/// the panel's top edge (CORE §4), which is drawn by `status_bar` because only `status_bar`
-/// knows where that edge is. What stays here is what a track could never carry: the phase,
+/// **There is no track in this row any more.** P13 moved the proportion to a line along the
+/// panel's top edge, and PXX made that line a [`PROGRESS_H`]px bar growing upward out of it
+/// (CORE §4). Either way it is drawn by `status_bar`, because only `status_bar` knows where
+/// that edge is. What stays here is what a track could never carry: the phase,
 /// the count, and the Cancel that is the only user-reachable writer to `app.cancel` in the
 /// program — which is also why this row could not simply be deleted.
 fn sb_progress(app: &Indium, ui: &mut egui::Ui) {
@@ -3649,10 +3836,11 @@ fn sb_progress(app: &Indium, ui: &mut egui::Ui) {
                         .color(theme::TEXT),
                 );
                 // **The track is not here any more.** CORE §4: "The proportion done is
-                // drawn as a 2px line along the bar's own top edge, not as a track inside
-                // the row: it is the one measurement in the window that wants the whole
-                // width, and the edge is already there." `status_bar` paints it, because
-                // only `status_bar` knows where the panel's edge is.
+                // drawn as a 6px bar along the bar's own top edge, growing upward out of
+                // it, not as a track inside the row: it is the one measurement in the
+                // window that wants the whole width, and the edge is already there."
+                // `status_bar` paints it, because only `status_bar` knows where the panel's
+                // edge is.
                 //
                 // What stays is what a track could never carry anyway: the phase, the
                 // count, and the Cancel that is the only user-reachable writer to
@@ -3768,6 +3956,45 @@ fn open_path_popup(app: &mut Indium, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// PXX 6.2: a folder handed to *Add files…* used to vanish without a word. It is still
+    /// not added — that would be a feature — but it is now counted and said out loud.
+    #[test]
+    fn a_folder_is_left_out_and_said_out_loud() {
+        let dir = std::env::temp_dir();
+        let file = dir.join("indium-6-2-not-a-folder.txt");
+        std::fs::write(&file, b"x").expect("temp file");
+
+        let (files, folders) = split_out_folders(vec![dir.clone(), file.clone(), dir.clone()]);
+        assert_eq!(
+            files,
+            vec![file.clone()],
+            "only the file survives the split"
+        );
+        assert_eq!(folders, 2, "both folders are counted, not silently dropped");
+
+        // A path that does not exist is not a folder: it goes through, so the task that
+        // fails on it can name it. Being quietly swallowed here would say less.
+        let ghost = dir.join("indium-6-2-no-such-thing");
+        let (files, folders) = split_out_folders(vec![ghost.clone()]);
+        assert_eq!((files, folders), (vec![ghost], 0));
+
+        assert_eq!(folders_note(0), "", "the ordinary case costs nothing");
+        for (n, want) in [(1, "1 folder left out"), (3, "3 folders left out")] {
+            let note = folders_note(n);
+            assert!(note.contains(want), "{n} folders reads as {note:?}");
+            assert!(
+                note.contains("INDIUM adds files, not folders"),
+                "the note has to say why, not just that: {note:?}"
+            );
+            assert!(
+                note.starts_with(' '),
+                "it is appended to a sentence: {note:?}"
+            );
+        }
+
+        std::fs::remove_file(&file).ok();
+    }
 
     #[test]
     fn archive_stem_strips_every_extension() {
