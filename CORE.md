@@ -140,10 +140,11 @@ Settings, and *Open file* went down, because it is a way in rather than somethin
 holding. The rule is a rule and not a gap; §6 fixes what it has to be to be seen.
 
 **Entry table**: virtualized; columns Name, Size, Packed, Method; a breadcrumb path above
-it, with *Add files…* and *Close* at the far end of that row — the picker adds into the
+it, with *Close* and then *Add files…* at the far end of that row — the picker adds into the
 directory the breadcrumb names, which is the one placement that needs no explanation, and
 *Close* is beside it because leaving the file is an act on the file and belongs where the
-file is. `Enter` descends into a directory, `Backspace` goes up. `Ctrl+F` opens a filter bar
+file is. *Add files…* keeps the outer edge it has held since P11: the control pressed often
+does not move so that the control that throws work away can have the place the hand knows. `Enter` descends into a directory, `Backspace` goes up. `Ctrl+F` opens a filter bar
 — there is deliberately no type-to-jump, because bare letters are shortcuts. With nothing
 open the table says so and offers the way in: it is a zone that is always there, not one
 that appears with an archive.
@@ -156,7 +157,9 @@ things it shows, as the two lists already are. What *Bring from archive* pulls a
 an entry inside an archive is not a file until something makes it one, so the draft holds
 files from that moment and the archive they came from can be closed without touching them.
 Nothing in the draft is a mutation of anything and nothing in it is written; it becomes tasks
-when *Create* is pressed, and not before.
+when *Create* is pressed, and not before. A *staged* creation survives a close for the same
+reason the draft does — it names an archive the closed file was never the subject of — so what
+closing discards is changes against the file being closed, and it says how many went.
 
 **Inspector** (right, permanent): two tabs, *Details* and *Preview*, toggled with `Space`.
 Details shows everything the reader can know about the selection; multi-select shows

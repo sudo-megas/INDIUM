@@ -2,10 +2,15 @@
 //!
 //! Copyright © sudo-megas. GPL-3.0-only.
 //!
-//! CORE §1: "One archive per window. Opening a second archive opens a second window.
-//! There are no tabs." So this binary opens exactly one archive — the first one named on
-//! the command line — and every further archive gets a window of its own, which since
-//! P8 this program opens rather than asks the user to open.
+//! CORE §1: "One archive per window, and no tabs. A window holds one archive at a time; a
+//! *file manager* asking INDIUM to open a second gets a second window." A command line is
+//! that file manager's twin — someone outside the program naming archives — so this binary
+//! opens exactly one archive here, the first one named, and every further archive gets a
+//! window of its own, which since P8 this program opens rather than asks the user to open.
+//!
+//! P22 amended §1 and left this half of it standing on purpose. What changed is what
+//! happens *inside* a window: opening another archive there closes the one it holds and
+//! takes the same window. Out here nothing is being closed, because nothing is open yet.
 
 // On Linux this attribute is a no-op, which is the only reason it is still here.
 //
@@ -95,10 +100,12 @@ fn main() -> eframe::Result<()> {
                 if open.is_none() {
                     open = Some(PathBuf::from(arg));
                 } else {
-                    // One archive per window is the rule, and until P8 the whole of
-                    // INDIUM's answer to a second path was a sentence telling the user
-                    // to go and open a window for it by hand. It is the same sentence
-                    // this program can now act on, so it does.
+                    // A window holds one archive, and until P8 the whole of INDIUM's
+                    // answer to a second path was a sentence telling the user to go and
+                    // open a window for it by hand. It is the same sentence this program
+                    // can now act on, so it does. P22 did not touch this: a second path
+                    // on the command line was named before anything was open, so there is
+                    // nothing here for the new window to be replacing.
                     also.push(PathBuf::from(arg));
                 }
             }

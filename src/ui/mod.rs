@@ -38,7 +38,7 @@ use crate::platform::clipboard;
 use crate::platform::picker::{self, PickerFor};
 use crate::platform::scratch::{self, Scratch};
 use crate::platform::store::{self, ExtractDefault, Recents, Settings, Store};
-use crate::platform::window::{self, Destination};
+use crate::platform::window;
 use crate::secret::Secret;
 use crate::tasks::{self, ApplyMsg, Draft, Queue, Task};
 use crate::theme;
@@ -262,6 +262,20 @@ pub struct Indium {
     pub archive_info: Option<ArchiveInfo>,
     pub entries: Vec<Entry>,
     pub listing: bool,
+    /// What the open that is in flight threw away — a count, and the archive it was staged
+    /// against — waiting for a status line worth putting it on.
+    ///
+    /// P22 made opening a close-then-open, so `Ctrl+O` over an archive with four renames
+    /// staged discards them, and F7 says the loss is recorded. It cannot be recorded where
+    /// it happens: `open_archive` sets *"Reading …"* and `ListMsg::Done` overwrites that
+    /// with the archive's name a few milliseconds later, so a sentence said at the close
+    /// would be gone before it was read. So the two facts wait here and `Done` composes
+    /// them, which is also the line that stays on screen.
+    ///
+    /// Set by every replacing open and cleared by the listing that lands. A same-archive
+    /// re-open leaves it **standing**, because the password prompt's resume is not a second
+    /// open — it is this one, continued, and the sentence still belongs to it.
+    pub discarded_on_open: Option<(usize, String)>,
 
     // --- navigation -------------------------------------------------------
     pub section: Section,
@@ -454,6 +468,7 @@ impl Indium {
             archive_info: None,
             entries: Vec::new(),
             listing: false,
+            discarded_on_open: None,
 
             section: Section::Recents,
             cwd: String::new(),
@@ -547,53 +562,16 @@ impl Indium {
     // Opening and listing
     // -----------------------------------------------------------------------
 
-    /// Open an archive — here if this window is free to take it, and in a second window
-    /// if it is not.
+    /// Drop everything on screen that belonged to the archive that was open.
     ///
-    /// This is reached from seven places — the command line, a drop, `Ctrl+O`, a click or
-    /// `Enter` on a recent, the password prompt's List resume, and Apply's own re-open —
-    /// and all seven ask the same question of `platform::window::destination` because
-    /// CORE §1's rule does not have seven readings. P8 §2 is that rule; the call sites
-    /// were not touched to add it.
-    ///
-    /// **The order of the two refusals below is the whole of P8 §2.** Until P8 this
-    /// function began with `work_running`, because opening an archive replaced what was
-    /// on screen: P7 §7 added the check after a copy-out was cut in half by a user who
-    /// clicked a recent while it ran, and the two lines that follow are the rug-pull it
-    /// stopped — they raise the old cancellation flag and hand the window a new one.
-    ///
-    /// A second window replaces nothing. So the destination is asked **first**, and a
-    /// window busy extracting will now happily open a different archive next to itself
-    /// rather than refuse — the refusal was never about the archive, it was about this
-    /// window's own running work, and it still guards exactly that. Asking `work_running`
-    /// first would have made the busiest window the one that could not do the one thing
-    /// that costs it nothing.
-    ///
-    /// A *listing* is not work in this sense and is still cancelled without ceremony:
-    /// nothing has been written, CORE §1 gives the window one archive, and opening the
-    /// next one is the whole of what the user asked for.
-    pub fn open_archive(&mut self, ctx: &egui::Context, path: PathBuf, passphrase: Option<Secret>) {
-        if window::destination(self.archive_path.as_deref(), &path) == Destination::NewWindow {
-            // The secret dies on this line rather than travelling to a command line.
-            // No caller reaches here holding one — the two that hold one re-open the
-            // archive already open — and `Secret`'s own `Drop` wipes it, so the day a
-            // caller does, CORE §9 is kept by the code rather than by the argument.
-            drop(passphrase);
-            self.status = match window::open_new(&path) {
-                Ok(()) => format!(
-                    "Opening {} in a second window.",
-                    path.file_name()
-                        .unwrap_or(path.as_os_str())
-                        .to_string_lossy()
-                )
-                .into(),
-                Err(e) => Status::bad(e),
-            };
-            return;
-        }
-        if self.work_running() {
-            return;
-        }
+    /// Shared by opening, which is about to draw another archive here, and by closing,
+    /// which is not. It is the codebase's own enumeration of what an archive puts on
+    /// screen, and it is a list that has grown by discovery rather than by design — so it
+    /// lives in one place, where the next thing to join it can only be added once.
+    fn reset_view(&mut self, ctx: &egui::Context) {
+        // P7 §7's rug-pull: raise the old listing's cancellation flag and hand the window
+        // a new one, so a worker that is still walking an archive cannot deliver rows into
+        // a table that has moved on.
         self.cancel.store(true, Ordering::Relaxed);
         self.cancel = Arc::new(AtomicBool::new(false));
 
@@ -603,7 +581,7 @@ impl Indium {
         self.cursor = 0;
         self.crc_of = None;
         // The Preview is the other half of what `crc_of` clears, and it was the half this
-        // function missed. `ApplyMsg::Done` re-opens the archive in this window precisely so
+        // reset missed. `ApplyMsg::Done` re-opens the archive in this window precisely so
         // the Inspector cannot describe a file that no longer exists — and an entry that kept
         // its name through the rebuild kept its `PreviewData` too, so `request_preview`'s
         // path check called it current and went on showing the bytes Apply had just replaced.
@@ -612,6 +590,99 @@ impl Indium {
         self.forget_preview(ctx);
         self.filter = None;
         self.archive_info = None;
+    }
+
+    /// Leave the archive this window holds, and report what leaving it cost.
+    ///
+    /// `None` when there was nothing open. Otherwise the count [`discarded_by_closing`]
+    /// gives and the name of what was left, for whichever sentence the caller is writing.
+    ///
+    /// Beyond [`reset_view`](Self::reset_view) it does three things that only *leaving*
+    /// does. It forgets the passphrase, which CORE §9 requires and which the old open
+    /// never did because opening is not leaving. It drops the listing in flight —
+    /// otherwise a cancelled walk's late `Done` overwrites the sentence this returns with
+    /// the name of an archive the window no longer holds. And it empties the tray, because
+    /// a tray must not describe changes against a closed archive.
+    fn leave_archive(&mut self, ctx: &egui::Context) -> Option<(usize, String)> {
+        let name = archive_name(self.archive_path.as_deref()?);
+
+        self.reset_view(ctx);
+        self.list_rx = None;
+        self.listing = false;
+        self.archive_bytes = 0;
+        self.archive_path = None;
+        self.set_window_title(ctx);
+        self.passphrase = None;
+
+        let discarded = discarded_by_closing(self.tasks.creation().is_some(), self.tasks.len());
+        if discarded > 0 {
+            self.tasks.clear();
+        }
+        self.staged_against.clear();
+        Some((discarded, name))
+    }
+
+    /// Close the archive, per CORE §1 as P22 amended it — and say what that cost.
+    ///
+    /// The control is on the breadcrumb row (`table.rs`), and until this round there was
+    /// no control at all: the answer to *"how do I get out of this archive"* was to close
+    /// the window, which took every other window's answer with it.
+    ///
+    /// It refuses while work is running for the same reason opening does — an extraction
+    /// narrating an archive the window no longer holds is a worse outcome than a button
+    /// that waits — and `work_running` says which of the two is in the way.
+    ///
+    /// It lands on Recents rather than on the empty File view, because *"nothing open ⇒
+    /// Recents"* is already this program's own convention: it is where a launch with no
+    /// archive named puts you. Close leaves the window in the state it launches in, and
+    /// what you most likely want next is the list of what you had open before.
+    pub fn close_archive(&mut self, ctx: &egui::Context) {
+        if self.work_running() {
+            return;
+        }
+        let Some((discarded, name)) = self.leave_archive(ctx) else {
+            return;
+        };
+        self.section = Section::Recents;
+        self.status = discarded_line(&format!("Closed {name}"), discarded, None).into();
+    }
+
+    /// Open an archive **here**, having closed whatever this window held.
+    ///
+    /// This is reached from seven places — the command line, a drop, `Ctrl+O`, a click or
+    /// `Enter` on a recent, the password prompt's List resume, and Apply's own re-open —
+    /// and all seven ask [`window::already_open`] the same question, because the rule does
+    /// not have seven readings. The call sites were not touched to add it.
+    ///
+    /// **P22 changed what the rule says.** Until this round a window that already held an
+    /// archive answered a second one by spawning a process, so the destination was asked
+    /// *before* `work_running`: a second window replaces nothing, so a window busy
+    /// extracting could still open a different archive beside itself rather than refuse.
+    /// That order is now inverted, and it must be. An in-program open replaces what is
+    /// here, so it is exactly the rug-pull P7 §7 added `work_running` to stop — a window
+    /// mid-extraction that opened a different archive would leave the extraction narrating
+    /// one archive while the table showed another. `open_new` still exists and still means
+    /// what it always meant, but it is now the *launcher's* door: a file manager or a
+    /// command line naming a second archive gets a second window, and nothing in here does.
+    ///
+    /// A *listing* is not work in this sense and is still cancelled without ceremony:
+    /// nothing has been written, and opening the next archive is the whole of what the
+    /// user asked for.
+    pub fn open_archive(&mut self, ctx: &egui::Context, path: PathBuf, passphrase: Option<Secret>) {
+        if self.work_running() {
+            return;
+        }
+
+        if window::already_open(self.archive_path.as_deref(), &path) {
+            // The archive already here, handed back: Apply's re-open and the password
+            // prompt's resume. Nothing is being left, so the tray and the passphrase stay
+            // — and so does anything a *previous* open left waiting to be said, because
+            // the resume is that open continued rather than a new one.
+            self.reset_view(ctx);
+        } else {
+            self.discarded_on_open = self.leave_archive(ctx).filter(|(n, _)| *n > 0);
+        }
+
         self.archive_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         self.archive_path = Some(path.clone());
         self.set_window_title(ctx);
@@ -684,13 +755,19 @@ impl Indium {
                     self.listing = false;
                     self.list_rx = None;
                     let _ = count;
-                    self.status = self
+                    let name = self
                         .archive_path
-                        .as_ref()
-                        .and_then(|p| p.file_name())
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "Ready.".to_string())
-                        .into();
+                        .as_deref()
+                        .map(archive_name)
+                        .unwrap_or_else(|| "Ready.".to_string());
+                    // The line that stays on screen, so it is the line F7's sentence gets
+                    // to ride on. Composed only when the open discarded something —
+                    // otherwise this is the archive's name and nothing else, as it has
+                    // been since P5, full stop and all absent.
+                    self.status = match self.discarded_on_open.take() {
+                        Some((n, against)) => discarded_line(&name, n, Some(&against)).into(),
+                        None => name.into(),
+                    };
                     self.remember_current_archive();
                 }
                 ListMsg::Failed(e) => {
@@ -1134,11 +1211,15 @@ impl Indium {
 
     /// Name the open archive in the window title.
     ///
-    /// CORE §1: "One archive per window. Opening a second archive opens a second window.
-    /// There are no tabs." The title was set once at startup and never changed, so every
-    /// window in that model was labelled `INDIUM` — identical in the compositor, the
-    /// switcher and the taskbar, with no way to tell which held which archive short of
-    /// focusing it. The information was already on `archive_path`.
+    /// CORE §1 gives a window one archive, so P5 put that archive's name here: the title was
+    /// set once at startup and never changed, and every window was labelled `INDIUM` —
+    /// identical in the compositor, the switcher and the taskbar, with no way to tell which
+    /// held which archive short of focusing it. The information was already on `archive_path`.
+    ///
+    /// P22 turned that from a convenience into the thing the title is for. A window holds one
+    /// archive *at a time* now, and Close leaves it holding none, so the title is no longer a
+    /// label fixed at launch — it is the one place outside this window that says what this
+    /// window currently is. Which is why `leave_archive` calls this on its way out.
     pub fn set_window_title(&self, ctx: &egui::Context) {
         let title = match self.archive_path.as_ref().and_then(|p| p.file_name()) {
             Some(name) => format!("{} — INDIUM", name.to_string_lossy()),
@@ -2274,6 +2355,19 @@ fn collect_files(dir: &std::path::Path) -> Vec<PathBuf> {
     out
 }
 
+/// What an archive is called on screen: its file name, whole, extensions and all.
+///
+/// Every sentence that names an archive wants this and not [`archive_stem`] — a person who
+/// opened `photos.zip` is not told about `photos`. The fallback matters for the same reason
+/// [`archive_stem`]'s does: a path can end in `..` or `/` and have no file name at all, and
+/// a status line that then said nothing would be worse than one that said the path.
+pub fn archive_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy()
+        .to_string()
+}
+
 /// `photos-2026.tar.gz` -> `photos-2026`. Strips every extension, because a
 /// double-extension archive should not extract into `photos-2026.tar`.
 pub fn archive_stem(path: &std::path::Path) -> String {
@@ -2393,6 +2487,30 @@ fn clipboard_chords(events: &[egui::Event]) -> (bool, bool) {
 ///
 /// Free rather than a method, for [`estimate_refusal_for`]'s reason: `Indium` cannot be built
 /// in a unit test, and a sentence nobody can reach is a sentence nobody checks.
+/// How much closing an archive throws away — the whole of what leaving one costs.
+///
+/// **A staged creation is not a change against the archive being closed, and does not go
+/// with it.** It names an archive that does not exist yet; photos.zip is not its subject
+/// and never was. F6 ruled that the draft survives a Close untouched, and the queue's
+/// creation lane is that draft projected — so discarding the projection while keeping the
+/// draft would cost a person one `N` press to reach a state they were already in, for no
+/// reason anyone could give them.
+///
+/// The two cases cannot overlap: `staging_refusal` refuses a rename or a remove while a
+/// creation is staged, so the queue holds a creation *or* mutations and never both. That is
+/// what lets this be a count rather than a filter, and it is what stops the sentence from
+/// having to say *"4 changes"* about a number that included the `Task::Create` itself.
+///
+/// Free rather than a method, for [`estimate_refusal_for`]'s reason: `Indium` cannot be
+/// built in a unit test, so a decision left on the type is held by eye.
+pub fn discarded_by_closing(creation_staged: bool, staged: usize) -> usize {
+    if creation_staged {
+        0
+    } else {
+        staged
+    }
+}
+
 pub fn discarded_line(headline: &str, discarded: usize, against: Option<&str>) -> String {
     if discarded == 0 {
         return format!("{headline}.");
@@ -3626,6 +3744,74 @@ mod tests {
             discarded_line("Staged: create backup.7z", 0, Some("photos.zip")),
             "Staged: create backup.7z.",
             "nothing went, so nothing is said about it"
+        );
+    }
+
+    /// F7 at the other door, and in the other form: closing names no second archive, so the
+    /// clause is *"4 staged changes discarded"* and not *"4 changes against photos.zip"* —
+    /// which would have said photos.zip twice in one line to no purpose.
+    #[test]
+    fn closing_says_what_it_discarded() {
+        assert_eq!(
+            discarded_line("Closed photos.zip", 4, None),
+            "Closed photos.zip · 4 staged changes discarded."
+        );
+        assert_eq!(
+            discarded_line("Closed photos.zip", 1, None),
+            "Closed photos.zip · 1 staged change discarded.",
+            "one change is not one changes"
+        );
+        assert_eq!(
+            discarded_line("Closed photos.zip", 0, None),
+            "Closed photos.zip.",
+            "nothing went, so nothing is said about it"
+        );
+    }
+
+    /// The other half of F7's Close: **what** goes, before there is a sentence about it.
+    ///
+    /// A staged creation stands. It names an archive that does not exist yet, photos.zip was
+    /// never its subject, and F6 ruled the draft it projects survives untouched — so
+    /// discarding the projection while keeping the draft would cost a person one `N` press
+    /// to get back somewhere they already were. The queue's `len()` here is 5 (a `Create` and
+    /// four `Add`s) and none of it goes, which is also why the count could never have been
+    /// reported as *"5 changes"*: one of the five was the creation itself.
+    #[test]
+    fn closing_leaves_the_draft_alone() {
+        assert_eq!(
+            discarded_by_closing(true, 5),
+            0,
+            "a creation is not left behind"
+        );
+        assert_eq!(
+            discarded_line("Closed photos.zip", discarded_by_closing(true, 5), None),
+            "Closed photos.zip.",
+            "nothing was discarded, so the line must not claim anything was"
+        );
+
+        // Mutations are against the archive being closed, and go with it.
+        assert_eq!(discarded_by_closing(false, 4), 4);
+        assert_eq!(discarded_by_closing(false, 0), 0);
+    }
+
+    /// The carried sentence, composed where it is finally read.
+    ///
+    /// `Ctrl+O` over an open archive is a close and an open, so F7 owes the same sentence —
+    /// but the status line at the moment of the close lives for as long as the listing takes,
+    /// which is milliseconds. `ListMsg::Done` composes it onto the line that stays, and this
+    /// is that composition: the *new* archive is the headline, so here the against-form is
+    /// the right one and the closed archive is what it names.
+    #[test]
+    fn opening_over_an_archive_says_what_that_cost() {
+        assert_eq!(
+            discarded_line("other.zip", 4, Some("photos.zip")),
+            "other.zip · 4 changes against photos.zip discarded."
+        );
+        // And with nothing staged the carry is never set, so `Done` writes the bare name it
+        // has written since P5 — no full stop, because a file name is not a sentence.
+        assert_eq!(
+            archive_name(std::path::Path::new("/x/other.zip")),
+            "other.zip"
         );
     }
 

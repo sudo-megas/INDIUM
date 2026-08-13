@@ -1,6 +1,6 @@
 //! The second window — P8 §1.
 //!
-//! CORE §1 has said since the first line of the first document: *"One archive per
+//! CORE §1 said, from the first line of the first document until P22: *"One archive per
 //! window. Opening a second archive opens a second window. There are no tabs."* Every
 //! consequence of that sentence was built long ago — P4's advisory lock is keyed to the
 //! archive path and lives in `$XDG_RUNTIME_DIR` so that *two processes* cannot rebuild
@@ -8,6 +8,14 @@
 //! and P3 recorded that "multiple windows on one archive are permitted and safe today".
 //! The one thing never built was the window itself. Until P8 the program answered a
 //! second archive with a sentence telling the *user* to go and open one by hand.
+//!
+//! **P22 amended the rule that quote comes from.** §1 now says a window holds one archive
+//! *at a time*: a file manager or a command line naming a second archive still gets a
+//! second window, and that is what `open_new` below is for and all it is for. But a person
+//! already inside INDIUM who opens another archive is not asking for two — they are done
+//! with the one they have. So an in-program open closes what this window holds and takes
+//! the next one here, and the question this module answers shrank to the only one left
+//! worth asking: **is the archive being handed to us the one already here?**
 //!
 //! A window is a process. That is not the only way egui can do it — eframe 0.36 will
 //! open genuine `xdg_toplevel`s for deferred viewports on Wayland, and the glow backend
@@ -34,25 +42,17 @@
 
 use std::path::{Path, PathBuf};
 
-/// Where an archive the user asked for should open.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Destination {
-    /// Here. Either this window holds nothing yet, or it already holds this same
-    /// archive and is being handed it again.
-    ThisWindow,
-    /// A second window, because this one is already spoken for.
-    NewWindow,
-}
-
-/// The whole of CORE §1, as one function.
+/// Is `requested` the archive this window already holds?
 ///
 /// `open_archive` is reached from seven places — the command line, a drop, `Ctrl+O`, a
 /// click or `Enter` on a recent, the password prompt's resume, and Apply's own re-open.
 /// Two of those seven hand back the archive that is already open: the password prompt
-/// re-opens it with the passphrase, and Apply re-opens it after the rebuild. Both must
-/// keep the window they are in, and neither is an exception written down anywhere — they
-/// fall out of the same rule everything else follows, because the archive they name is
-/// the archive already there.
+/// re-opens it with the passphrase, and Apply re-opens it after the rebuild. Neither is
+/// *leaving* anything, and under P22's §1 that distinction became load-bearing: a
+/// replacing open closes what is here first, and closing here would throw away the
+/// passphrase the prompt has just taken and re-empty a tray Apply has already emptied.
+/// Neither is an exception written down anywhere — both fall out of this one question,
+/// because the archive they name is the archive already there.
 ///
 /// Paths are compared **canonicalised**, for the reason `tasks::lock_name_for` gives for
 /// doing the same: paths arrive from `std::env::args_os`, a drop, and a hand-typed field,
@@ -60,11 +60,10 @@ pub enum Destination {
 /// exotic one. A path that cannot be canonicalised — an archive that is not there —
 /// falls back to the name as given, which is correct: nothing that does not exist can be
 /// the archive this window already holds.
-pub fn destination(current: Option<&Path>, requested: &Path) -> Destination {
+pub fn already_open(current: Option<&Path>, requested: &Path) -> bool {
     match current {
-        None => Destination::ThisWindow,
-        Some(current) if resolve(current) == resolve(requested) => Destination::ThisWindow,
-        Some(_) => Destination::NewWindow,
+        None => false,
+        Some(current) => resolve(current) == resolve(requested),
     }
 }
 
@@ -177,39 +176,42 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn an_empty_window_takes_the_archive_itself() {
-        assert_eq!(
-            destination(None, Path::new("/tmp/photos.7z")),
-            Destination::ThisWindow,
-            "the command line's archive must not open a second window and leave an empty first one"
-        );
-    }
+    // `an_empty_window_takes_the_archive_itself` and
+    // `a_window_that_holds_one_archive_opens_another_elsewhere` stood here until P22,
+    // holding `destination`. Both are gone with it, and deliberately: the first is now
+    // unconditional — *every* window takes the archive it is handed, so there is no
+    // branch left to assert — and the second asserted the exact behaviour this round
+    // reverses. What survives of the pair is the question below, which is the half of
+    // `destination` that was doing real work.
 
+    /// An empty window holds nothing, so an archive handed to it leaves nothing behind.
+    /// The launch case, and the reason the answer here is a plain `false` rather than a
+    /// third state: "nothing open" and "a different archive open" both end with this
+    /// window holding the archive, and only the second has anything to close first.
     #[test]
-    fn a_window_that_holds_one_archive_opens_another_elsewhere() {
-        assert_eq!(
-            destination(
-                Some(Path::new("/tmp/photos.7z")),
-                Path::new("/tmp/docs.zip")
-            ),
-            Destination::NewWindow
-        );
+    fn an_empty_window_has_nothing_to_leave() {
+        assert!(!already_open(None, Path::new("/tmp/photos.7z")));
     }
 
     /// Apply re-opens the archive it just rebuilt, and the password prompt re-opens the
-    /// archive it just unlocked. Neither may spawn a window: the first would leave the
-    /// rebuilt archive listed twice, and the second would put the unlocked archive in a
-    /// window that never got the passphrase.
+    /// archive it just unlocked. Neither may be read as leaving it: the first would clear
+    /// a tray Apply has already emptied, and the second would wipe the passphrase the
+    /// prompt has just taken and fail straight back to a second prompt.
     #[test]
-    fn handing_a_window_the_archive_it_already_holds_keeps_the_window() {
-        assert_eq!(
-            destination(
-                Some(Path::new("/tmp/photos.7z")),
-                Path::new("/tmp/photos.7z")
-            ),
-            Destination::ThisWindow
-        );
+    fn handing_a_window_the_archive_it_already_holds_is_not_leaving_it() {
+        assert!(already_open(
+            Some(Path::new("/tmp/photos.7z")),
+            Path::new("/tmp/photos.7z")
+        ));
+    }
+
+    /// The archive this window does not hold is the one it must close for.
+    #[test]
+    fn a_different_archive_is_a_different_archive() {
+        assert!(!already_open(
+            Some(Path::new("/tmp/photos.7z")),
+            Path::new("/tmp/docs.zip")
+        ));
     }
 
     /// `indium ./photos.7z` in one window and a recent naming `/tmp/.../photos.7z` are
@@ -223,10 +225,9 @@ mod tests {
         std::fs::write(&archive, b"not really an archive").unwrap();
 
         let indirect = dir.join(".").join("photos.7z");
-        assert_eq!(
-            destination(Some(&archive), &indirect),
-            Destination::ThisWindow,
-            "a second spelling of the open archive must not open a second window"
+        assert!(
+            already_open(Some(&archive), &indirect),
+            "a second spelling of the open archive must not be read as a different one"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -234,15 +235,12 @@ mod tests {
 
     /// The fallback for a path that cannot be canonicalised must not collapse two
     /// different missing archives into one, or a window holding a deleted archive would
-    /// refuse to open anything.
+    /// think it already held whatever it was handed next and skip the close.
     #[test]
     fn two_archives_that_are_not_there_are_still_two_archives() {
-        assert_eq!(
-            destination(
-                Some(Path::new("/nowhere/gone-a.7z")),
-                Path::new("/nowhere/gone-b.7z")
-            ),
-            Destination::NewWindow
-        );
+        assert!(!already_open(
+            Some(Path::new("/nowhere/gone-a.7z")),
+            Path::new("/nowhere/gone-b.7z")
+        ));
     }
 }

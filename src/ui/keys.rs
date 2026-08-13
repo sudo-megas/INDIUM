@@ -50,13 +50,14 @@ pub const ROWS: &[(&str, &str)] = &[
 
 /// The one line the testing round asked for that is not a keybinding.
 ///
-/// *"still dont know how to exit from the archive"* — and the honest answer is that there is
-/// no key for it, because CORE §1 gives one archive per window: you close the window. Saying
-/// so is the whole point of the popup, so it is said here rather than left to be inferred
-/// from a table that does not mention it.
+/// *"still dont know how to exit from the archive"* — and until P22 the honest answer was
+/// that there was no way, only a window to close. There is a control now, and it is on the
+/// breadcrumb row rather than in this table because leaving an archive throws staged work
+/// away and a key is too easy to hit. Saying where it is, is the whole point of the popup,
+/// so it is said here rather than left to be inferred from a table that does not mention it.
 const NO_KEY_FOR: &str =
-    "There is no key for leaving an archive. One archive per window (CORE §1) — \
-     so closing the window is how you leave it, and every other window stays open.";
+    "There is no key for leaving an archive — Close, on the breadcrumb row, is how you \
+     leave it. Opening another archive leaves this one too, and takes this same window.";
 
 pub fn show(app: &mut Indium, ctx: &egui::Context) {
     if app.popup != Some(Popup::Keys) {

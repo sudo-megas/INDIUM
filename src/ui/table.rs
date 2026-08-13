@@ -370,6 +370,7 @@ fn breadcrumb_bar(app: &mut Indium, ui: &mut egui::Ui) {
     // Set inside the closure, acted on after it: `request_picker` needs `&mut app`, which
     // the layout closure is already holding immutably.
     let mut pick = false;
+    let mut close = false;
 
     // The crumb font, resolved rather than written down: `RichText::family` keeps the
     // current text style's size and swaps only the family, and this is that by hand,
@@ -443,10 +444,31 @@ fn breadcrumb_bar(app: &mut Indium, ui: &mut egui::Ui) {
                     {
                         pick = true;
                     }
+
+                    // **Close** — P22, and the answer to the testing round's *"still dont
+                    // know how to exit from the archive"*. Until this round there was no
+                    // answer but closing the window, which took every other window with it.
+                    //
+                    // Left of *Add files…* rather than at the edge, deliberately: this row
+                    // has ended in *Add files…* since P11 and that is where the hand goes.
+                    // The frequent control keeps its place and the one that throws work
+                    // away is the one that moved, which is the right way round.
+                    if theme::small_button(ui, egui::RichText::new("Close"), true)
+                        .on_hover_text("Close this archive · staged changes are discarded")
+                        .clicked()
+                    {
+                        close = true;
+                    }
                 });
             });
         });
 
+    // Close first, and alone: the other two act on an archive this window may no longer
+    // hold. One click cannot set two of these, but the order says which is true anyway.
+    if close {
+        app.close_archive(ui.ctx());
+        return;
+    }
     if pick {
         app.request_picker(ui.ctx(), PickerFor::Add);
     }
