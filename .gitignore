@@ -19,3 +19,9 @@
 /build/package/pkg/
 /build/package/out/
 /build/package/*.pkg.tar.zst
+
+# The release tarball, when it is downloaded here to be tested against. The rule above
+# names the root copy; PXX pulled `v2.1`'s three artefacts into this directory to run the
+# suite against what shipped, and the tarball was the one of the three no pattern caught.
+# A near-miss of exactly the kind P6 §9 exists for.
+/build/package/*.tar.gz
