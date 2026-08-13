@@ -27,6 +27,17 @@ whose expectation is "works" tests nothing.
 tree. §7's gate says *"a testing round against a released build"* and means it: a tree can carry
 an uncommitted fix that no user will ever have.
 
+**The fixtures.** Rounds 11–13 need archives measured in gigabytes, and none of them are in this
+repository — they are regenerable, and P6 §9 was written after two release tarballs came within
+one `git add -A` of entering history forever. `build/make-testdata.sh` builds them into
+`~/indium-test`: `under-limit.tar`, `over-limit.tar`, `big-mixed.tar.zst`, `many-entries.tar`,
+`deep.tar`, and the 8 GiB sparse `bigsecret-input.bin` that step 12.8 turns into an archive.
+The filler is an AES-CTR keystream under a fixed pass phrase rather than `/dev/urandom`, so two
+runs produce identical bytes and a figure measured here can be compared with one measured
+elsewhere. Run it on `/home` and not on `/tmp`, `$XDG_RUNTIME_DIR` or the overflow partition:
+those three are `nosuid,nodev`, and an extraction test that passes there passed because the mount
+forbade the thing rather than because INDIUM did.
+
 **Notation.** `[R1.4]` is round 1, step 4. **†** marks a step recovered from the P11/P12 round —
 either quoted verbatim or located by the coordinate `P11.md` gives it; where that round reported
 a defect, the step says what went wrong then, because a step that once failed is the step most
@@ -84,7 +95,8 @@ worth running again. **‡** marks a step P22 left unticked and this round inher
 | 3.9 | Open `secret.7z` | The password popup appears **at open**, before any entry is listed — its headers are encrypted, so the listing is itself the moment of use. (`bsdtar -tf secret.7z` refuses it too: *"The archive header is encrypted"*.) | §4.7 |
 | 3.10 | Give it the wrong password | Refused with a sentence, and asked again. Nothing partial is listed. | §4.7 |
 | 3.11 | Give it the right one, then close and reopen the archive | It asks **again**. The password nowhere survives its use. | §4.7, §9 |
-| 3.12 | Open `deep.tar` (pathological nesting) | The breadcrumb elides in the middle rather than growing; no path escapes the display. | §4, §6 |
+| 3.12 | Open `deep.tar` (60 levels, long names, spaces, tabs, a newline, Turkish, emoji) | The breadcrumb elides in the middle rather than growing off the edge; every name is listed as one row, and the one containing a newline does not become two. | §4, §6 |
+| 3.13 | Extract **all** of `deep.tar` into `~/indium-test/sandbox` — **that directory and nowhere else** — then `ls ~/indium-test` and `ls /` | It carries four traversal members (`../`, `../../`, one via a middle component, and one absolute). `path_escapes` (`arch.rs:940-946`) must refuse every one, saying so rather than silently dropping them. **Deny** if any `escaped-*.txt` or `/absolute-escape.txt` exists afterwards outside the sandbox. This is the only step in the plan that could write outside its target, which is why it names its target twice. | §3, §4.3 |
 
 ## Round 4 — out of an archive
 
