@@ -16,7 +16,18 @@ pkgrel=1
 pkgdesc="The Most Verbose Archive Manager for Linux on Wayland."
 arch=('x86_64')
 url="https://github.com/sudo-megas/INDIUM"
-license=('GPL-3.0-only' 'OFL-1.1')
+# The second entry is font-derived and moves when the face does. SPDX splits the Open
+# Font Licence by whether the licensor reserved a name: Cascadia reserves *Cascadia Code*,
+# so it is `OFL-1.1-RFN`, and Arch's own `ttf-cascadia-mono-nerd` declares exactly that.
+# The face this replaced, Fira Mono, reserved nothing — `otf-firamono-nerd` declares
+# `OFL-1.1-no-RFN` — and the plain `OFL-1.1` written here through P23 was a generic stand-in
+# that was harmless for Fira and understates the restriction the shipped face carries.
+#
+# The `.deb` says `OFL-1.1` and is not wrong to: DEP-5 takes Debian's short names, which
+# have no RFN variants, and it inlines the licence text underneath rather than pointing at
+# an identifier. The two artefacts declaring different strings is correct; do not reconcile
+# them by changing one to match the other.
+license=('GPL-3.0-only' 'OFL-1.1-RFN')
 
 # CORE §2's system-library table names what the compositor session already provides. A
 # package must still say so, or it installs a program that cannot open a window.

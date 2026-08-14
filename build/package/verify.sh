@@ -345,6 +345,9 @@ if locate "$PKG" "$INDIUM_PKG" 'build/package/*.pkg.tar.zst' '(cd build/package 
     fi
 
     # CORE §8: GPL-3.0-only for the program, OFL-1.1 for the bundled font. Two, both named.
+    # This asserts the count and that both are present, and matches `OFL` loosely on
+    # purpose — *which* OFL variant is a font-derived fact, so it is derived from the
+    # licence text and checked against the PKGBUILD in check 10 rather than typed here.
     nlic=$(grep -c '^license = ' "$tmp/PKGINFO" || true)
     if [ "$nlic" = 2 ] &&
        grep -qi '^license = .*GPL-3\.0' "$tmp/PKGINFO" &&
@@ -617,7 +620,9 @@ echo "-- 10. the copyright names the font that ships"
 #
 # So the expectation is *derived* and never typed a second time. LICENSES/OFL-1.1.txt is
 # copied verbatim out of the font package — assets/fonts/README.md records the `cp` — so its
-# first line moves when the face does, and this check moves with it.
+# opening copyright block moves when the face does, and this check moves with it. The block,
+# not the first line: Cascadia's runs to two lines and carries its Reserved Font Name on the
+# second, which is the half a first-line read would have dropped.
 hdr=build/package/deb/copyright.header
 
 # The licence's own copyright block, joined into one line and normalised.
@@ -690,6 +695,47 @@ elif [ -n "$(find assets/fonts -maxdepth 1 -name "$face*" -print -quit)" ]; then
   ok "the copyright header names the embedded face: $face"
 else
   bad "copyright.header names '$face', which matches no file in assets/fonts/"
+fi
+
+# The third font-derived string, and the one that rotted through the whole of P23 without
+# anything noticing — which is the argument for adding this rather than a reason it is
+# fussy. SPDX splits the Open Font Licence by whether the licensor reserved a name, and the
+# PKGBUILD's `license=()` array is the one place INDIUM states which half it ships under.
+# It said the generic `OFL-1.1` from P12 to here: true enough of Fira, which reserved
+# nothing, and an understatement for Cascadia, which reserves *Cascadia Code*. Arch's own
+# packages declare the variants — `otf-firamono-nerd` is `OFL-1.1-no-RFN`,
+# `ttf-cascadia-mono-nerd` is `OFL-1.1-RFN` — so the distinction is one this ecosystem
+# actually makes.
+#
+# **It is derived from the same opening block as everything else in this check, and it has
+# to be.** The OFL's body defines the term "Reserved Font Name" in its DEFINITIONS section
+# whether or not one was reserved, so grepping the file says yes to every OFL font ever
+# written — Fira's copy contains the phrase once and reserved nothing. Only the copyright
+# block distinguishes them, and `ofl_holder` already returns exactly that block.
+#
+# The .deb is not checked here and is not wrong to differ: DEP-5 takes Debian's short
+# names, which have no RFN variants, and it inlines the licence text underneath rather than
+# pointing at an identifier. The two artefacts saying different strings is correct.
+#
+# Gated on a readable opener for the same reason the derivation reads the block: with
+# `$want` empty the `case` below falls to its default and would announce "the licence is
+# no-RFN" — a fabricated diagnosis, printed beside the true one the block above already
+# emitted. A check with nothing to derive from says so once and stops.
+pkgb=build/package/PKGBUILD
+if [ -z "$want" ]; then
+  : # already reported above: there is no copyright block to derive an SPDX variant from
+else
+  case "$want" in
+    *"Reserved Font Name"*) spdx=OFL-1.1-RFN ;;
+    *)                      spdx=OFL-1.1-no-RFN ;;
+  esac
+  if ! grep -q "^license=(" "$pkgb"; then
+    bad "$pkgb declares no license=() array"
+  elif grep -q "^license=(.*'$spdx'" "$pkgb"; then
+    ok "the PKGBUILD declares the OFL variant its licence text carries: $spdx"
+  else
+    bad "$pkgb says $(sed -n "s/^license=(\(.*\))/\1/p" "$pkgb"); LICENSES/OFL-1.1.txt is $spdx"
+  fi
 fi
 
 # Tier two: the same facts in the file that actually ships. Not redundant with the above —
