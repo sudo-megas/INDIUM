@@ -1616,11 +1616,16 @@ mod tests {
         std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{rel} is readable: {e}"))
     }
 
-    /// Every `.rs` file under `src/ui/`, so a scan cannot quietly find nothing.
-    fn ui_sources() -> Vec<(String, String)> {
+    /// Every `.rs` file under a directory, named relative to the crate root and sorted, with
+    /// the floor that keeps a scan honest.
+    ///
+    /// `least` is not a formality. Every caller here is a test that passes by finding nothing,
+    /// so a walk that silently returns an empty list turns each of them green for the one
+    /// reason none of them is checking.
+    fn sources_under(rel: &str, least: usize) -> Vec<(String, String)> {
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
             for entry in std::fs::read_dir(dir)
-                .expect("src/ui is readable")
+                .unwrap_or_else(|e| panic!("{} is readable: {e}", dir.display()))
                 .flatten()
             {
                 let path = entry.path();
@@ -1633,11 +1638,12 @@ mod tests {
         }
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut paths = Vec::new();
-        walk(&root.join("src/ui"), &mut paths);
+        walk(&root.join(rel), &mut paths);
+        paths.sort();
         assert!(
-            paths.len() >= 10,
-            "only {} file(s) under src/ui — a scan that found nothing must not read as a scan \
-             that found nothing wrong",
+            paths.len() >= least,
+            "only {} file(s) under {rel}, fewer than the {least} this scan expects — a scan \
+             that found nothing must not read as a scan that found nothing wrong",
             paths.len()
         );
         paths
@@ -1686,7 +1692,7 @@ mod tests {
             "vline(",
         ];
         let mut seen = 0usize;
-        for (name, body) in ui_sources() {
+        for (name, body) in sources_under("src/ui", 10) {
             // Code only. A comment is free to name a sink and a token in one breath — several
             // in this crate do, explaining why the pairing would be wrong — and a scan that
             // cannot tell prose from code would fire on the very notes that agree with it.
@@ -2070,6 +2076,114 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The general form of [`no_second_remove_mark_is_typed_into_the_source`], which that test
+    /// names as owed to this section: **every character the program draws has to be a
+    /// character the face can draw.**
+    ///
+    /// A missing codepoint does not fail — it draws a box, and a box looks exactly like a font
+    /// that did not load. `icon::ALL` has been checked against both faces since P16, but only
+    /// the icons: an ordinary sentence with an arrow in it went through no check at all, and
+    /// **that is how `⇄` reached a release.** `keys.rs:38` draws `"Details ⇄ Preview"` from
+    /// CORE §4's own keyboard table, U+21C4 is in neither weight, and it has been a tofu box
+    /// in the Keys popup in every version that had one. Verified twice in P23 §2f — this
+    /// crate's `cmap` reader and `fc-query` over the two `.ttf` files from outside the
+    /// codebase, agreeing on every codepoint.
+    ///
+    /// **So it lands with one named exception rather than red.** The fix is CORE draft E —
+    /// `⇄` → `↔` U+2194, which *is* in both weights — and CORE is the maker's hand, so the
+    /// alternative to naming it is a suite that stays red until he gets to it. A named
+    /// exception still fails on a *second* one, which is the whole job; a red suite fails at
+    /// everything and is therefore read as failing at nothing. It is asserted rather than
+    /// skipped, so the day `keys.rs:38` is corrected this test says to delete the line.
+    ///
+    /// Test modules are cut at their `#[cfg(test)]`, because an assertion message is not
+    /// something the window draws — `table.rs` quotes `✕` in one, and it is right to.
+    #[test]
+    fn every_drawn_character_exists_in_both_faces() {
+        // (file, codepoint). One entry, and it is expected to become zero.
+        const EXCEPTIONS: [(&str, u32); 1] = [("src/ui/keys.rs", 0x21C4)];
+
+        /// The string literals on one line, escapes skipped.
+        fn literals(line: &str) -> Vec<String> {
+            let (mut out, mut cur, mut inside) = (Vec::new(), String::new(), false);
+            let mut chars = line.chars();
+            while let Some(c) = chars.next() {
+                if !inside {
+                    inside = c == '"';
+                } else {
+                    match c {
+                        '\\' => {
+                            chars.next();
+                        }
+                        '"' => {
+                            out.push(std::mem::take(&mut cur));
+                            inside = false;
+                        }
+                        _ => cur.push(c),
+                    }
+                }
+            }
+            out
+        }
+
+        let mut checked = 0usize;
+        for (name, body) in sources_under("src", 30) {
+            for line in body.lines() {
+                if line.starts_with("#[cfg(test)]") {
+                    break;
+                }
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                for lit in literals(line) {
+                    for ch in lit.chars().filter(|c| !c.is_ascii()) {
+                        let cp = ch as u32;
+                        checked += 1;
+                        if EXCEPTIONS.contains(&(name.as_str(), cp)) {
+                            continue;
+                        }
+                        assert!(
+                            face_covers(FACE_REGULAR, cp) && face_covers(FACE_BOLD, cp),
+                            "{name} draws U+{cp:04X} `{ch}`, which is not in both embedded \
+                             weights and will render as a tofu box. Either use a character \
+                             the face carries, or — if CORE names this one — draft the \
+                             amendment and add it to EXCEPTIONS with the reason"
+                        );
+                    }
+                }
+            }
+        }
+
+        // Both legs of the exception list, so it cannot rot into a permanent excuse.
+        for (file, cp) in EXCEPTIONS {
+            assert!(
+                !(face_covers(FACE_REGULAR, cp) && face_covers(FACE_BOLD, cp)),
+                "U+{cp:04X} is in both faces now, so {file} is no longer an exception — take \
+                 it off the list"
+            );
+            let body = source(file);
+            let drawn = body
+                .lines()
+                .take_while(|l| !l.starts_with("#[cfg(test)]"))
+                .any(|l| {
+                    !l.trim_start().starts_with("//")
+                        && literals(l)
+                            .iter()
+                            .any(|s| s.chars().any(|c| c as u32 == cp))
+                });
+            assert!(
+                drawn,
+                "{file} no longer draws U+{cp:04X}, so the exception is stale — CORE draft E \
+                 has landed or the string was reworded, and this line comes out"
+            );
+        }
+        assert!(
+            checked >= 50,
+            "only {checked} non-ASCII character(s) found across src/ — this scan is not \
+             reaching the literals it is supposed to be reading"
+        );
     }
 
     /// Named-by-role is only worth anything if the names are distinct: two roles sharing a
@@ -2871,10 +2985,10 @@ mod tests {
     #[test]
     fn every_popup_is_raised_through_floating() {
         // The walk, and the "a scan that found nothing is not a scan that found nothing
-        // wrong" guard with it, are [`ui_sources`]. This test wrote both first; 2f needed the
+        // wrong" guard with it, are [`sources_under`]. This test wrote both first; 2f needed the
         // same two and copying them a second time is the shape 2c was deleting.
         let mut strays = Vec::new();
-        for (name, text) in ui_sources() {
+        for (name, text) in sources_under("src/ui", 10) {
             for (n, line) in text.lines().enumerate() {
                 if line.trim_start().starts_with("//") {
                     continue;
