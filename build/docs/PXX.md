@@ -68,6 +68,40 @@ there and leaving it is how a walk ends up running the old build under the new b
 the same defect this round caught the first walk committing. It is put back afterwards, and the
 restore is proved by hash rather than assumed.)*
 
+*(Phase 2e/6 then reinstalled v2.1 and ran R10's re-walk. The point of R10 is that the first walk's
+round 10 ran a local rebuild, and the argument that it was the same source — true, and provable
+from `git diff` — is still an argument about an artefact rather than a measurement of one. This
+time it is a measurement: `pacman -Q` reads `indium 2.1.0-1`, `indium` resolves to `/usr/bin/indium`
+with the `~/.local` symlink parked, and that file's sha256 is `9d52300ada45993d…` — **byte-identical
+to the binary inside the `.pkg`**. It is also the odd one out of the three v2.1 binaries, since the
+tarball and the `.deb` share `f9bcea2d…` and the `.pkg` does not, so the re-walk certifies the one
+build no other check in this round reaches. All thirteen steps of round 10 were run against it;
+**twelve answered as written** and one carries a question, recorded below. 45 undecorated paths,
+45 NULs and no newlines under `-0`, `--long -0` refused
+with rc=2, `Extracted 3 entries.` and `Extracted 45 entries.` on the round trip with `beach day.jpg`
+and `--weird-name` surviving the pipe, exactly 153 bytes from `cat` with `cmp` silent, and — through
+a real pty, because a pipe cannot test a prompt that reads from the terminal by design — one
+password prompt, no echo, and no trace of the typed word in the pty stream. `--password` is an
+unknown option and `INDIUM_PASSWORD` is never consulted. `indium ./list` opened a window while
+`indium list` entered the terminal half, which is the distinction §4 promises stated as a control
+rather than asserted. `indium a.zip b.zip` forked one process per archive. The verdicts are the
+maker's; what is recorded here is what the program did.)*
+
+*(The question is 10.2's, and it is written down here rather than resolved because resolving it is
+the maker's. The step asks for eight columns and a total; all eight are present and the total reads
+`45 entries, 42 files, 3 directories, 6.1 KiB`. But the **packed column prints `-` for every member
+of a zip**, while for `secret.7z` it prints a figure. Python's `zipfile` says the archive does carry
+it — `compress_size=29` against `file_size=27` — so the data exists and INDIUM does not show it.
+Two readings, and neither is asserted here. **Honest**: libarchive exposes no
+`archive_entry_compressed_size()`, so `-` means *the reader did not tell me* rather than *zero*,
+which is consistent with the total line printing a ratio for the 7z and none for the zip, and with
+the GUI's Details panel showing the same shape. **Under-reported**: the figure is in the central
+directory, `--help` promises "packed" without qualification, and a person reading `--long` on a zip
+learns nothing about compression. It is **not one of the ledger's 23 and not a regression** — v2.1
+shipped this way and so did every release before it. If 10.2 is approved it goes to Phase 3's agent
+5 as a CLI observation; if it is denied it becomes work in this round under R3, like any other
+denial.)*
+
 ### What the estimator measured, and one thing it found
 
 Eight candidates over this repository's own `src/`, **936.1 KiB weighed whole** (under the 2 MiB
