@@ -189,9 +189,17 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                         .map(|e| (e.encrypted, e.is_dir, e.size, e.packed, e.method.clone()));
 
                     tr.col(|ui| {
-                        let colour = if focused {
-                            theme::ORANGE
-                        } else if row.is_dir {
+                        // PXX. The cursor row's name used to paint `ORANGE`, and CORE §6
+                        // rules it out twice over: the accent is *"reserved for exactly three
+                        // meanings — the current selection, staged changes, and
+                        // Apply/progress"*, of which this is none, and the keyboard's
+                        // position in a list is *"a line, not a colour"*. It also failed AA
+                        // where nothing else on the row did. Moving the cursor sets the
+                        // selection too, so that ink sat on the orange wash at 2.91:1 — while
+                        // every other column on the same row had just been stepped up a tier
+                        // to clear AA on that exact ground. `TEXT` measures 9.14:1 there, and
+                        // the ring below is what says where the cursor is.
+                        let colour = if focused || row.is_dir {
                             theme::TEXT
                         } else {
                             theme::TEXT_SECONDARY
@@ -322,9 +330,16 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
         // It used to be the filename turning `ORANGE` and nothing else. But moving the
         // cursor also sets the selection (`mod.rs`, the movement block), and the selection
         // is `ORANGE.linear_multiply(0.35)` — so the cursor was orange ink on an orange
-        // wash at **2.06:1**, which the testing round reported not as faint but as absent:
+        // wash at **2.91:1**, which the testing round reported not as faint but as absent:
         // *"dont know what orange row cursor you talk about. i see none orange thing."*
         // A line and a wash can be read at the same time; two washes cannot.
+        //
+        // PXX corrected that figure from 2.06:1, and finished the job the paragraph
+        // describes. 2.06 is what a *linear* blend gives, but `linear_multiply` composites
+        // in sRGB byte space and lands on `#712422` — the ground the comment 150 lines above
+        // names, and computes its own two ratios from. And the Name column went on painting
+        // `ORANGE` on the cursor row for three rounds after the ring replaced it, which is
+        // why this passage stood in the past tense while the code did not.
         //
         // The rect matches `egui_extras`' own `gapless_rect` — `expand2(0.5 * item_spacing)`
         // — so the ring sits exactly on the selection fill rather than a few pixels inside
