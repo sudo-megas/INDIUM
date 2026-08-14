@@ -53,6 +53,15 @@ pub fn show(app: &mut Indium, ui: &mut egui::Ui) {
                 // Orange, and legitimately so: CORE §6 reserves it for the current
                 // selection, staged changes, and Apply/progress. This is the second of the
                 // three, and the first time INDIUM has had cause to use it.
+                //
+                // **This is the one orange ink left in the window, and it measures 4.44:1 on
+                // PANEL against a floor of 4.5.** P23 §2f found it beside the three buttons
+                // and the maker's ruling fixed those by filling them instead; a label cannot
+                // take a fill without becoming a control it is not, so this one is asserted
+                // as it stands — `PAINTED_ANYWAY` in `every_ink_is_legible_on_every_ground_
+                // it_is_allowed_on`, the only entry left on that list. The answer it wants is
+                // a lighter orange usable as an ink, which is a CORE §6 palette decision and
+                // is not drafted.
                 ui.label(
                     egui::RichText::new(app.tasks.tray_summary())
                         .family(theme::MONO)
@@ -61,11 +70,9 @@ pub fn show(app: &mut Indium, ui: &mut egui::Ui) {
                 );
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    apply = theme::button(
+                    apply = theme::button_primary(
                         ui,
-                        egui::RichText::new("Apply")
-                            .color(theme::ORANGE)
-                            .family(theme::bold()),
+                        egui::RichText::new("Apply").family(theme::bold()),
                         true,
                     )
                     .clicked();

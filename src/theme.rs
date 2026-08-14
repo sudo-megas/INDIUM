@@ -94,6 +94,32 @@ pub const AUBERGINE: Color32 = Color32::from_rgb(0x77, 0x29, 0x53);
 /// from a resting one. At this end of the scale there is only room upward.
 pub const AUBERGINE_LIT: Color32 = Color32::from_rgb(0x8F, 0x31, 0x64);
 
+/// "The same colour with the light on", as arithmetic rather than as a second hex.
+///
+/// [`AUBERGINE_LIT`] **is** `lit(AUBERGINE)` exactly — 119·1.2 = 142.8 → 143, 41 → 49,
+/// 83 → 100, all three rounding to the byte that was picked by eye nine milestones ago.
+/// That is not a coincidence worth ignoring: it means CORE §6's *one meaning at two
+/// intensities* has a definition, and a second accent can be lit without a second palette
+/// decision. `the_light_on_is_one_relation_and_aubergine_proves_it` pins the identity, so
+/// this cannot drift into a different transform while still citing this one.
+///
+/// Rounded, not truncated — `×6/5` alone gives 142 and would miss [`AUBERGINE_LIT`] by a
+/// byte, which is exactly the sort of near-miss that would make the claim above false while
+/// looking true. Clamped at 255, which [`ORANGE`] reaches on its red channel: the lift then
+/// spends itself on green and blue and the hue rides toward yellow, which is what a hot
+/// filament does and is the right direction for an accent being pressed.
+pub const fn lit(c: Color32) -> Color32 {
+    const fn up(v: u8) -> u8 {
+        let n = (v as u32 * 6 + 2) / 5;
+        if n > 255 {
+            255
+        } else {
+            n as u8
+        }
+    }
+    Color32::from_rgb(up(c.r()), up(c.g()), up(c.b()))
+}
+
 // --- Accent -------------------------------------------------------------------
 /// Ubuntu Orange. CORE §6 reserves it for exactly three meanings: the current
 /// selection, staged changes, and Apply/progress. "Orange means *something will
@@ -1016,6 +1042,73 @@ pub fn foot(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
         });
 }
 
+/// [`button_primary`]'s three faces, rest first, each a step lighter than the one before.
+///
+/// A named array rather than three literals inside the function, and the reason is what a
+/// test can reach: `the_primary_button_ink_clears_aa_on_every_state_it_is_painted_on`
+/// measures *this*, so the figures it clears are the figures the button paints. Written out
+/// at the call site instead, the test would have had to restate the ladder, and a hand
+/// changing the button's press colour would have moved the screen without moving the
+/// measurement — which is the shape of every defect P23 has had to correct so far.
+const PRIMARY_ORANGE: [Color32; 3] = [ORANGE, lit(ORANGE), lit(lit(ORANGE))];
+
+/// The primary button: an orange *fill* with a dark ink, rather than orange ink on the
+/// ordinary face.
+///
+/// **This is the maker's ruling on what P23 §2f found, and the finding was that orange had
+/// never been measured as an ink at all.** It is the ink of exactly three controls — Apply
+/// in the tray, Apply in Pending tasks, Create in the Create popup — and [`button`] sets no
+/// fill when enabled, so the ink rode egui's own widget states and came out **under AA 4.5
+/// on every one of them**: 3.65 at rest on [`CONTROL`], 2.58 hovered on [`AUBERGINE`], 2.06
+/// held on [`AUBERGINE_LIT`]. The large-text tier cannot rescue it either — it wants 18pt
+/// regular or 14pt bold and [`BODY`] is 9.75pt, so the bold Apply is short of the tier by a
+/// third, and 2.58 and 2.06 are under even the 3:1 that tier would ask.
+///
+/// Filling instead of tinting fixes all three states at once and leaves the token alone,
+/// which is why it was the recommendation. It also says something the old treatment did
+/// not: a primary action now sits *above* the row it is in rather than beside it.
+///
+/// **The ladder goes up, and it has to.** Pressed-as-darker is the conventional cue and it
+/// is not available here: `ORANGE` at the same ×0.8 that would darken it measures **3.67:1**
+/// against this ink, so the press state would have broken the very floor this function
+/// exists to clear. [`AUBERGINE_LIT`]'s own doc records the identical finding from the other
+/// end of the palette — *"at this end of the scale there is only room upward"*. So rest is
+/// `ORANGE`, hover is [`lit`] of it, held is `lit` twice, each step lighter than the last,
+/// and the ink's contrast therefore only ever improves above its resting floor: 5.40, 6.71,
+/// 7.54.
+///
+/// **The ink is [`VOID`], and that is a ground doing a second job on purpose.** It is the
+/// darkest thing the window owns, which is what buys the 5.40:1; nothing in the palette's
+/// ink ladder is dark, because until now no ground in the window was light enough to need a
+/// dark ink. `the_primary_button_ink_clears_aa_on_every_state_it_is_painted_on` measures all
+/// three states rather than the resting one, so a later hand relighting the ladder cannot
+/// quietly drop the held state through the floor.
+///
+/// **Why the fill is not simply `Button::fill`.** That call is documented *"this will
+/// override any on-hover effects"* and it does: `Style::button_style` builds the frame from
+/// `visuals.widgets.state(state).weak_bg_fill` and then the override replaces it for every
+/// state alike. A button whose fill cannot change is the complaint
+/// `the_four_control_states_are_four_colours` was written for — *"clicks doesnt feel
+/// anything"* — so the fill is set per state through a scoped visuals override, which is the
+/// same door `install_visuals` uses and keeps expansion and the hot edge working unchanged.
+///
+/// Disabled delegates to [`button`], whose outlined ghost is the established answer and is
+/// not orange for the reason `newarchive` states beside its own call: orange promises that
+/// something *will* happen, and over a refusal nothing will.
+pub fn button_primary(ui: &mut egui::Ui, text: egui::RichText, enabled: bool) -> egui::Response {
+    if !enabled {
+        return button(ui, text, false);
+    }
+    ui.scope(|ui| {
+        let w = &mut ui.visuals_mut().widgets;
+        w.inactive.weak_bg_fill = PRIMARY_ORANGE[0];
+        w.hovered.weak_bg_fill = PRIMARY_ORANGE[1];
+        w.active.weak_bg_fill = PRIMARY_ORANGE[2];
+        button(ui, text.color(VOID), true)
+    })
+    .inner
+}
+
 /// A button, with the focus problem solved.
 ///
 /// egui maps `has_focus() || clicked()` to the *active* state and offers no `widgets.focused`
@@ -1464,7 +1557,16 @@ mod tests {
         // not a text ramp: nothing draws orange words directly onto a popup's face, onto a
         // selected row, or onto a hovered one — the orange in those places is the *fill*, and
         // the ink over it is TEXT. Listed rather than omitted so that stays true.
-        const FORBIDDEN: [(&str, &str); 7] = [
+        //
+        // **The last three arrived by being fixed, and that is the only way an entry should
+        // ever move onto this list.** ORANGE on CONTROL, AUBERGINE and AUBERGINE_LIT were
+        // `PAINTED_ANYWAY` below when §2f measured them — 3.65, 2.58 and 2.06, the three
+        // states of the same three buttons. The maker's ruling on that finding was to give
+        // those buttons an orange *fill* and a dark ink ([`button_primary`]), so orange stops
+        // being an ink on all three grounds at once and the pairs become forbidden in the
+        // ordinary way. The figures themselves never moved and never will: what changed is
+        // that nothing paints them.
+        const FORBIDDEN: [(&str, &str); 10] = [
             ("TEXT_MUTED", "AUBERGINE"),
             ("TEXT_MUTED", "AUBERGINE_LIT"),
             ("TEXT_SECONDARY", "AUBERGINE_LIT"),
@@ -1472,42 +1574,42 @@ mod tests {
             ("ORANGE", "POPUP"),
             ("ORANGE", "SELECTION_WASH"),
             ("ORANGE", "ROW_HOVER"),
-        ];
-
-        // **These four are painted today, and they are under the floor.** That is a different
-        // statement from the list above and it does not get to share its name: `FORBIDDEN`
-        // means the program never does this, and the program does all four of these on every
-        // launch. Measuring ORANGE as an ink for the first time is what surfaced them.
-        //
-        // | pair | measures | drawn by |
-        // | --- | --- | --- |
-        // | ORANGE on PANEL | 4.44 | `tray.rs:60` — the staging summary, [`BODY`] in [`MONO`] |
-        // | ORANGE on CONTROL | 3.65 | Apply and Create at rest |
-        // | ORANGE on AUBERGINE | 2.58 | the same three buttons, hovered |
-        // | ORANGE on AUBERGINE_LIT | 2.06 | the same three, held down |
-        //
-        // The three buttons come from [`button`], which sets no fill when enabled, so the ink
-        // rides egui's own widget states: `weak_bg_fill` is CONTROL inactive, AUBERGINE
-        // hovered, AUBERGINE_LIT active (`install_visuals`).
-        //
-        // **The large-text exemption does not apply and cannot be made to.** WCAG's 3:1 tier
-        // wants 18pt regular or 14pt bold; [`BODY`] is 13px, which is 9.75pt, so the bold
-        // Apply is 9.75pt bold and short of the tier by a third. And the hovered and held
-        // figures — 2.58 and 2.06 — are under 3:1 as well, so no reading of the exemption
-        // reaches them even if the size did.
-        //
-        // **This is a finding, not a decision, and the decision is not mine.** ORANGE is
-        // CORE §6's palette and CORE §6 gives it the meaning *something will happen*, so
-        // every way out — darkening the token, giving the buttons an orange fill and a dark
-        // ink, or accepting the figures on the record — edits a clause only the maker edits.
-        // Until then the truth is pinned here rather than left unmeasured, and it is pinned
-        // in **both** directions: heal one of these and this fires and says to move it up.
-        const PAINTED_ANYWAY: [(&str, &str); 4] = [
-            ("ORANGE", "PANEL"),
             ("ORANGE", "CONTROL"),
             ("ORANGE", "AUBERGINE"),
             ("ORANGE", "AUBERGINE_LIT"),
         ];
+
+        // **This one is painted today, and it is under the floor.** That is a different
+        // statement from the list above and it does not get to share its name: `FORBIDDEN`
+        // means the program never does this, and the program does this on every launch with
+        // anything staged. Measuring ORANGE as an ink for the first time is what surfaced it.
+        //
+        // | pair | measures | drawn by |
+        // | --- | --- | --- |
+        // | ORANGE on PANEL | 4.44 | `tray.rs:60` — the staging summary, [`BODY`] in [`MONO`] |
+        //
+        // **It began as four, and the maker's ruling closed three of them.** Apply, Apply and
+        // Create were orange ink on egui's own widget states — CONTROL at rest, AUBERGINE
+        // hovered, AUBERGINE_LIT held, at 3.65, 2.58 and 2.06 — and they now carry an orange
+        // fill and a dark ink instead ([`button_primary`]), so those three pairs moved up to
+        // `FORBIDDEN`, where a pair nothing paints belongs.
+        //
+        // **The tray summary is not a button and did not move with them.** It is a label, and
+        // the ruling that fixed the buttons says nothing about it: filling behind a line of
+        // running text is not the same act as filling a control. 4.44 against 4.5 is the
+        // narrowest miss in the file — close enough that a hand might call it noise, which is
+        // exactly why it is asserted rather than rounded away. The answer it wants is a CORE
+        // §6 one and has not been drafted: a lighter orange usable as an ink is a palette
+        // decision, and the palette is the maker's.
+        //
+        // **The large-text exemption does not apply and cannot be made to**, here or on the
+        // three that moved. WCAG's 3:1 tier wants 18pt regular or 14pt bold; [`BODY`] is
+        // 13px, which is 9.75pt, so the bold Apply was short of the tier by a third — and
+        // 2.58 and 2.06 were under 3:1 as well, so no reading of the exemption reached them
+        // even if the size had.
+        //
+        // Pinned in **both** directions: heal this and the assertion fires and says so.
+        const PAINTED_ANYWAY: [(&str, &str); 1] = [("ORANGE", "PANEL")];
 
         for (gn, g) in &grounds {
             let resting = GROUNDS.iter().any(|(n, _)| n == gn);
@@ -1550,6 +1652,76 @@ mod tests {
         // 2.64. TEXT_MUTED cannot reach 4.5 on AUBERGINE and stay muted: it would have to be
         // about #B3B3B1, which is TEXT_SECONDARY in all but name, and the ink ladder would
         // collapse from three tiers to two. So the call sites moved, not the palette.
+    }
+
+    /// [`lit`] claims to be CORE §6's *"the same colour with the light on"*, and the claim is
+    /// checkable because the palette already contains one worked example.
+    ///
+    /// [`AUBERGINE_LIT`] was picked by eye in P7, nine milestones before there was a
+    /// transform to compare it to. If `lit(AUBERGINE)` is that byte triple exactly, then the
+    /// relation is not something this round invented and applied to a second accent — it is
+    /// the one already in the document, given arithmetic. If it ever stops being exactly
+    /// that, [`button_primary`]'s ladder is lighting orange by some other rule while still
+    /// citing this one, and the doc comment becomes a false claim rather than a stale one.
+    #[test]
+    fn the_light_on_is_one_relation_and_aubergine_proves_it() {
+        assert_eq!(
+            lit(AUBERGINE),
+            AUBERGINE_LIT,
+            "lit(AUBERGINE) is {:?} and AUBERGINE_LIT is {:?} — CORE §6 calls them one colour \
+             at two intensities, and `lit` is what makes that a definition rather than a \
+             description. Either the transform moved or a hex did",
+            lit(AUBERGINE),
+            AUBERGINE_LIT
+        );
+        // Rounding, not truncation, is the whole of why the identity holds: ×6/5 alone gives
+        // 142 where AUBERGINE_LIT's red is 143.
+        assert_eq!(lit(AUBERGINE).r(), 143);
+        // The clamp is reached by ORANGE and by nothing else in the palette, so it is checked
+        // where it actually happens rather than on a made-up colour.
+        assert_eq!(lit(ORANGE).r(), 255, "ORANGE's red saturates when lit");
+        assert!(
+            lit(ORANGE).g() > ORANGE.g() && lit(ORANGE).b() > ORANGE.b(),
+            "with red clamped the lift has to spend itself on the other two channels, or \
+             `lit` of a saturated colour is a no-op and the hover state stops existing"
+        );
+    }
+
+    /// The dark ink of [`button_primary`] against all three faces of the button, not just the
+    /// one a screenshot catches.
+    ///
+    /// `every_ink_is_legible_on_every_ground_it_is_allowed_on` cannot see these: its grounds
+    /// are the palette's, and two of [`PRIMARY_ORANGE`]'s three exist only inside that
+    /// function's scoped override. Adding them to the ground ladder would be worse than
+    /// useless — it would demand every *other* ink be legible on orange, which is a rule
+    /// nothing in the window wants and three inks would immediately fail.
+    ///
+    /// **Resting is the floor and the ladder only goes up**, which is the property worth
+    /// asserting rather than the three numbers: it is what makes measuring the state a
+    /// screenshot catches sufficient for the two it does not. Assert it in that direction and
+    /// a later hand cannot introduce a darker press state without this failing — which is the
+    /// exact mistake the ruling's own measurement rejected at 3.67:1.
+    #[test]
+    fn the_primary_button_ink_clears_aa_on_every_state_it_is_painted_on() {
+        let states = ["at rest", "hovered", "held"];
+        let mut last = 0.0;
+        for (name, ground) in states.into_iter().zip(PRIMARY_ORANGE) {
+            let seen = contrast(VOID, ground);
+            assert!(
+                seen >= 4.5,
+                "the primary button's ink measures {seen:.2}:1 {name} — under AA 4.5. This is \
+                 the floor the orange fill exists to clear; orange ink on the ordinary face \
+                 was 3.65/2.58/2.06 and that is what it was replaced for"
+            );
+            assert!(
+                seen > last,
+                "the primary button got no lighter going {name}: {seen:.2}:1 against \
+                 {last:.2}:1 before it. The ladder is what lets the resting figure stand as \
+                 the floor for all three, and a darker press state measured 3.67:1 when it \
+                 was tried"
+            );
+            last = seen;
+        }
     }
 
     /// [`SCRIM`]'s job is the opposite of every other figure in this file: the window behind
@@ -1965,7 +2137,26 @@ mod tests {
     }
 
     /// P5 §3 and P6 §6.6's invariant, pinned at last: orange means the current selection,
-    /// staged changes and Apply/progress, and reaches the widget states through none of them.
+    /// staged changes and Apply/progress, and reaches the *installed* widget states through
+    /// none of them.
+    ///
+    /// **"Installed" is doing work in that sentence now, and P23 §2f is why.** The maker's
+    /// ruling gave the three primary buttons an orange fill, and a fill on a button is a
+    /// widget state by construction — [`button_primary`] sets `weak_bg_fill` from
+    /// [`PRIMARY_ORANGE`] on all three of them. So the flat reading of this test's old title
+    /// stopped being true the day that landed, and a test whose name outlives its claim is
+    /// worth less than no test.
+    ///
+    /// What survives, and is the half that always mattered: **orange is never a widget state
+    /// by default**, so it cannot arrive at Cancel, Discard, Clear list or a checkbox by
+    /// someone editing the theme — the failure `install_visuals` warns about in its own words
+    /// beside `widgets.active.bg_stroke`. `button_primary` is the opposite of that: a scope,
+    /// entered deliberately, at three call sites that each mean *something will happen*.
+    ///
+    /// The scan is what keeps the distinction honest rather than merely stated. Every place
+    /// in the tree that writes a widget-state fill is counted, and orange may appear in
+    /// exactly the three that `button_primary` owns — so a fourth, anywhere, fails here with
+    /// the reason attached instead of quietly becoming decoration.
     #[test]
     fn orange_has_not_spread_into_the_widget_states() {
         let v = visuals();
@@ -1982,6 +2173,38 @@ mod tests {
             assert_ne!(c, ORANGE, "orange reached a widget state");
         }
         assert_eq!(v.selection.stroke.color, ORANGE);
+
+        // `sources_under` rather than a fifth walker, which is the housekeeping 2f did while
+        // it was here: the walk, the sort and the found-nothing floor are one function's job.
+        let mut orange_states = Vec::new();
+        for (name, src) in sources_under("src", 20) {
+            for (i, line) in src.lines().enumerate() {
+                let t = line.trim();
+                // An assignment, not one of this module's own reads of the same field.
+                if t.starts_with("//") || !t.contains("weak_bg_fill") || !t.contains('=') {
+                    continue;
+                }
+                let where_ = format!("{name}:{}", i + 1);
+                assert!(
+                    name.ends_with("theme.rs"),
+                    "{where_} sets a widget-state fill outside theme.rs. The window's states \
+                     are installed in one place so that a colour cannot acquire a second \
+                     meaning in a file that only draws one panel"
+                );
+                if t.contains("ORANGE") {
+                    orange_states.push(where_);
+                }
+            }
+        }
+        assert_eq!(
+            orange_states.len(),
+            3,
+            "orange is a widget state in {} places and `button_primary`'s three are the only \
+             sanctioned ones — rest, hovered and held of the primary button: {orange_states:?}. \
+             A fourth is orange being spent on something that is not Apply, Apply or Create, \
+             which is the spread this test is named for",
+            orange_states.len()
+        );
     }
 
     // -----------------------------------------------------------------------

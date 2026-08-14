@@ -275,13 +275,13 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     );
                     // Orange while it can be pressed, and the helper's muted ghost when it
                     // cannot: CORE §6 gives orange to "something *will* happen", and a Create
-                    // over an empty draft is exactly the case where nothing will.
-                    create = theme::button(
-                        ui,
-                        egui::RichText::new("Create").color(theme::ORANGE),
-                        refusal.is_none(),
-                    )
-                    .clicked();
+                    // over an empty draft is exactly the case where nothing will. Orange as
+                    // the *fill* since P23 §2f — as ink on this button's own resting face it
+                    // measured 3.65:1, and the sentence above was true of a control nobody
+                    // could read it on.
+                    create =
+                        theme::button_primary(ui, egui::RichText::new("Create"), refusal.is_none())
+                            .clicked();
                     // Why it is dead, beside it — the same discipline Measure has followed
                     // since P21b, and for the same reason: a disabled button reports no
                     // click, so a sentence waiting for one never reaches the person who

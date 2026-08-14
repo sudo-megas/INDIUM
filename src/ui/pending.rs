@@ -107,11 +107,9 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 ui.horizontal(|ui| {
                     discard = theme::button(ui, egui::RichText::new("Discard all"), true).clicked();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        apply = theme::button(
+                        apply = theme::button_primary(
                             ui,
-                            egui::RichText::new("Apply")
-                                .color(theme::ORANGE)
-                                .family(theme::bold()),
+                            egui::RichText::new("Apply").family(theme::bold()),
                             true,
                         )
                         .clicked();
