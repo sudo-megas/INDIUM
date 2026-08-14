@@ -52,6 +52,22 @@ first time all three were true at once.
 is a check that found nothing to look at — and the two ELF checks skip by default precisely when
 nobody has put a shipped binary where they look.
 
+*(Phase 2e/5 ran both again after the fixes and got the same two lines back — **40 passed, 0
+failed, 0 skipped**, toolkit-free, PIE, BIND_NOW. It then pointed them a second time at the binary
+the fixes produced, which had never been ELF-checked at all and is the one the re-walk runs: PIE,
+BIND_NOW, no RUNPATH, no RPATH, no TEXTREL, non-executable stack, stripped, and no GTK, Qt, KF6,
+X11 or portal. It was built from the tree at `71c7357` — twelve commits past v2.1, five of them
+touching source — and none of them dragged in a forbidden dependency or lost a hardening default.
+Two things were checked rather than assumed while doing it. `release.yml:342` says in a
+comment that the tarball holds the same binary the `.deb` wraps — it does, byte for byte, and the
+`.pkg`'s is a different build, which is the whole of why v2.1 shipped two distinct binaries.
+And the swap has a trap in it worth writing down for anyone who repeats the recipe: both binary
+checks read `target/release/indium`, `check-deps.sh` hardcodes that path with no argument, and
+`~/.local/bin/indium` symlinks to it ahead of `/usr/bin` in `$PATH`. Unpacking a shipped binary
+there and leaving it is how a walk ends up running the old build under the new build's name —
+the same defect this round caught the first walk committing. It is put back afterwards, and the
+restore is proved by hash rather than assumed.)*
+
 ### What the estimator measured, and one thing it found
 
 Eight candidates over this repository's own `src/`, **936.1 KiB weighed whole** (under the 2 MiB
