@@ -506,7 +506,7 @@ impl Indium {
 /// a person fixes by leaving the popup: the name and the directory are seeded when the popup
 /// opens, so an empty draft is the refusal this will actually show.
 ///
-/// Free rather than a method, for [`super::estimate_refusal_for`]'s reason — `Indium` cannot
+/// Free rather than a method, for [`crate::ui::estimate_refusal_for`]'s reason — `Indium` cannot
 /// be built in a unit test, and a gate written as a method on it is held by eye.
 fn create_refusal_for(empty_draft: bool, no_name: bool, no_dir: bool) -> Option<&'static str> {
     if empty_draft {
@@ -608,5 +608,117 @@ mod tests {
             ),
             "archive.tar.gz"
         );
+    }
+
+    /// The METHOD line holds three things, and P23 §2c spent most of the room it had.
+    ///
+    /// The heading, the refusal sentence and the *Measure* button share one `ui.horizontal`
+    /// — the comment at the top of that row explains why they were folded onto one line —
+    /// and the type scale moved two of the three: the heading 14 → [`theme::SECTION`] and the
+    /// sentence 11 → [`theme::SMALL`]. **Measured at the popup's real width, that took the
+    /// clearance between heading and sentence from 62.0px to 18.9px** — the round spent 70%
+    /// of the margin, and the state it is tightest in is the encrypted one, which no
+    /// screenshot in §2c reached. Nothing failed, and nothing was pinned either.
+    ///
+    /// **The failure this guards is an overrun, not a wrap**, and that is worth stating
+    /// because the obvious assumption is wrong: `Ui::wrap_mode` returns `Extend` for a
+    /// horizontal layout that is not `main_wrap` (egui-0.36.1 `ui.rs:588-605`), so a
+    /// sentence with no room does not take a second line — it keeps going left, out of the
+    /// popup. Lengthened by eighteen characters it starts at **−71.3**, past the window's
+    /// own edge, with nothing on screen to say it was cut. So the left edge is the
+    /// assertion that carries this test; the height one below it is the leg that catches
+    /// the row being changed to a wrapping layout, where the overflow would go the other
+    /// way and push the method list down instead.
+    ///
+    /// The sentences come from [`crate::ui::estimate_refusal_for`] rather than being quoted,
+    /// so a reword is measured the day it is written.
+    #[test]
+    fn the_method_line_holds_heading_sentence_and_button_on_one_line() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+
+        // The three sentences the button can be dead behind, in the order §4.1 produces
+        // them: nothing staged and nothing open, an archive not yet read, an encrypted one.
+        let sentences = [
+            crate::ui::estimate_refusal_for(false, false, false, false),
+            crate::ui::estimate_refusal_for(false, true, true, false),
+            crate::ui::estimate_refusal_for(false, true, false, true),
+        ];
+
+        for why in sentences {
+            let why = why.expect("each of these three states refuses to measure");
+            let mut heading = egui::Rect::NOTHING;
+            let mut sentence = egui::Rect::NOTHING;
+            // What one line of `SMALL` is, measured in the same frame by the same face
+            // rather than asserted as a number. Drawn after the row, so it cannot move it.
+            let mut line = 0.0f32;
+            let mut full = ctx.run_ui(
+                egui::RawInput {
+                    // 656 leaves the panel's content exactly the 620 `show` sets as the
+                    // popup's minimum, and the popup is `resizable(false)`, so 620 is not a
+                    // floor the window grows off — it is the width.
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(656.0, 500.0),
+                    )),
+                    ..Default::default()
+                },
+                |root| {
+                    egui::CentralPanel::default()
+                        .frame(theme::zone(theme::PANEL))
+                        .show(root, |ui| {
+                            ui.set_min_width(620.0);
+                            ui.horizontal(|ui| {
+                                heading = ui
+                                    .label(
+                                        egui::RichText::new("METHOD")
+                                            .size(theme::SECTION)
+                                            .family(theme::bold())
+                                            .color(theme::TEXT),
+                                    )
+                                    .rect;
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        theme::button(ui, egui::RichText::new("Measure"), false);
+                                        sentence = ui
+                                            .label(
+                                                egui::RichText::new(why)
+                                                    .size(theme::SMALL)
+                                                    .color(theme::TEXT_MUTED),
+                                            )
+                                            .rect;
+                                    },
+                                );
+                            });
+                            line = ui
+                                .label(egui::RichText::new("reference").size(theme::SMALL))
+                                .rect
+                                .height();
+                        });
+                },
+            );
+            // `FullOutput` panics on drop with an unapplied delta; nothing here paints it.
+            full.textures_delta.clear();
+
+            assert!(
+                sentence.left() > heading.right(),
+                "\"{why}\" starts at {:.1}, which is not clear of where the METHOD heading \
+                 ends ({:.1}). This row extends rather than wraps, so a sentence with no \
+                 room runs off the popup's left edge and says nothing about it — either \
+                 shorten the sentence, quieten one of the two sizes, or give the row its \
+                 own line and pay `list_height` the row of chrome that costs.",
+                sentence.left(),
+                heading.right()
+            );
+            assert!(
+                sentence.height() <= line + 0.5,
+                "\"{why}\" is {:.1}px tall where one line of SMALL is {line:.1}, so this row \
+                 now wraps. That is a different failure from the one above and needs a \
+                 different fix: the popup is resizable(false) at 620, so a second line \
+                 pushes the method list down rather than widening anything.",
+                sentence.height()
+            );
+        }
     }
 }
