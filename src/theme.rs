@@ -919,11 +919,24 @@ pub fn zone(fill: Color32) -> egui::Frame {
 ///
 /// **Where a popup opens the second time is egui's answer, and it is kept.** `pivot_pos` is
 /// set through `get_or_insert_with` (`area.rs:459-462`), so `default_pos` is read once and a
-/// popup that has been dragged reopens where it was left. That state lives in egui's memory,
-/// and `eframe` is built here with `default-features = false` — **no `persistence`** — so it
-/// dies with the process: moved within a run, centred again on the next launch. Nothing in
-/// this file makes that happen; it is written down because it is the behaviour, and the next
-/// hand to add `persistence` for some other reason will change it without meaning to.
+/// popup that has been dragged reopens where it was left — closed and reopened in the test
+/// below it comes back at the same pixel, not near it. That state lives in egui's memory, and
+/// `eframe` is built here with `default-features = false` — **no `persistence`** — so it dies
+/// with the process: moved within a run, centred again on the next launch. Nothing in this
+/// file makes that happen; it is written down because it is the behaviour, and the next hand
+/// to add `persistence` for some other reason will change it without meaning to.
+///
+/// **The same cache has a second effect, and it is the one that will look like a bug.** Read
+/// once means read once whether or not anybody dragged anything, so a popup that has never
+/// been touched also stops re-centring: resize the window and reopen it and it returns to the
+/// old centre. Measured, a popup centred in a 1200×800 window and reopened at 800×600 sits
+/// **223.8px off centre**, where the anchored version it replaced sat at 0.5. It is not lost —
+/// `constrain_window_rect_to_area` still clamps it into view — it is simply not centred until
+/// the process restarts, which is the same sentence as the paragraph above and the same cause.
+/// **That is the accepted cost of the maker's question**, and it is
+/// stated here in full because stage 3's round-13 walk resizes the window to 125% and 150% and
+/// reopens popups at each: without this paragraph that walk files a placement defect, and it
+/// would be filing one against a decision rather than a mistake.
 ///
 /// The two modals are not here. Password and Measure are `egui::Modal`, fixed by
 /// construction, and CORE §4.10 rests on Measure being the one popup drawn *over* another.
@@ -2292,7 +2305,7 @@ mod tests {
         );
     }
 
-    /// One popup, driven through six frames with a mouse egui can actually feel.
+    /// One popup on a bench: a context, a window, and frames you can vary.
     ///
     /// **The pointer goes in through `RawInput::events`, which is the only door that
     /// works here.** P23 spent an afternoon on `ydotool` before this: `--absolute` is inert
@@ -2301,27 +2314,44 @@ mod tests {
     /// far side of it, and egui cannot tell it from a hand.
     ///
     /// `anchored` swaps [`floating`] back for the `.anchor()` call it replaced. It is the
-    /// control leg: every assertion below is also run against the popup as it shipped, so a
+    /// control leg: the assertions are also run against the popup as it shipped, so a
     /// harness that cannot drag anything fails the test it is supposed to pass.
     ///
-    /// Returns where the popup opened and where it ended up.
-    fn drag_popup(anchored: bool, drag: egui::Vec2) -> (egui::Rect, egui::Rect, egui::Rect) {
-        let ctx = egui::Context::default();
-        install(&ctx);
-        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
-        let mut content = egui::Rect::NOTHING;
+    /// `screen` is public because one of the tests below resizes the window mid-run.
+    struct Bench {
+        ctx: egui::Context,
+        screen: egui::Rect,
+        anchored: bool,
+    }
 
-        let run = |events: Vec<egui::Event>| -> egui::Rect {
+    impl Bench {
+        fn new(anchored: bool) -> Self {
+            let ctx = egui::Context::default();
+            install(&ctx);
+            Self {
+                ctx,
+                screen: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0)),
+                anchored,
+            }
+        }
+
+        /// One frame. With `show` false the window is not raised at all, which is what a
+        /// closed popup looks like from egui's side — `open: bool` guards the `show` call
+        /// at all eight sites.
+        fn frame(&self, events: Vec<egui::Event>, show: bool) -> egui::Rect {
             let mut rect = egui::Rect::NOTHING;
-            let mut full = ctx.run_ui(
+            let mut full = self.ctx.run_ui(
                 egui::RawInput {
-                    screen_rect: Some(screen),
+                    screen_rect: Some(self.screen),
                     events,
                     ..Default::default()
                 },
                 |root| {
+                    if !show {
+                        return;
+                    }
                     let ctx = root.ctx().clone();
-                    let w = if anchored {
+                    let w = if self.anchored {
                         egui::Window::new("Drag me")
                             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
                     } else {
@@ -2338,25 +2368,36 @@ mod tests {
             // `FullOutput` panics on drop with an unapplied delta; nothing here paints it.
             full.textures_delta.clear();
             rect
-        };
+        }
 
-        // The first frame is a sizing pass — `Area::begin` marks it uninteractable on
-        // purpose — so the popup is only really open on the second.
-        run(vec![]);
-        let opened = run(vec![]);
-        ctx.input(|i| content = i.content_rect());
+        /// Raise it and let the sizing pass settle: the first frame is uninteractable on
+        /// purpose — `Area::begin` marks it so — and the popup is only really open on the
+        /// second.
+        fn open(&self) -> egui::Rect {
+            self.frame(vec![], true);
+            self.frame(vec![], true)
+        }
 
-        // Grab the middle of the title band, a few pixels down from the top edge.
-        let grab = opened.center_top() + egui::vec2(0.0, 8.0);
-        run(vec![egui::Event::PointerMoved(grab)]);
-        run(vec![egui::Event::PointerButton {
-            pos: grab,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::default(),
-        }]);
-        run(vec![egui::Event::PointerMoved(grab + drag)]);
-        (opened, run(vec![]), content)
+        /// Grab the middle of the title band, a few pixels down from the top edge, and pull.
+        fn drag(&self, from: egui::Rect, by: egui::Vec2) -> egui::Rect {
+            let grab = from.center_top() + egui::vec2(0.0, 8.0);
+            self.frame(vec![egui::Event::PointerMoved(grab)], true);
+            self.frame(
+                vec![egui::Event::PointerButton {
+                    pos: grab,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                }],
+                true,
+            );
+            self.frame(vec![egui::Event::PointerMoved(grab + by)], true);
+            self.frame(vec![], true)
+        }
+
+        fn content(&self) -> egui::Rect {
+            self.ctx.input(|i| i.content_rect())
+        }
     }
 
     /// The maker's question — *"Can popups float and be moved by mouse freely?"* — as an
@@ -2370,7 +2411,10 @@ mod tests {
     fn a_popup_opens_centred_and_can_then_be_dragged_off_centre() {
         let drag = egui::vec2(120.0, -60.0);
 
-        let (opened, moved, content) = drag_popup(false, drag);
+        let bench = Bench::new(false);
+        let opened = bench.open();
+        let content = bench.content();
+        let moved = bench.drag(opened, drag);
         assert!(
             (opened.center() - content.center()).length() < 1.0,
             "a floating popup opens at {:?}, which is not the centre of {:?} — \
@@ -2389,12 +2433,97 @@ mod tests {
             moved.min
         );
 
-        let (anchored_open, anchored_moved, _) = drag_popup(true, drag);
+        let control = Bench::new(true);
+        let anchored_open = control.open();
+        let anchored_moved = control.drag(anchored_open, drag);
         assert_eq!(
             anchored_moved.min, anchored_open.min,
             "the anchored control moved, so this harness cannot tell a movable popup from a \
              fixed one and neither assertion above means anything"
         );
+    }
+
+    /// Where a popup opens the *second* time — measured, because [`floating`]'s doc claims it.
+    ///
+    /// The claim was read off egui's source before it was ever run: `Area::begin` fills
+    /// `pivot_pos` through `get_or_insert_with` (egui-0.36.1 `area.rs:459-462`), so
+    /// `default_pos` is consulted once per `Id` and a popup that has been dragged reopens
+    /// where it was left. That is an inference, and this round's own gate row says
+    /// *measured rather than argued*, so here it is closed and reopened instead.
+    ///
+    /// The same cache has a **second consequence, and it is the one worth knowing about**:
+    /// a popup that was never touched also stops re-centring. Resize the window mid-run and
+    /// reopen it and it comes back at the old centre, because the cached position is not
+    /// recomputed — under `.anchor()` it was, every frame. Nothing is lost off-screen
+    /// (`constrain_window_rect_to_area` still clamps it), it is simply no longer centred.
+    ///
+    /// **This is the chosen behaviour, not a defect**, and it is written down here because
+    /// stage 3's round-13 walk resizes the window to 125% and 150% and reopens popups at
+    /// each — without this paragraph the walker files "popup not centred" and is right to.
+    /// The anchored control leg measures the old behaviour beside it, so the difference is
+    /// on the record as a difference rather than as a description.
+    #[test]
+    fn a_dragged_popup_reopens_where_it_was_left_and_a_resize_no_longer_re_centres_one() {
+        let drag = egui::vec2(120.0, -60.0);
+        let bench = Bench::new(false);
+        let opened = bench.open();
+        let moved = bench.drag(opened, drag);
+
+        // Without this leg the one below is vacuous: a popup that never moved reopens at the
+        // position it never left, and the assertion holds while measuring nothing.
+        assert!(
+            (moved.min - opened.min).length() > 1.0,
+            "the drag did not move the popup, so \"it reopens where it was left\" is being \
+             asserted about a popup that was never anywhere else"
+        );
+
+        // Close it — three frames with nothing raised — and open it again.
+        for _ in 0..3 {
+            bench.frame(vec![], false);
+        }
+        let reopened = bench.open();
+        assert!(
+            (reopened.min - moved.min).length() < 1.0,
+            "dragged to {:?} and closed, the popup reopened at {:?} — `default_pos` is \
+             supposed to be consulted once per `Id`, so this is either egui dropping the \
+             `Area` state of a window that missed a frame or `floating` being handed a \
+             position every time",
+            moved.min,
+            reopened.min
+        );
+
+        // A popup nobody touched, and a window that changes size under it.
+        for (anchored, label) in [(false, "floating"), (true, "anchored")] {
+            let mut bench = Bench::new(anchored);
+            let first = bench.open();
+            assert!(
+                (first.center() - bench.content().center()).length() < 1.0,
+                "the {label} popup did not open centred, so the resize below proves nothing"
+            );
+            bench.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+            for _ in 0..3 {
+                bench.frame(vec![], false);
+            }
+            let after = bench.open();
+            let off = (after.center() - bench.content().center()).length();
+            if anchored {
+                assert!(
+                    off < 1.0,
+                    "the anchored control did not re-centre after the resize either, so the \
+                     floating leg below is not measuring a change — it is measuring a harness \
+                     that cannot see one"
+                );
+            } else {
+                assert!(
+                    off > 1.0,
+                    "a floating popup re-centred itself after the window resized, {off:.1}px \
+                     from centre. That is the anchor's behaviour, and `floating` does not have \
+                     the anchor: `pivot_pos` is cached per `Id`. If egui has started \
+                     recomputing it, this test's doc — and P23 §2e's note to the round-13 \
+                     walker — are describing something that no longer happens"
+                );
+            }
+        }
     }
 
     /// Every popup is built by [`floating`], and the next one will be too.
