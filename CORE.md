@@ -150,7 +150,7 @@ type-to-jump, because bare letters are shortcuts. With nothing open the table sa
 offers the way in: it is a zone that is always there, not one that appears with an archive.
 
 **The Draft** is what this same zone shows when the second section is chosen — one row per
-item with its own remove ✕, and two controls: *Add files…*, which is the same picker, and
+item with its own remove ×, and two controls: *Add files…*, which is the same picker, and
 *Bring from archive*, which pulls the entries selected in the open archive across into the
 draft. It is not a sixth zone; the entry table is the zone, and the draft is one of the
 things it shows, as the two lists already are. What *Bring from archive* pulls are **copies**:
@@ -237,7 +237,7 @@ bar has a hierarchy, and it is part of this document rather than a matter of tas
    the draft is empty. At the foot, a live sentence states exactly what will
    be built: *"Building photos-2026.7z — 7z, LZMA2:9, AES-256."*
 2. **Pending tasks** (`W`, or clicking the tray). The full task list: one row per staged
-   operation with its own remove ✕, then *Discard all* and **Apply**.
+   operation with its own remove ×, then *Discard all* and **Apply**.
 3. **Extract** (`E`). A popover: *Extract here*, *Extract to `<name>/`*, a path field with
    tab completion, bookmarks beneath. Enter-driven.
 4. **Open With** (`Enter` on a file, after extraction to the runtime dir). Applications
@@ -298,7 +298,7 @@ bar has a hierarchy, and it is part of this document rather than a matter of tas
 | `F1` | Keys — this table, in the window |
 | Arrows, `PgUp/PgDn`, `Home/End` | Move in the table |
 | `Enter` / `Backspace` | Descend / go up |
-| `Space` | Details ⇄ Preview |
+| `Space` | Details ↔ Preview |
 | `Ctrl+F` | Filter bar |
 | `Ctrl+A` | Select all |
 | `Ctrl+C` | Copy out (extract to runtime dir, URIs to clipboard) |

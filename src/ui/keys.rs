@@ -35,7 +35,7 @@ pub const ROWS: &[(&str, &str)] = &[
     ("F1", "Keys — this table, in the window"),
     ("Arrows, PgUp/PgDn, Home/End", "Move in the table"),
     ("Enter / Backspace", "Descend / go up"),
-    ("Space", "Details ⇄ Preview"),
+    ("Space", "Details ↔ Preview"),
     ("Ctrl+F", "Filter bar"),
     ("Ctrl+A", "Select all"),
     (

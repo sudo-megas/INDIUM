@@ -1,6 +1,6 @@
 //! Pending tasks — CORE §4's second popup, `W`, built by P4 §5.
 //!
-//! CORE §4.2: "The full task list: one row per staged operation with its own remove ✕,
+//! CORE §4.2: "The full task list: one row per staged operation with its own remove ×,
 //! then *Discard all* and **Apply**."
 //!
 //! Copyright © sudo-megas. GPL-3.0-only.

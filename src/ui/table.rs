@@ -747,7 +747,7 @@ fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
 // The draft
 // ---------------------------------------------------------------------------
 
-/// CORE §4: "one row per item with its own remove ✕, and two controls".
+/// CORE §4: "one row per item with its own remove ×, and two controls".
 ///
 /// Only one of the two is here. *Bring from archive* arrives with the machinery that makes
 /// it honest — an entry inside an archive is not a file until the worker has written one,

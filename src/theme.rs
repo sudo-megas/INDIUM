@@ -1164,15 +1164,15 @@ pub fn button(ui: &mut egui::Ui, text: egui::RichText, enabled: bool) -> egui::R
 /// four rows: every one is a label or two and then this button, right-aligned, against 13pt
 /// text. The swap would have made the mark *larger* than the row it ends.
 ///
-/// `REMOVE` and not `CLOSE` because that is the job. CORE §4 writes "its own remove ✕" at
+/// `REMOVE` and not `CLOSE` because that is the job. CORE §4 writes "its own remove ×" at
 /// both places it names one, and none of the four closes anything.
 ///
-/// **CORE writes `✕` U+2715 and the screen has always drawn `×` U+00D7.** The document's
-/// character is in neither embedded face, so a literal reading of §4 would ship tofu, and
-/// this silent divergence is the only reason those controls render at all. Which character
-/// §4 should name is CORE's to settle and the amendment is drafted in `build/docs/P23.md`;
-/// until it lands, the prose that quotes §4 keeps the document's `✕`, because a quotation
-/// stays accurate even when the quoted text is wrong.
+/// **§4 wrote `✕` U+2715 for sixteen milestones and the screen has always drawn `×` U+00D7.**
+/// The document's character is in neither embedded face, so a literal reading of it would
+/// have shipped tofu, and that silent divergence is the only reason those controls ever
+/// rendered at all. P23's draft E closed it in the direction the screen was already going:
+/// the document now names the character that is drawn, and the two sentences above are
+/// quotations again rather than a divergence being managed.
 pub const REMOVE: &str = "×";
 
 /// The same, for a `×` or a `+` that must not be a full-height button.
@@ -2308,25 +2308,28 @@ mod tests {
     /// A missing codepoint does not fail — it draws a box, and a box looks exactly like a font
     /// that did not load. `icon::ALL` has been checked against both faces since P16, but only
     /// the icons: an ordinary sentence with an arrow in it went through no check at all, and
-    /// **that is how `⇄` reached a release.** `keys.rs:38` draws `"Details ⇄ Preview"` from
-    /// CORE §4's own keyboard table, U+21C4 is in neither weight, and it has been a tofu box
-    /// in the Keys popup in every version that had one. Verified twice in P23 §2f — this
-    /// crate's `cmap` reader and `fc-query` over the two `.ttf` files from outside the
-    /// codebase, agreeing on every codepoint.
+    /// **that is how `⇄` reached a release.** `keys.rs:38` drew `"Details ⇄ Preview"` from
+    /// CORE §4's own keyboard table, U+21C4 is in neither weight, and it was a tofu box in the
+    /// Keys popup in every version that had one. Verified twice in P23 §2f — this crate's
+    /// `cmap` reader and `fc-query` over the two `.ttf` files from outside the codebase,
+    /// agreeing on every codepoint.
     ///
-    /// **So it lands with one named exception rather than red.** The fix is CORE draft E —
-    /// `⇄` → `↔` U+2194, which *is* in both weights — and CORE is the maker's hand, so the
-    /// alternative to naming it is a suite that stays red until he gets to it. A named
-    /// exception still fails on a *second* one, which is the whole job; a red suite fails at
-    /// everything and is therefore read as failing at nothing. It is asserted rather than
-    /// skipped, so the day `keys.rs:38` is corrected this test says to delete the line.
+    /// **It landed with one named exception rather than red, and the exception is now gone.**
+    /// The fix was CORE draft E — `⇄` → `↔` U+2194, which *is* in both weights — and CORE is
+    /// the maker's hand, so the alternative to naming it was a suite that stayed red until he
+    /// got to it. A named exception still fails on a *second* one, which is the whole job; a
+    /// red suite fails at everything and is therefore read as failing at nothing. It was
+    /// asserted rather than skipped, both legs of it, so the day `keys.rs:38` was corrected
+    /// this test said to delete the line. `EXCEPTIONS` is empty and the loop that walks it
+    /// stays: it is the machinery a *next* exception has to pass through, and an empty list
+    /// is the strongest state this test has ever been in.
     ///
     /// Test modules are cut at their `#[cfg(test)]`, because an assertion message is not
     /// something the window draws — `table.rs` quotes `✕` in one, and it is right to.
     #[test]
     fn every_drawn_character_exists_in_both_faces() {
-        // (file, codepoint). One entry, and it is expected to become zero.
-        const EXCEPTIONS: [(&str, u32); 1] = [("src/ui/keys.rs", 0x21C4)];
+        // (file, codepoint). It was one entry, and it was expected to become zero. It has.
+        const EXCEPTIONS: [(&str, u32); 0] = [];
 
         /// The string literals on one line, escapes skipped.
         ///
@@ -2638,12 +2641,18 @@ mod tests {
     /// verbatim without tripping a test about what the screen draws.
     ///
     /// **`✕` U+2715 is asserted absent for a harder reason than tidiness: neither embedded
-    /// face carries it.** CORE §4 names it in two places, so a hand correcting the code to
-    /// match the document would ship a tofu box in four rows and see nothing wrong in the
-    /// diff. That is not hypothetical elsewhere — `keys.rs` draws `⇄` U+21C4 from §4's own
-    /// keyboard table, which is absent too and therefore ships as tofu today. The general
-    /// form of this check, over every non-ASCII character in every drawn literal, is owed to
-    /// P23 §2f, where it can land green behind a named exception; here the scope is the one
+    /// face carries it.** That claim is about the *faces* and stays true however §4 is
+    /// worded. What retired with P23's draft E is the danger beneath it: §4 named `✕` in two
+    /// places, so a hand correcting the code to match the document would have shipped a tofu
+    /// box in four rows and seen nothing wrong in the diff. §4 names `×` now, and the two
+    /// agree — but the assertion stays, because what made the trap possible was the character
+    /// being typed inline at all, and that is what this test forbids.
+    ///
+    /// It was not hypothetical elsewhere: `keys.rs` drew `⇄` U+21C4 from §4's own keyboard
+    /// table, absent too, and it shipped as tofu in every release that had a Keys popup.
+    /// `every_drawn_character_exists_in_both_faces` — the general form of this check, over
+    /// every non-ASCII character in every drawn literal, owed to P23 §2f — is what found it,
+    /// and draft E is what let it be fixed rather than named. Here the scope stays the one
     /// mark this constant replaced.
     #[test]
     fn no_second_remove_mark_is_typed_into_the_source() {
@@ -2695,8 +2704,9 @@ mod tests {
 
         assert!(
             tofu.is_empty(),
-            "`✕` U+2715 is in neither embedded face and would draw as a tofu box; CORE §4 \
-             names it but the screen has never drawn it. Written at {tofu:?}"
+            "`✕` U+2715 is in neither embedded face and would draw as a tofu box. CORE §4 \
+             named it until P23's draft E and the screen never drew it; now neither does. \
+             Written at {tofu:?}"
         );
         assert_eq!(
             drawn.len(),
