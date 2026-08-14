@@ -71,12 +71,25 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     });
                     ui.selectable_label(on, text).clicked()
                 };
-                // PXX 8.11. This was the row's *label*, and it was read as a button — by
-                // the maker, who wrote the rule it was obeying. A word set beside two
-                // pressable words, in the same row, at the same size, is a third pressable
-                // word no matter what it was meant to be, and the walk denied the step for
-                // exactly that reason. The fix is to mean it rather than to restyle it
-                // into something quieter: the word it was misread as is the word it keeps.
+                if toggle(ui, cur == ExtractDefault::Here, "here") && cur != ExtractDefault::Here {
+                    changed = Some(ExtractDefault::Here);
+                }
+                if toggle(ui, cur == ExtractDefault::Subdir, "into a subdirectory")
+                    && cur != ExtractDefault::Subdir
+                {
+                    changed = Some(ExtractDefault::Subdir);
+                }
+                // PXX 8.11. This was the row's *label*, sitting where the row's label goes,
+                // and it was read as a button — by the maker, who wrote the rule it was
+                // obeying. A word set beside two pressable words, in the same row and at the
+                // same size, is a third pressable word no matter what it was meant to be.
+                // The fix is to mean it rather than to restyle it into something quieter:
+                // the word it was misread as is the word it keeps.
+                //
+                // **Third, and not first.** Leading the row it would still read as the
+                // label it used to be, whatever it now does on a click; the maker asked for
+                // it as "an 3rd option" and third is where a third option goes. The group's
+                // heading is what names the row now, the way it already does for Bookmarks.
                 //
                 // It raises the picker on every click, including while it is already the
                 // active mode, because that is the only route to changing the directory it
@@ -85,14 +98,6 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 // cancelled dialog must leave the setting exactly as it found it.
                 if toggle(ui, cur == ExtractDefault::Preselect, "Preselect") {
                     want_preselect = true;
-                }
-                if toggle(ui, cur == ExtractDefault::Here, "here") && cur != ExtractDefault::Here {
-                    changed = Some(ExtractDefault::Here);
-                }
-                if toggle(ui, cur == ExtractDefault::Subdir, "into a subdirectory")
-                    && cur != ExtractDefault::Subdir
-                {
-                    changed = Some(ExtractDefault::Subdir);
                 }
             });
             // The directory gets its own line. A path is as long as the filesystem is deep
