@@ -357,6 +357,12 @@ which kind of figure it is showing rather than hoping nobody asks.
 One theme: **Ubuntu Canonical Aubergine.** There is no second theme and no theme setting. The
 window is aubergine throughout; popups are not, and that is the one deliberate exception —
 contrast where a surface has to be told apart from the surface it covers, not decoration.
+A zone may also cast into the gutter. That is the same rule and not an exception to it: a cast
+says a zone is *above* the gutter, which is a thing the reader has to be told apart, and it is
+not ornament. It is bounded so it cannot become one — one zone's cast never reaches its
+neighbour, and it is measured rather than eyeballed, at **ΔE 8–12 against the gutter it falls
+on**. Under that floor it is invisible and merely costs; over it, it is a glow, and a glow is
+decoration.
 
 | Role | Value |
 | --- | --- |
@@ -374,7 +380,7 @@ pill: the corner radius is half the control's height, so the ends are semicircle
 softened corners. This is the one shape rule in the document and it exists because a control
 that is merely a rounded rectangle is a rectangle, and reads as one. Rows are **not** capsules:
 a list is read as a column, and a stack of pills is read as a pile of separate objects. The
-radius vocabulary stays at three values and no fourth — square for a zone, 3px for a row,
+radius vocabulary stays at three values and no fourth — 6px for a zone, 3px for a row,
 half-height for a control and for a popup, which at the sizes this window uses are the same
 number.
 
@@ -382,7 +388,7 @@ number.
 paths, the whole Inspector. Monospace is what makes a verbose pane scannable instead of
 noisy, and the pane is the program, so the window wears it throughout. Chrome and values
 are told apart by weight and colour, never by family. There is no second face and no font
-setting. The face is **Fira Mono Nerd Font**, regular and bold.
+setting. The face is **CaskaydiaMono Nerd Font Mono**, regular and bold.
 
 **Icons are glyphs of that same face**, which is what keeps the sentence above literally true
 rather than nearly true. They come from the **Font Awesome** range the Nerd Font patches in, and
