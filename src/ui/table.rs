@@ -727,6 +727,104 @@ fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
 /// coming **from**, in that order, because the first is what this archive will contain and
 /// the second is only how it got here. It is the same two-line shape the bookmarks list
 /// uses, for the same reason: a name a person chose, over a path they did not.
+/// The Draft section's two controls, and the reason they sit in a *wrapping* row.
+///
+/// This is the whole of step 6.3, and the row is lifted out of `draft_view` so the test below
+/// can drive the shipped widgets rather than a copy of them.
+///
+/// **An overflowing row widens the region it sits in, and everything after it inherits that
+/// width while the clip rectangle does not follow.** Not the row's own `min_rect` — the parent
+/// `Ui`'s `max_rect`, which is what every later widget reads its wrap width from.
+///
+/// The test below measures it on this exact egui, and the number that matters is that the plain
+/// row **does not yield**: laid out with `ui.horizontal` these two buttons take 258.4 points in
+/// a centre panel offering 218, and 258.4 again in one offering 78. It is the same width either
+/// way, because a non-wrapping horizontal layout sizes to its contents and leaves the panel to
+/// cope. So at the 700-point window the walk was run at, the forty points past the panel edge
+/// are laid out and then thrown away by the clip.
+///
+/// That single fact is the whole of what the maker denied, and it explains all three symptoms
+/// he listed under one step: the refusal sentence cut mid-word, the centred empty-state text
+/// cut the same way, and the ✕ — which is right-aligned inside each draft row, so a region
+/// forty points too wide puts it forty points past the edge, which is the *"cannot be seen
+/// without maximizing"* he reported. One cause, three faces. Reading it as three defects is
+/// what made the first attempt at this step incomplete.
+///
+/// `horizontal_wrapped` closes it by dropping the second button to its own line rather than
+/// letting the row overflow: 218 stays 218. The limit is worth stating rather than discovering
+/// later — a row still cannot wrap below its **widest single item**, and *"Bring from archive"*
+/// is 94.6 points wide on its own. Below roughly 577 points of window the panel cannot hold
+/// even that, and the region grows to the button's width; 94.6 where the plain row gave 258.4,
+/// so the symptom is bounded rather than abolished. Abolishing it would mean truncating a
+/// button's label, which reads worse than the defect it would close.
+fn draft_buttons(ui: &mut egui::Ui, pull_live: bool) -> (bool, bool) {
+    let mut pick = false;
+    let mut pull = false;
+    ui.horizontal_wrapped(|ui| {
+        if theme::small_button(ui, egui::RichText::new("Add files…"), true)
+            .on_hover_text("Choose files to put in the draft")
+            .clicked()
+        {
+            pick = true;
+        }
+        if theme::small_button(ui, egui::RichText::new("Bring from archive"), pull_live)
+            .on_hover_text("Copy the entries selected in the open archive into the draft")
+            .clicked()
+        {
+            pull = true;
+        }
+    });
+    (pick, pull)
+}
+
+/// One staged file: the name it will take inside the archive, the path it came from, and the
+/// ✕ that drops it. Returns the row's own response and whether the ✕ was pressed.
+///
+/// Lifted out of `draft_view` for the same reason [`draft_buttons`] is — the ✕ is the headline
+/// of what step 6.3 denied, *"cannot be seen without maximizing"*, and a test that could not
+/// drive the shipped widget would only be testing a copy of it.
+///
+/// The ✕ is right-aligned, so **it lands wherever the region's right edge is** and nowhere
+/// else. That is what makes it the most sensitive thing in the section to the widening
+/// [`draft_buttons`] describes: at the walk's window that row left the region 40.4 points too
+/// wide, and the ✕ came to rest 30.4 points past the panel, under the Inspector. Nothing in
+/// this function needed changing — the row was always right about where its own edge was, and
+/// was being handed the wrong one. `the_draft_row_s_cross_stays_inside_the_panel` has the
+/// measurements at three widths.
+fn draft_row(ui: &mut egui::Ui, dest: &str, source: &str, focused: bool) -> (egui::Response, bool) {
+    let mut dropped = false;
+    let resp = theme::row(ui, focused, LIST_PAD, |ui| {
+        // See `sidebar::row_body`: a selectable label out-ranks the row beneath it and would
+        // eat the click that lands on the name.
+        ui.style_mut().interaction.selectable_labels = false;
+        let dim = if focused {
+            theme::TEXT_SECONDARY
+        } else {
+            theme::TEXT_MUTED
+        };
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new(dest).color(theme::TEXT));
+                ui.label(
+                    egui::RichText::new(source)
+                        .family(theme::MONO)
+                        .size(13.0)
+                        .color(dim),
+                );
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // A real `Button`, so it wins the hit test over the row's own sense and
+                // removing an item does not also move the cursor onto it —
+                // `UiBuilder::sense`'s stated property, as in the two lists.
+                if theme::small_button(ui, egui::RichText::new("×"), true).clicked() {
+                    dropped = true;
+                }
+            });
+        });
+    });
+    (resp, dropped)
+}
+
 fn draft_view(app: &mut Indium, ui: &mut egui::Ui) {
     theme::section(ui, "Draft");
     ui.label(
@@ -736,37 +834,18 @@ fn draft_view(app: &mut Indium, ui: &mut egui::Ui) {
     );
     ui.add_space(6.0);
 
-    let mut pick = false;
-    let mut pull = false;
     // Why the second control cannot run, asked once and used twice — for whether the button
     // is live, and for the sentence beside it. A disabled button reports no click, so the
     // reason has to be drawn rather than waited for; the same discipline Measure has
     // followed since P21b.
     let refusal = pull_refusal_for(!app.has_archive(), app.selection.is_empty());
-    ui.horizontal(|ui| {
-        if theme::small_button(ui, egui::RichText::new("Add files…"), true)
-            .on_hover_text("Choose files to put in the draft")
-            .clicked()
-        {
-            pick = true;
-        }
-        if theme::small_button(
-            ui,
-            egui::RichText::new("Bring from archive"),
-            refusal.is_none(),
-        )
-        .on_hover_text("Copy the entries selected in the open archive into the draft")
-        .clicked()
-        {
-            pull = true;
-        }
-    });
-    // Under the buttons, not beside them, and that is the whole of the 6.3 fix on this line.
-    // A `ui.horizontal` lays its contents out on a row of unbounded width, and an
-    // `egui::Label` given unbounded width does not wrap — so in there the sentence ran off
-    // the panel's right edge and was cut mid-word, which it did even at 1180 wide, never
-    // mind the 560 the walk denied. Out here the layout is vertical, the label wraps at the
-    // panel's own width, and the reason stays whole at every size the window can take.
+    let (pick, pull) = draft_buttons(ui, refusal.is_none());
+    // Under the buttons, not beside them, which is one half of the 6.3 fix; the other half is
+    // `draft_buttons`' wrapping row. Inside the old row this sentence never wrapped at all: a
+    // `Label` in a horizontal layout is laid out with `TextWrapMode::Extend`, so it ran off the
+    // panel's right edge and was cut mid-word, and it did that at 1180 wide as readily as at
+    // the 560 the walk denied. Out here the layout is vertical, the label wraps, and the reason
+    // stays whole at every size the window can take.
     if let Some(reason) = refusal {
         ui.add_space(4.0);
         ui.label(
@@ -801,35 +880,11 @@ fn draft_view(app: &mut Indium, ui: &mut egui::Ui) {
         .show(ui, |ui| {
             for (i, item) in app.draft.items().iter().enumerate() {
                 let focused = i == app.draft_cursor;
-                let resp = theme::row(ui, focused, LIST_PAD, |ui| {
-                    // See `sidebar::row_body`: a selectable label out-ranks the row beneath
-                    // it and would eat the click that lands on the name.
-                    ui.style_mut().interaction.selectable_labels = false;
-                    let dim = if focused {
-                        theme::TEXT_SECONDARY
-                    } else {
-                        theme::TEXT_MUTED
-                    };
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.label(egui::RichText::new(&item.dest).color(theme::TEXT));
-                            ui.label(
-                                egui::RichText::new(item.source.to_string_lossy())
-                                    .family(theme::MONO)
-                                    .size(13.0)
-                                    .color(dim),
-                            );
-                        });
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            // A real `Button`, so it wins the hit test over the row's own
-                            // sense and removing an item does not also move the cursor onto
-                            // it — `UiBuilder::sense`'s stated property, as in the two lists.
-                            if theme::small_button(ui, egui::RichText::new("×"), true).clicked() {
-                                remove = Some(i);
-                            }
-                        });
-                    });
-                });
+                let (resp, dropped) =
+                    draft_row(ui, &item.dest, &item.source.to_string_lossy(), focused);
+                if dropped {
+                    remove = Some(i);
+                }
                 if resp.clicked() {
                     focus = Some(i);
                 }
@@ -875,4 +930,171 @@ fn mono_right(ui: &mut egui::Ui, text: &str, colour: egui::Color32) {
                 .color(colour),
         );
     });
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What one headless frame of the Draft section leaves behind, in the units step 6.3 turns
+    /// on. All four are absolute x-coordinates or widths in the same space.
+    struct Frame {
+        /// The region's width before the button row is laid out.
+        before: f32,
+        /// And after it — the number the whole defect reduces to.
+        after: f32,
+        /// The right edge of what the panel will actually show.
+        clip_right: f32,
+        /// The right edge of a staged row, which is where its right-aligned ✕ sits.
+        row_right: f32,
+    }
+
+    /// One frame of the real Draft section — [`draft_buttons`] then [`draft_row`] — in a centre
+    /// panel `outer` points wide, wearing the frame `show` gives it and the fonts the window
+    /// runs. The fonts are not optional: in egui's default face these two buttons fit at widths
+    /// where Fira Mono's do not, so a test without [`theme::install`] passes while measuring a
+    /// program nobody runs.
+    ///
+    /// `shipped: false` swaps in a plain `ui.horizontal` button row and changes nothing else.
+    /// It is the control — a copy on purpose, so that every assertion below has a leg that
+    /// shows the same frame failing when the one line under test is taken away.
+    fn draft_frame(outer: f32, shipped: bool) -> Frame {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let mut out = Frame {
+            before: 0.0,
+            after: 0.0,
+            clip_right: 0.0,
+            row_right: 0.0,
+        };
+        let mut full = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(outer, 500.0),
+                )),
+                ..Default::default()
+            },
+            |root| {
+                egui::CentralPanel::default()
+                    .frame(theme::zone(theme::WINDOW).inner_margin(egui::Margin::same(4)))
+                    .show(root, |ui| {
+                        out.before = ui.max_rect().width();
+                        if shipped {
+                            draft_buttons(ui, false);
+                        } else {
+                            ui.horizontal(|ui| {
+                                theme::small_button(ui, egui::RichText::new("Add files…"), true);
+                                theme::small_button(
+                                    ui,
+                                    egui::RichText::new("Bring from archive"),
+                                    false,
+                                );
+                            });
+                        }
+                        out.after = ui.max_rect().width();
+                        out.clip_right = ui.clip_rect().right();
+                        // A path long enough to want more width than the pane has, which is
+                        // the case the ✕ has to survive.
+                        let (resp, _) = draft_row(
+                            ui,
+                            "quarterly-report.pdf",
+                            "/home/megas/indium-test/large/quarterly-report.pdf",
+                            true,
+                        );
+                        out.row_right = resp.rect.right();
+                    });
+            },
+        );
+        // `FullOutput` panics on drop with an unapplied delta; nothing here paints it.
+        full.textures_delta.clear();
+        out
+    }
+
+    /// Step 6.3's first half, at the width the walk was run at.
+    ///
+    /// 700 of window less the sidebar's 202 and the Inspector's clamped 260 leaves the centre
+    /// 238 outer, which is the number fed in here. The property is not "the buttons fit" — it
+    /// is that the region under them is the width it was, because a region widened by an
+    /// overflowing row is what put the refusal sentence and the empty-state text past the clip.
+    #[test]
+    fn the_draft_s_button_row_never_widens_what_comes_under_it() {
+        let f = draft_frame(238.0, true);
+        assert_eq!(
+            f.after, f.before,
+            "the wrapping row must leave the region exactly as it found it"
+        );
+
+        let c = draft_frame(238.0, false);
+        assert!(
+            c.after > c.before,
+            "the control must actually overflow at this width ({} -> {}), or the assertion \
+             above is passing on buttons that simply fit",
+            c.before,
+            c.after
+        );
+    }
+
+    /// Step 6.3's headline: *"X button cannot be seen without maximizing the app."*
+    ///
+    /// The ✕ is right-aligned, so it sits at the right edge of whatever region the row is
+    /// given, which makes it the most sensitive thing in the section to a widened one. The
+    /// overhang past the clip, measured here, is the whole story of the step:
+    ///
+    /// | centre panel | the window it implies | before | after |
+    /// | --- | --- | --- | --- |
+    /// | 978 | 1180 | 10 inside | 10 inside |
+    /// | 238 | 700 | **30.4 outside** | **10 inside** |
+    /// | 98 | 560 (`MIN_W`) | 170.4 outside | 13.8 outside |
+    ///
+    /// The first row is why he wrote *"without maximizing"* rather than *"ever"*: wide enough
+    /// and the row never overflowed, so the ✕ was where it belonged. The second is the defect
+    /// and its fix. The third is the bound, asserted rather than hoped for — at `MIN_W` the
+    /// *"Bring from archive"* label is wider than the whole centre panel and no amount of
+    /// wrapping will fit it, so what is claimed there is that the overhang stays small, not
+    /// that it is gone.
+    #[test]
+    fn the_draft_row_s_cross_stays_inside_the_panel() {
+        for outer in [978.0, 238.0] {
+            let f = draft_frame(outer, true);
+            assert!(
+                f.row_right <= f.clip_right,
+                "at {outer} outer the row's right edge is {} against a clip of {}, so the ✕ is \
+                 drawn under the Inspector",
+                f.row_right,
+                f.clip_right
+            );
+        }
+
+        let c = draft_frame(238.0, false);
+        assert!(
+            c.row_right > c.clip_right,
+            "the control must put the ✕ outside the clip ({} vs {}), or the loop above proves \
+             nothing about the fix",
+            c.row_right,
+            c.clip_right
+        );
+
+        // `MIN_W`, where the fix cannot finish the job and says so. Both halves are asserted:
+        // that the remainder is a sliver rather than a pane's width, and that the row without
+        // the fix is an order of magnitude worse — so this stays a documented bound instead of
+        // quietly becoming the same defect again.
+        let f = draft_frame(98.0, true);
+        let c = draft_frame(98.0, false);
+        assert!(
+            f.row_right - f.clip_right < 20.0,
+            "at MIN_W the ✕ may overhang, but by a sliver: {}",
+            f.row_right - f.clip_right
+        );
+        assert!(
+            c.row_right - c.clip_right > 100.0,
+            "and the unwrapped row must still be far worse there ({}), or this bound is \
+             measuring nothing",
+            c.row_right - c.clip_right
+        );
+    }
 }
