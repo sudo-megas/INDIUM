@@ -69,7 +69,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             // belongs with the numbers it describes.
             ui.label(
                 egui::RichText::new(statement(app.estimate_of.as_ref(), app.estimate_running))
-                    .size(13.0)
+                    .size(theme::BODY)
                     .color(theme::TEXT_SECONDARY),
             );
             ui.add_space(10.0);
@@ -89,7 +89,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                         egui::Label::new(
                             egui::RichText::new(header())
                                 .family(theme::bold())
-                                .size(TABLE_PT)
+                                .size(theme::SECTION)
                                 .color(theme::TEXT_MUTED),
                         )
                         .wrap_mode(egui::TextWrapMode::Extend),
@@ -132,7 +132,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 }
                 ui.label(
                     egui::RichText::new("Click a method to choose it · Esc closes")
-                        .size(12.0)
+                        .size(theme::SMALL)
                         .color(theme::TEXT_MUTED),
                 );
             });
@@ -168,7 +168,7 @@ fn method_row(ui: &mut egui::Ui, app: &Indium, method: Method, chose: &mut Optio
             egui::Label::new(
                 egui::RichText::new(row_text(method, measured, failed, sampled))
                     .family(theme::bold())
-                    .size(TABLE_PT)
+                    .size(theme::SECTION)
                     .color(if selected {
                         theme::TEXT
                     } else {
@@ -189,14 +189,14 @@ fn method_row(ui: &mut egui::Ui, app: &Indium, method: Method, chose: &mut Optio
 // Written out as constants rather than inlined, because the header and the three kinds of row
 // have to agree about them and a width typed four times is a width that will drift.
 
-/// The type size of the whole table, header and rows alike.
-///
-/// **Sixteen, and the number is the point of this popup.** The figures were 11 pt in a lane
-/// on a method row when the maker first saw them, which is why they are here at all; putting
-/// them on a surface of their own and then setting them at the body size would have moved the
-/// problem rather than fixed it. The table is the largest text in the window after a title,
-/// and the popup is sized by it rather than the other way round.
-const TABLE_PT: f32 = 16.0;
+// The table's own type size used to live here, as `TABLE_PT = 16.0`, and its reasoning was
+// sound: the figures were 11pt in a lane on a method row when the maker first saw them, which
+// is why this popup exists at all, and setting them back at the body size would have moved the
+// problem rather than fixed it. What was not sound was the number being *this file's*. Sixteen
+// was a seventh size in a window that had eight, and the reasoning it was defending — larger
+// than a value, smaller than a title — is exactly what `theme::SECTION` is. P23 folded it
+// there, one point down, and the popup is still sized by its table rather than the other way
+// round.
 
 /// The breathing room above and below a row's text.
 ///

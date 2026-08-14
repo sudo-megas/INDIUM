@@ -3663,20 +3663,20 @@ fn sb_what_is_open(app: &mut Indium, ui: &mut egui::Ui) {
                 ui.label(
                     egui::RichText::new(theme::icon::ARCHIVE)
                         .family(theme::MONO)
-                        .size(13.0 * theme::ICON_SCALE)
+                        .size(theme::BODY * theme::ICON_SCALE)
                         .color(theme::TEXT),
                 );
                 ui.label(
                     egui::RichText::new(name.to_string_lossy())
                         .family(theme::bold())
-                        .size(13.0)
+                        .size(theme::BODY)
                         .color(theme::TEXT),
                 )
             }
             None => ui.label(
                 egui::RichText::new("No archive open.")
                     .family(theme::MONO)
-                    .size(13.0)
+                    .size(theme::BODY)
                     .color(theme::TEXT_MUTED),
             ),
         };
@@ -3686,14 +3686,14 @@ fn sb_what_is_open(app: &mut Indium, ui: &mut egui::Ui) {
             ui.label(
                 egui::RichText::new(&info.format)
                     .family(theme::MONO)
-                    .size(13.0)
+                    .size(theme::BODY)
                     .color(theme::TEXT_SECONDARY),
             );
             if !info.filter.is_empty() && info.filter != "none" {
                 ui.label(
                     egui::RichText::new(&info.filter)
                         .family(theme::MONO)
-                        .size(13.0)
+                        .size(theme::BODY)
                         .color(theme::TEXT_MUTED),
                 );
             }
@@ -3717,7 +3717,7 @@ fn sb_what_is_open(app: &mut Indium, ui: &mut egui::Ui) {
                 // the width divided by it. **That arithmetic is only true because the face
                 // is monospace** (CORE §6) — a double-width script would elide short. The
                 // corpus this program is tested against is Turkish, which is single-width.
-                let font = egui::FontId::new(12.0, theme::MONO);
+                let font = egui::FontId::new(theme::SMALL, theme::MONO);
                 // `fonts_mut`, not `fonts`: measuring a glyph can populate the atlas, so
                 // the accessor that admits it is the correct one.
                 let cell = ui.ctx().fonts_mut(|f| f.glyph_width(&font, '0')).max(1.0);
@@ -3745,7 +3745,7 @@ fn sb_what_is_open(app: &mut Indium, ui: &mut egui::Ui) {
                         egui::Label::new(
                             egui::RichText::new(shown)
                                 .family(theme::MONO)
-                                .size(12.0)
+                                .size(theme::SMALL)
                                 .color(theme::TEXT_MUTED),
                         )
                         // CORE §4: "clicking it hands that folder to the desktop's file
@@ -3765,7 +3765,7 @@ fn sb_what_is_open(app: &mut Indium, ui: &mut egui::Ui) {
                 ui.label(
                     egui::RichText::new(theme::icon::FOLDER)
                         .family(theme::MONO)
-                        .size(12.0 * theme::ICON_SCALE)
+                        .size(theme::SMALL * theme::ICON_SCALE)
                         .color(theme::TEXT_MUTED),
                 );
             });
@@ -3832,7 +3832,7 @@ fn sb_the_numbers(app: &Indium, ui: &mut egui::Ui) {
             ui.label(
                 egui::RichText::new(sb_lane_entries(agg.count))
                     .family(theme::bold())
-                    .size(13.0)
+                    .size(theme::BODY)
                     .color(theme::TEXT),
             );
             ui.label(egui::RichText::new("·").color(theme::TEXT_MUTED));
@@ -3842,7 +3842,7 @@ fn sb_the_numbers(app: &Indium, ui: &mut egui::Ui) {
             ui.label(
                 egui::RichText::new(sb_lane_sizes(agg.total_real, app.archive_bytes))
                     .family(theme::MONO)
-                    .size(13.0)
+                    .size(theme::BODY)
                     .color(theme::TEXT_SECONDARY),
             );
 
@@ -3851,7 +3851,7 @@ fn sb_the_numbers(app: &Indium, ui: &mut egui::Ui) {
                 ui.label(
                     egui::RichText::new(sb_lane_selected(app.selection.len()))
                         .family(theme::MONO)
-                        .size(13.0)
+                        .size(theme::BODY)
                         .color(theme::TEXT_SECONDARY),
                 );
             }
@@ -3862,7 +3862,7 @@ fn sb_the_numbers(app: &Indium, ui: &mut egui::Ui) {
                 egui::Label::new(
                     egui::RichText::new(&app.status.text)
                         .family(theme::MONO)
-                        .size(13.0)
+                        .size(theme::BODY)
                         // CORE §4: "A failure is `#FFD800`... A refusal is a failure; a
                         // confirmation is not." For eleven milestones every sentence in
                         // this bar was the same grey, so `Could not create …` and
@@ -3884,7 +3884,7 @@ fn sb_the_numbers(app: &Indium, ui: &mut egui::Ui) {
                 ui.label(
                     egui::RichText::new(theme::icon::WARNING)
                         .family(theme::MONO)
-                        .size(13.0 * theme::ICON_SCALE)
+                        .size(theme::BODY * theme::ICON_SCALE)
                         .color(theme::WARNING),
                 );
             }
@@ -3921,7 +3921,7 @@ fn sb_progress(app: &Indium, ui: &mut egui::Ui) {
             ui.label(
                 egui::RichText::new(format!("{done}/{total}"))
                     .family(theme::MONO)
-                    .size(13.0)
+                    .size(theme::BODY)
                     .color(theme::TEXT),
             );
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -3929,7 +3929,7 @@ fn sb_progress(app: &Indium, ui: &mut egui::Ui) {
                 ui.label(
                     egui::RichText::new(label)
                         .family(theme::bold())
-                        .size(13.0)
+                        .size(theme::BODY)
                         .color(theme::TEXT),
                 );
                 // **The track is not here any more.** CORE §4: "The proportion done is
@@ -3948,10 +3948,14 @@ fn sb_progress(app: &Indium, ui: &mut egui::Ui) {
             // `E` works while a listing is still streaming in, and when both are true
             // the Cancel has to reach the worker that is writing files.
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                // Sized explicitly: a `Spinner` left to itself takes `interact_size.y`,
-                // which is `CONTROL_H` — 20, and still taller than the 13pt text beside
-                // it, which would make the spinner the loudest thing in a bar of words.
-                ui.add(egui::Spinner::new().color(theme::ORANGE).size(14.0));
+                // Sized explicitly, and from a named length: `SPINNER_D` carries the reason.
+                // `Spinner::size` is a diameter that happens to share a method name with the
+                // type scale, so the number does not get to live inline here.
+                ui.add(
+                    egui::Spinner::new()
+                        .color(theme::ORANGE)
+                        .size(theme::SPINNER_D),
+                );
                 let n = app.entries.len();
                 ui.label(
                     egui::RichText::new(format!(
@@ -3959,7 +3963,7 @@ fn sb_progress(app: &Indium, ui: &mut egui::Ui) {
                         if n == 1 { "entry" } else { "entries" }
                     ))
                     .family(theme::MONO)
-                    .size(13.0)
+                    .size(theme::BODY)
                     .color(theme::TEXT_SECONDARY),
                 );
             });

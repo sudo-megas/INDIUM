@@ -59,7 +59,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                         ui.add_space(10.0);
                         ui.label(
                             egui::RichText::new("INDIUM")
-                                .size(28.0)
+                                .size(theme::WORDMARK)
                                 .color(theme::TEXT)
                                 .family(theme::bold()),
                         );
@@ -101,7 +101,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                             "Addresses here are text you can select and copy. INDIUM opens no \
                              browser and follows no link.",
                         )
-                        .size(13.0)
+                        .size(theme::BODY)
                         .color(theme::TEXT_MUTED),
                     );
 
@@ -122,7 +122,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                         egui::Label::new(
                             egui::RichText::new(LICENCE)
                                 .family(theme::MONO)
-                                .size(13.0)
+                                .size(theme::BODY)
                                 .color(theme::TEXT_SECONDARY),
                         )
                         .selectable(true),
@@ -133,7 +133,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             theme::foot(ui, |ui| {
                 ui.label(
                     egui::RichText::new("Copyright © sudo-megas · Built with Reason and Passion.")
-                        .size(13.0)
+                        .size(theme::BODY)
                         .color(theme::TEXT_MUTED),
                 );
             });

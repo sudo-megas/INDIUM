@@ -65,7 +65,7 @@ pub fn show(app: &mut Indium, ui: &mut egui::Ui, matched: usize) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
                         egui::RichText::new("Esc clears")
-                            .size(13.0)
+                            .size(theme::BODY)
                             .color(theme::TEXT_MUTED),
                     );
                 });

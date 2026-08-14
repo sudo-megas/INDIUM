@@ -277,6 +277,18 @@ pub const PAD: i8 = 12;
 /// every button in the program 32 tall and turned R_PILL's 10 into a merely rounded corner,
 /// which is exactly the shape CORE §6 refuses. A control's height is its own number now.
 pub const CONTROL_H: f32 = 20.0;
+/// The reading spinner's diameter.
+///
+/// **A length, not a type size, and it is here so that it cannot be mistaken for one.** It
+/// takes `.size()` on an `egui::Spinner` — the same method name the type scale uses on
+/// `RichText`, which is the whole reason it is written down: left inline it was a bare `14.0`
+/// in the middle of a status bar full of type literals, indistinguishable from a seventh size
+/// by any reader, human or test.
+///
+/// Fourteen because a `Spinner` left to itself takes `interact_size.y`, which is
+/// [`CONTROL_H`] — 20, and taller than the [`BODY`] text beside it, which made the spinner the
+/// loudest thing in a bar of words.
+pub const SPINNER_D: f32 = 14.0;
 /// One status-bar row.
 ///
 /// Tall enough for an icon at [`ICON_SCALE`], which is 1.4 and not the 2 this comment
@@ -293,6 +305,67 @@ pub const CONTROL_H: f32 = 20.0;
 pub const SB_ROW: f32 = 24.0;
 /// Between status-bar rows.
 pub const SB_GAP: f32 = 4.0;
+
+/// The type scale — six roles, and the fact that there was never a seventh worth having.
+///
+/// **These are roles, not sizes.** Before P23 the window drew text at eight different numbers
+/// across a hundred and eleven call sites — plus two more behind a file-local constant in
+/// `measure.rs` — while `install_spacing` below set five text styles between **three** distinct
+/// sizes. So the scale was not a decision the
+/// program stated anywhere; it was the sum of a hundred and thirteen separate ones. Two of those numbers were the *same role drawn at two sizes*, which is the
+/// defect this section exists to close and not a matter of taste:
+///
+/// - **The subject's name** — a popup's title, the Inspector's file, "17 selected" — was 17
+///   in four places in the Inspector and in every `TextStyle::Heading`, and **16** in Open
+///   With's app name and in the table's empty state. One role, two numbers, no reason.
+/// - **A subordinate sentence** — the muted line under a heading that says what the thing is
+///   for — was 13 in the Bookmarks and Draft panes and **11** twice in Create. Eleven is not
+///   a level; it is a popup that was crowded and got quieter to fit.
+///
+/// **[`BODY`] is 13 because CORE says 13, not because it shipped that way.** §6 argues the
+/// icon scale from "about nine points of ink next to **a thirteen-point capital**"
+/// (`CORE.md:394`), and §6's file-type-icon ruling from "at `ICON_SCALE` **a 13pt glyph**
+/// does not fit a 20px row" (`CORE.md:425`). Moving the body size falsifies two sentences of
+/// a document that is the maker's to edit, so it is the one value here that is not this
+/// round's to choose. Everything else in the scale is measured against it.
+///
+/// The gaps are the rethink. Thirteen, twelve and eleven were three sizes inside two points,
+/// which reads as unevenness rather than as hierarchy; eleven is gone. A section heading was
+/// 14 — one point over body — so it was told from the text beneath it by weight alone, and
+/// CORE §5's own account of what was wrong with the Inspector is "ten fields in one size, one
+/// weight and three greys, with nothing to say which mattered" (`CORE.md:204`). Fifteen gives
+/// the heading two points and a weight instead of a weight and a rounding error.
+///
+/// Held by `every_drawn_size_comes_from_the_type_scale` — the same shape as the icon
+/// registry's guard, and for the same reason: the scale is only one decision for as long as
+/// nothing can quietly add a seventh number to it.
+pub const WORDMARK: f32 = 28.0;
+/// The wordmark where it stands beside the 50px mark rather than the 150px one.
+///
+/// Two sizes because there are two marks, not because the brand has two voices: the sidebar's
+/// head is a fifth of About's and a 28pt word beside a 50px mark reads as a caption that got
+/// away.
+pub const WORDMARK_SM: f32 = 23.0;
+/// The name of the thing on screen — a popup's title, the Inspector's subject, the empty
+/// state's one line.
+///
+/// This is what `TextStyle::Heading` resolves to as well, so a popup's own title bar and a
+/// pane's subject are the same size by construction rather than by two hands agreeing.
+pub const TITLE: f32 = 17.0;
+/// A heading *inside* a pane — what [`section`] and [`section_bare`] draw.
+///
+/// Not a title: a title names the thing, a section names a group of fields within it.
+pub const SECTION: f32 = 15.0;
+/// A value, a label, a button, a table cell, a table header.
+///
+/// **Pinned by CORE §6 at 13** — see the scale's note above. Every other size here is chosen
+/// against this one, and the icon step is literally derived from it.
+pub const BODY: f32 = 13.0;
+/// Subordinate to the value beside it — a badge, a unit, a hint, the status bar's second row.
+///
+/// One point under [`BODY`] and never two: the third size that used to live below this one
+/// was 11, and it was crowding rather than hierarchy.
+pub const SMALL: f32 = 12.0;
 
 /// How much bigger an icon is than the text it stands beside.
 ///
@@ -691,18 +764,21 @@ pub fn install_visuals(ctx: &egui::Context) {
     // buys was already there and only its blur — epaint's own "It also lead to text looking
     // more blurry" — was being paid for. The argument is false, and the font file says so:
     // `CaskaydiaMonoNerdFontMono-Regular.ttf` reports `head.unitsPerEm` 2048 and an advance
-    // of 1200, so the advance is fixed at 0.586 *em* and not at a whole pixel. At the three
-    // sizes this window sets — 12, 13 and 17 — it is 7.031 / 7.617 / 9.961 px, none of them
-    // integral, so with binning off each glyph origin rounds to a pixel and the gaps at 13px
-    // run 8, 7, 8, 7, 8, 8. The window was paying uneven spacing for a benefit it had been
-    // told it could not collect.
+    // of 1200, so the advance is fixed at 0.586 *em* and not at a whole pixel. At the six
+    // sizes this window sets — the type scale, 12 / 13 / 15 / 17 / 23 / 28 — it is 7.031 /
+    // 7.617 / 8.789 / 9.961 / 13.477 / 16.406 px, **not one of them integral**, so with
+    // binning off each glyph origin rounds to a pixel and the gaps at 13px run 8, 7, 8, 7, 8,
+    // 8. The window was paying uneven spacing for a benefit it had been told it could not
+    // collect.
     //
-    // **Every figure in that paragraph was re-measured at P23's face swap and the sizes were
-    // wrong before it.** This comment said "12 / 13 / 18" while `install_spacing` below has
-    // set Heading to 17 for as long as it has existed. The conclusion survived the face
+    // **Every figure in that paragraph has now been re-measured twice, and the sizes were
+    // wrong both times before it.** At 2b the comment said "12 / 13 / 18" while
+    // `install_spacing` below had set Heading to 17 for as long as it had existed; at 2c it
+    // said *three* sizes while the scale above names six. The conclusion survived the face
     // change untouched — Fira was 600/1000 and this face is 1200/2048, and neither lands on
-    // a pixel — which is the point: the argument is about the *shape* of the number, so a
-    // reader must not have to wonder whether it was ever re-checked.
+    // a pixel — and it survives the scale, because every one of the six misses a pixel too.
+    // That is the point: the argument is about the *shape* of the number, so a reader must
+    // not have to wonder whether it was ever re-checked. Twice now it needed to be.
     //
     // P21 owed the line an experiment and never ran it — `P21.md:551`, *"if the A/B refuses
     // it, the line comes out"*, with `P21.md:673` left unticked. PXX ran it: two builds
@@ -740,23 +816,29 @@ fn install_spacing(ctx: &egui::Context) {
         // Four roles, not ten sizes. Body is the value you read; Button matches it so a
         // button never shouts; Small is a label or a hint; Heading is a popup title, which
         // egui resolves for us and which had been 18.0 by nobody's decision.
+        //
+        // **The numbers are not here.** They are the type scale above, and this map is a
+        // reader of it like every call site in `ui/`. It was the other way round until P23:
+        // these five literals were the nearest thing the program had to a stated scale, and
+        // being the nearest thing is not the same as being it — a hundred and eleven call sites
+        // drew sizes this map had never heard of, three of them larger than anything in it.
         style.text_styles = [
             (
                 TextStyle::Heading,
-                FontId::new(17.0, FontFamily::Proportional),
+                FontId::new(TITLE, FontFamily::Proportional),
             ),
-            (TextStyle::Body, FontId::new(13.0, FontFamily::Proportional)),
+            (TextStyle::Body, FontId::new(BODY, FontFamily::Proportional)),
             (
                 TextStyle::Button,
-                FontId::new(13.0, FontFamily::Proportional),
+                FontId::new(BODY, FontFamily::Proportional),
             ),
             (
                 TextStyle::Small,
-                FontId::new(12.0, FontFamily::Proportional),
+                FontId::new(SMALL, FontFamily::Proportional),
             ),
             (
                 TextStyle::Monospace,
-                FontId::new(13.0, FontFamily::Monospace),
+                FontId::new(BODY, FontFamily::Monospace),
             ),
         ]
         .into();
@@ -928,7 +1010,7 @@ pub fn button(ui: &mut egui::Ui, text: egui::RichText, enabled: bool) -> egui::R
 /// **The other half of §2d's plan — moving it to `fa-times` U+F00D — measurement withdrew.**
 /// The premise was that a mathematical operator drawn from the text portion of the face
 /// "shares neither weight nor ink density with the Font Awesome marks beside it", and both
-/// halves are false. Rastered at a common 18.2pt (`13.0 * ICON_SCALE`) and summing coverage
+/// halves are false. Rastered at a common 18.2pt (`BODY * ICON_SCALE`) and summing coverage
 /// over each glyph's own `uv_rect`, `×` fills **45.4%** of a 9×8 box and `fa-times` **46.1%**
 /// of an 11×12 — the same weight, in a smaller box, which is what a glyph sized to text
 /// rather than to an icon looks like. And no Font Awesome mark stands beside it in any of the
@@ -1056,7 +1138,7 @@ pub fn section_bare(ui: &mut egui::Ui, title: &str) {
     ui.add_space(SECTION_ABOVE);
     ui.label(
         egui::RichText::new(title)
-            .size(14.0)
+            .size(SECTION)
             .family(bold())
             .color(TEXT),
     );
@@ -1942,7 +2024,7 @@ mod tests {
             warm.textures_delta.clear();
 
             let family = if weight == "bold" { bold() } else { MONO };
-            let font = egui::FontId::new(13.0, family);
+            let font = egui::FontId::new(BODY, family);
             let render = |s: &str| -> Vec<(char, f32, String)> {
                 let galley =
                     ctx.fonts_mut(|f| f.layout_no_wrap(s.to_owned(), font.clone(), Color32::WHITE));
@@ -2013,7 +2095,7 @@ mod tests {
         warm.textures_delta.clear();
 
         // The tallest thing the bar draws: an icon beside Body text, which is 13.0.
-        let icon = egui::FontId::new(13.0 * ICON_SCALE, MONO);
+        let icon = egui::FontId::new(BODY * ICON_SCALE, MONO);
         let line_box = ctx.fonts_mut(|f| f.row_height(&icon));
 
         assert!(
@@ -2021,7 +2103,7 @@ mod tests {
             "an icon at {}px has a {line_box}px line box and SB_ROW is {SB_ROW} — the status \
              bar is shorter than the glyph it exists to carry, which is the defect P13 grew \
              the row to fix",
-            13.0 * ICON_SCALE
+            BODY * ICON_SCALE
         );
 
         // The other half, and the reason this is not simply `<=`: a bar with a great deal of
@@ -2033,6 +2115,139 @@ mod tests {
              {}px of unexplained headroom, so the constant has drifted away from the face \
              it is supposed to be fitted to",
             SB_ROW - line_box
+        );
+    }
+
+    /// The type scale is the only place a drawn size is written down.
+    ///
+    /// **This is the test that makes §2c a decision rather than a tidy-up.** Naming six roles
+    /// is worth nothing on its own: the program had five named sizes in `install_spacing`
+    /// before this round and still drew text at eight, because a call site can always type a
+    /// number. A hundred and eleven of them had. Renaming without a guard buys one clean
+    /// afternoon and the same drift by the next round.
+    ///
+    /// It reads the tree rather than a list of files, so a `ui/` module added later is scanned
+    /// the day it appears — the one thing an `include_str!` sweep of named files cannot do,
+    /// and the way [`the_icon_registry_is_the_only_way_an_icon_is_defined`]'s narrower scan
+    /// would have missed the four inline `×` marks §2d found.
+    ///
+    /// **There are no exceptions, and that cost a constant.** The status bar's spinner takes
+    /// `.size()` too, on an `egui::Spinner`, where it means a diameter — so the honest fix was
+    /// [`SPINNER_D`], not a name on an allow-list. An exception list is where a scale goes to
+    /// die: the seventh size arrives as the second exception and nobody re-reads why the first
+    /// one was granted.
+    #[test]
+    fn every_drawn_size_comes_from_the_type_scale() {
+        // The tree, walked at test time. `include_str!` would pin the file list at compile
+        // time, which is the failure this is written against.
+        fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let read = std::fs::read_dir(dir)
+                .unwrap_or_else(|e| panic!("{} is readable: {e}", dir.display()));
+            for entry in read {
+                let path = entry.expect("a readable directory entry").path();
+                if path.is_dir() {
+                    rs_files(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rs_files(&root, &mut files);
+        files.sort();
+        // A tree that reads as empty is a test that passes by accident. `src/` has had more
+        // than thirty files since P16 and cannot plausibly shrink to five.
+        assert!(
+            files.len() >= 20,
+            "only {} .rs files found under {} — the scan is not seeing the tree it is \
+             supposed to be guarding",
+            files.len(),
+            root.display()
+        );
+
+        // Two spellings reach the font: `RichText::size` and `FontId::new`. Both are matched
+        // only where a *digit* follows, so `.size(theme::BODY)` and this file's own mentions
+        // of the method by name are not hits.
+        const SPELLINGS: [&str; 2] = [".size(", "FontId::new("];
+        let mut strays = Vec::new();
+        for file in &files {
+            let text = std::fs::read_to_string(file)
+                .unwrap_or_else(|e| panic!("{} is readable: {e}", file.display()));
+            for (n, line) in text.lines().enumerate() {
+                // Prose is entitled to quote a number; a comment is not a call. The icon
+                // registry's guard learned this the same way — a test that cannot tell a
+                // declaration from a sentence about one fails the next time someone
+                // documents the thing it guards.
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                for spelling in SPELLINGS {
+                    let mut rest = line;
+                    while let Some(at) = rest.find(spelling) {
+                        let after = &rest[at + spelling.len()..];
+                        if after.starts_with(|c: char| c.is_ascii_digit()) {
+                            strays.push(format!(
+                                "{}:{}: {}",
+                                file.strip_prefix(&root).unwrap_or(file).display(),
+                                n + 1,
+                                line.trim()
+                            ));
+                        }
+                        rest = &rest[at + spelling.len()..];
+                    }
+                }
+            }
+        }
+
+        assert!(
+            strays.is_empty(),
+            "{} drawn size(s) bypass the type scale:\n{}\n\nEvery size in the window is one \
+             of WORDMARK {WORDMARK}, WORDMARK_SM {WORDMARK_SM}, TITLE {TITLE}, SECTION \
+             {SECTION}, BODY {BODY} or SMALL {SMALL} — or, if it is a length rather than \
+             type, a named one like SPINNER_D. A seventh number needs a role and a reason, \
+             both of them next to the other six.",
+            strays.len(),
+            strays.join("\n")
+        );
+    }
+
+    /// [`BODY`] is thirteen because CORE §6 argues from thirteen, twice.
+    ///
+    /// The maker asked this round to rethink every size in the window, and every size in the
+    /// window was this round's to move — except one. §6 builds the icon scale on *"about nine
+    /// points of ink next to a **thirteen-point** capital"*, and its file-type-icon refusal on
+    /// *"at `ICON_SCALE` a **13pt** glyph does not fit a 20px row"*. Both sentences are
+    /// arguments, not descriptions: change the body size and they stop being true, in a
+    /// document that is the maker's to edit and nobody else's.
+    ///
+    /// So this is the binding rather than a comment saying so. It fails from either end — a
+    /// hand moving `BODY`, or a hand editing those sentences without moving `BODY` — which is
+    /// the only arrangement that survives someone who has read neither.
+    #[test]
+    fn core_s_icon_argument_is_the_reason_body_is_thirteen() {
+        let core = include_str!("../CORE.md");
+        let look = core
+            .split_once("## 6. LOOK")
+            .expect("CORE has a section 6 heading")
+            .1;
+        // Two independent sentences, so a single edit cannot quietly unpin the constant.
+        for phrase in ["thirteen-point capital", "a 13pt glyph does not fit"] {
+            assert!(
+                look.contains(phrase),
+                "CORE §6 no longer says \"{phrase}\" — the sentence BODY = {BODY} was pinned \
+                 to has been edited. If the maker moved the body size, move BODY with it and \
+                 re-derive SB_ROW and the icon step; if the wording merely changed, re-anchor \
+                 this test. Do not delete it: the constant is load-bearing for CORE's own \
+                 argument about icons."
+            );
+        }
+        assert_eq!(
+            BODY, 13.0,
+            "BODY is {BODY} while CORE §6 argues the icon scale from a thirteen-point capital \
+             and refuses file-type icons because a 13pt glyph will not fit a 20px row. Those \
+             two sentences are the maker's to change (CORE.md:3-5), so this constant cannot \
+             move ahead of them."
         );
     }
 }

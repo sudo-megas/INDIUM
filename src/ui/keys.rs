@@ -91,12 +91,12 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                                 rect.left_center(),
                                 egui::Align2::LEFT_CENTER,
                                 key,
-                                egui::FontId::new(13.0, theme::MONO),
+                                egui::FontId::new(theme::BODY, theme::MONO),
                                 theme::TEXT,
                             );
                             ui.label(
                                 egui::RichText::new(*does)
-                                    .size(13.0)
+                                    .size(theme::BODY)
                                     .color(theme::TEXT_SECONDARY),
                             );
                         });
@@ -106,7 +106,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             theme::foot(ui, |ui| {
                 ui.label(
                     egui::RichText::new(NO_KEY_FOR)
-                        .size(12.0)
+                        .size(theme::SMALL)
                         .color(theme::TEXT_MUTED),
                 );
             });

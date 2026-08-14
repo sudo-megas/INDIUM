@@ -34,13 +34,13 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
 
             ui.label(
                 egui::RichText::new(&app.openwith_name)
-                    .size(16.0)
+                    .size(theme::TITLE)
                     .color(theme::TEXT),
             );
             ui.label(
                 egui::RichText::new(&app.openwith_mime)
                     .family(theme::MONO)
-                    .size(13.0)
+                    .size(theme::BODY)
                     .color(theme::TEXT_MUTED),
             );
             ui.add_space(8.0);
@@ -142,20 +142,24 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                                 if c.is_default {
                                     ui.label(
                                         egui::RichText::new("default")
-                                            .size(12.0)
+                                            .size(theme::SMALL)
                                             .family(theme::MONO)
                                             .color(theme::TEXT),
                                     );
                                 }
                                 if c.app.terminal {
-                                    ui.label(egui::RichText::new("terminal").size(12.0).color(dim));
+                                    ui.label(
+                                        egui::RichText::new("terminal")
+                                            .size(theme::SMALL)
+                                            .color(dim),
+                                    );
                                 }
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
                                         ui.label(
                                             egui::RichText::new(&c.app.id)
-                                                .size(12.0)
+                                                .size(theme::SMALL)
                                                 .family(theme::MONO)
                                                 .color(dim),
                                         );
@@ -176,7 +180,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             theme::foot(ui, |ui| {
                 ui.label(
                     egui::RichText::new(FOOTER)
-                        .size(13.0)
+                        .size(theme::BODY)
                         .color(theme::TEXT_MUTED),
                 );
             });

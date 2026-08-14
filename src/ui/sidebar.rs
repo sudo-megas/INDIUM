@@ -197,13 +197,13 @@ pub fn show(app: &mut Indium, root: &mut egui::Ui) {
                         ui.add_space(4.0);
                         ui.label(
                             egui::RichText::new("INDIUM")
-                                .size(23.0)
+                                .size(theme::WORDMARK_SM)
                                 .color(theme::TEXT)
                                 .family(theme::bold()),
                         );
                         ui.label(
                             egui::RichText::new("archive manager")
-                                .size(13.0)
+                                .size(theme::BODY)
                                 .color(theme::TEXT_MUTED),
                         );
                     });
@@ -341,7 +341,7 @@ fn row_body(
         ui.label(
             egui::RichText::new(icon)
                 .family(theme::MONO)
-                .size(13.0 * theme::ICON_SCALE)
+                .size(theme::BODY * theme::ICON_SCALE)
                 .color(ink),
         );
         ui.label(egui::RichText::new(label).color(ink));
@@ -349,7 +349,7 @@ fn row_body(
             if let Some(t) = tag {
                 ui.label(
                     egui::RichText::new(t)
-                        .size(12.0)
+                        .size(theme::SMALL)
                         .family(theme::MONO)
                         .color(dim),
                 );
@@ -357,7 +357,7 @@ fn row_body(
                 ui.label(
                     egui::RichText::new(key)
                         .family(theme::MONO)
-                        .size(13.0)
+                        .size(theme::BODY)
                         .color(dim),
                 );
             }

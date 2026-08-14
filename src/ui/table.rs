@@ -149,7 +149,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                     header.col(|ui| {
                         ui.label(
                             egui::RichText::new(name)
-                                .size(13.0)
+                                .size(theme::BODY)
                                 .color(theme::TEXT_MUTED),
                         );
                     });
@@ -237,7 +237,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                             // columns beside it, in every row of the program's main view.
                             let mut text = egui::RichText::new(shown)
                                 .family(theme::MONO)
-                                .size(13.0)
+                                .size(theme::BODY)
                                 .color(colour);
                             if row.is_dir {
                                 text = text.family(theme::bold());
@@ -253,7 +253,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                             ui.add(egui::Label::new(text).truncate());
                         }
                         if entry.as_ref().map(|e| e.0).unwrap_or(false) {
-                            ui.label(egui::RichText::new("enc").size(12.0).color(dim));
+                            ui.label(egui::RichText::new("enc").size(theme::SMALL).color(dim));
                         }
                     });
 
@@ -286,7 +286,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                         ui.label(
                             egui::RichText::new(text)
                                 .family(theme::MONO)
-                                .size(13.0)
+                                .size(theme::BODY)
                                 .color(dim),
                         );
                     });
@@ -582,17 +582,19 @@ fn recents_view(app: &mut Indium, ctx: &egui::Context, ui: &mut egui::Ui) {
                             ui.label(
                                 egui::RichText::new(path)
                                     .family(theme::MONO)
-                                    .size(13.0)
+                                    .size(theme::BODY)
                                     .color(dim),
                             );
                             if !exists {
-                                ui.label(egui::RichText::new("missing").size(12.0).color(dim));
+                                ui.label(
+                                    egui::RichText::new("missing").size(theme::SMALL).color(dim),
+                                );
                             }
                         });
                         ui.label(
                             egui::RichText::new(util::format_timestamp(*opened))
                                 .family(theme::MONO)
-                                .size(12.0)
+                                .size(theme::SMALL)
                                 .color(dim),
                         );
                     });
@@ -645,7 +647,7 @@ fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
     theme::section(ui, "Bookmarks");
     ui.label(
         egui::RichText::new("Named directories to extract into.")
-            .size(13.0)
+            .size(theme::BODY)
             .color(theme::TEXT_MUTED),
     );
     ui.add_space(6.0);
@@ -694,13 +696,17 @@ fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
                                     dim
                                 }));
                                 if !exists {
-                                    ui.label(egui::RichText::new("missing").size(12.0).color(dim));
+                                    ui.label(
+                                        egui::RichText::new("missing")
+                                            .size(theme::SMALL)
+                                            .color(dim),
+                                    );
                                 }
                             });
                             ui.label(
                                 egui::RichText::new(&b.path)
                                     .family(theme::MONO)
-                                    .size(13.0)
+                                    .size(theme::BODY)
                                     .color(dim),
                             );
                         });
@@ -832,7 +838,7 @@ fn draft_row(ui: &mut egui::Ui, dest: &str, source: &str, focused: bool) -> (egu
                 ui.label(
                     egui::RichText::new(source)
                         .family(theme::MONO)
-                        .size(13.0)
+                        .size(theme::BODY)
                         .color(dim),
                 );
             });
@@ -853,7 +859,7 @@ fn draft_view(app: &mut Indium, ui: &mut egui::Ui) {
     theme::section(ui, "Draft");
     ui.label(
         egui::RichText::new("What the next archive will be made of. Nothing here is written.")
-            .size(13.0)
+            .size(theme::BODY)
             .color(theme::TEXT_MUTED),
     );
     ui.add_space(6.0);
@@ -874,7 +880,7 @@ fn draft_view(app: &mut Indium, ui: &mut egui::Ui) {
         ui.add_space(4.0);
         ui.label(
             egui::RichText::new(reason)
-                .size(13.0)
+                .size(theme::BODY)
                 .color(theme::TEXT_MUTED),
         );
     }
@@ -933,13 +939,13 @@ fn empty_state(ui: &mut egui::Ui, title: &str, hint: &str) {
         ui.add_space(70.0);
         ui.label(
             egui::RichText::new(title)
-                .size(16.0)
+                .size(theme::TITLE)
                 .color(theme::TEXT_SECONDARY),
         );
         ui.add_space(4.0);
         ui.label(
             egui::RichText::new(hint)
-                .size(13.0)
+                .size(theme::BODY)
                 .color(theme::TEXT_MUTED),
         );
     });
@@ -950,7 +956,7 @@ fn mono_right(ui: &mut egui::Ui, text: &str, colour: egui::Color32) {
         ui.label(
             egui::RichText::new(text)
                 .family(theme::MONO)
-                .size(13.0)
+                .size(theme::BODY)
                 .color(colour),
         );
     });

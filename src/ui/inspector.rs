@@ -135,7 +135,7 @@ fn tabs(app: &mut Indium, ui: &mut egui::Ui) {
             ui.label(
                 egui::RichText::new("Space")
                     .family(theme::MONO)
-                    .size(12.0)
+                    .size(theme::SMALL)
                     .color(theme::TEXT_MUTED),
             );
         });
@@ -176,7 +176,7 @@ fn details(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                                 "This directory is inferred from entry paths — the archive \
                                  stores no header for it, so there is no metadata to show.",
                             )
-                            .size(13.0)
+                            .size(theme::BODY)
                             .color(theme::TEXT_MUTED),
                         );
                     }
@@ -192,14 +192,14 @@ fn details(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
 fn entry_card(app: &mut Indium, ui: &mut egui::Ui, e: &Entry) {
     ui.label(
         egui::RichText::new(util::base_name(&e.path))
-            .size(17.0)
+            .size(theme::TITLE)
             .color(theme::TEXT),
     );
     ui.add(
         egui::Label::new(
             egui::RichText::new(&e.path)
                 .family(theme::MONO)
-                .size(13.0)
+                .size(theme::BODY)
                 .color(theme::TEXT_MUTED),
         )
         .selectable(true)
@@ -275,7 +275,7 @@ fn entry_card(app: &mut Indium, ui: &mut egui::Ui, e: &Entry) {
             );
             ui.label(
                 egui::RichText::new("CRC32, computed")
-                    .size(12.0)
+                    .size(theme::SMALL)
                     .color(theme::TEXT_MUTED),
             );
         }
@@ -369,7 +369,7 @@ fn aggregate_card(ui: &mut egui::Ui, selected: &[Entry]) {
     let agg = model::aggregate(selected.iter());
     ui.label(
         egui::RichText::new(format!("{} selected", agg.count))
-            .size(17.0)
+            .size(theme::TITLE)
             .color(theme::TEXT),
     );
     ui.add_space(8.0);
@@ -411,14 +411,14 @@ fn archive_card(app: &Indium, ui: &mut egui::Ui) {
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_default(),
         )
-        .size(17.0)
+        .size(theme::TITLE)
         .color(theme::TEXT),
     );
     ui.add(
         egui::Label::new(
             egui::RichText::new(path.to_string_lossy())
                 .family(theme::MONO)
-                .size(13.0)
+                .size(theme::BODY)
                 .color(theme::TEXT_MUTED),
         )
         .selectable(true)
@@ -543,7 +543,7 @@ fn preview(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
     ui.add(
         egui::Label::new(
             egui::RichText::new(util::base_name(&path))
-                .size(17.0)
+                .size(theme::TITLE)
                 .color(theme::TEXT),
         )
         .truncate(),
@@ -557,7 +557,7 @@ fn preview(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                 ui.add(egui::Spinner::new().color(theme::ORANGE));
                 ui.label(
                     egui::RichText::new("Reading…")
-                        .size(13.0)
+                        .size(theme::BODY)
                         .color(theme::TEXT_SECONDARY),
                 );
             });
@@ -569,7 +569,7 @@ fn preview(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
 
     ui.label(
         egui::RichText::new(kind_line(data, entry.size))
-            .size(12.0)
+            .size(theme::SMALL)
             .color(theme::TEXT_MUTED),
     );
     ui.add_space(8.0);
@@ -607,7 +607,7 @@ fn preview(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
                         egui::Label::new(
                             egui::RichText::new(String::from_utf8_lossy(&data.bytes))
                                 .family(theme::MONO)
-                                .size(13.0)
+                                .size(theme::BODY)
                                 .color(theme::TEXT_SECONDARY),
                         )
                         .selectable(true)
@@ -634,7 +634,7 @@ fn preview(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
 /// says at length why the count is fixed, and the pane is resizable for a reader who wants
 /// the whole width. `ScrollArea::both` is the image arm's idiom, one zone over.
 fn hex(ui: &mut egui::Ui, data: &super::PreviewData) {
-    let font = egui::FontId::new(13.0, theme::MONO);
+    let font = egui::FontId::new(theme::BODY, theme::MONO);
     // `fonts_mut` for the reason the status bar's lane gives: measuring can populate the
     // atlas, so the accessor that admits it is the correct one.
     let row_h = ui.ctx().fonts_mut(|f| f.row_height(&font));
@@ -657,7 +657,7 @@ fn hex(ui: &mut egui::Ui, data: &super::PreviewData) {
                     ui.label(
                         egui::RichText::new(util::hex_offset(start))
                             .family(theme::MONO)
-                            .size(13.0)
+                            .size(theme::BODY)
                             .color(theme::TEXT_MUTED),
                     );
                     ui.add(
@@ -667,7 +667,7 @@ fn hex(ui: &mut egui::Ui, data: &super::PreviewData) {
                                 util::hex_body(&data.bytes[start..end])
                             ))
                             .family(theme::MONO)
-                            .size(13.0)
+                            .size(theme::BODY)
                             .color(theme::TEXT_SECONDARY),
                         )
                         // As the text arm is. A selection cannot run past the rows that
@@ -706,7 +706,7 @@ fn empty_note(ui: &mut egui::Ui, title: &str, hint: &str) {
         ui.add_space(4.0);
         ui.label(
             egui::RichText::new(hint)
-                .size(13.0)
+                .size(theme::BODY)
                 .color(theme::TEXT_MUTED),
         );
     });
@@ -727,14 +727,14 @@ fn grid(ui: &mut egui::Ui, id: &str, body: impl FnOnce(&mut egui::Ui)) {
 fn field(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.label(
         egui::RichText::new(label)
-            .size(13.0)
+            .size(theme::BODY)
             .color(theme::TEXT_MUTED),
     );
     ui.add(
         egui::Label::new(
             egui::RichText::new(value)
                 .family(theme::MONO)
-                .size(13.0)
+                .size(theme::BODY)
                 .color(theme::TEXT),
         )
         .selectable(true)
@@ -746,13 +746,13 @@ fn field(ui: &mut egui::Ui, label: &str, value: &str) {
 fn field_muted(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.label(
         egui::RichText::new(label)
-            .size(13.0)
+            .size(theme::BODY)
             .color(theme::TEXT_MUTED),
     );
     ui.label(
         egui::RichText::new(value)
             .family(theme::MONO)
-            .size(13.0)
+            .size(theme::BODY)
             .color(theme::TEXT_MUTED),
     );
     ui.end_row();
@@ -769,7 +769,7 @@ fn note(ui: &mut egui::Ui, text: &str) {
     ui.add_space(3.0);
     ui.label(
         egui::RichText::new(text)
-            .size(12.0)
+            .size(theme::SMALL)
             .italics()
             .color(theme::TEXT_MUTED),
     );

@@ -38,7 +38,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 // and an empty queue says so.
                 ui.label(
                     egui::RichText::new("Nothing staged.")
-                        .size(13.0)
+                        .size(theme::BODY)
                         .color(theme::TEXT_MUTED),
                 );
                 return;
@@ -52,14 +52,14 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                         ui.horizontal(|ui| {
                             ui.label(
                                 egui::RichText::new(task.verb())
-                                    .size(12.0)
+                                    .size(theme::SMALL)
                                     .color(theme::TEXT)
                                     .family(theme::bold()),
                             );
                             ui.label(
                                 egui::RichText::new(task.summary())
                                     .family(theme::MONO)
-                                    .size(13.0)
+                                    .size(theme::BODY)
                                     .color(theme::TEXT),
                             );
                             ui.with_layout(
@@ -96,7 +96,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 for note in &losses {
                     ui.label(
                         egui::RichText::new(note)
-                            .size(12.0)
+                            .size(theme::SMALL)
                             .italics()
                             .color(theme::TEXT_MUTED),
                     );
@@ -120,7 +120,7 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                 });
                 ui.label(
                     egui::RichText::new("Esc closes · nothing is written until Apply")
-                        .size(12.0)
+                        .size(theme::SMALL)
                         .color(theme::TEXT_MUTED),
                 );
             });
