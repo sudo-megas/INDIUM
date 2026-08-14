@@ -1,3 +1,44 @@
+indium (2.2.0-1) unstable; urgency=medium
+
+  * Archives made with `tar -cf x.tar -C dir .` extract again. Their first member is the
+    archive root `./`, whose name normalises to nothing, and a guard written for a
+    different defect read that empty name as one that could not be decoded -- so INDIUM
+    refused the whole archive and blamed the system it was being read on. It is the
+    commonest tar shape there is. A member that is exactly the archive root is now told
+    apart from a name that genuinely did not survive the read, and the second is still
+    refused whole-archive, exactly as before.
+  * A rebuild or a creation into a folder that is not there says so, and says which
+    folder. It used to name a temporary file nobody had chosen -- something ending
+    `.indium-new` -- and it only did that for `.7z`, because that was the format anybody
+    had watched fail. The check sits in front of both writers now, so all seven writable
+    containers answer the same way.
+  * A long Apply says where it is, and stops when it is told to. Progress and the cancel
+    flag were only read between members, which is nothing to go on when the archive is
+    one large member: the program was working the whole time and had no way to say so.
+    Both land inside the member now, throttled to about a hundred reports over a member
+    rather than a million, and a cancelled run clears up what it had written.
+  * Preselect is a button, and it is third in its row. It had been the row's label,
+    sitting first, at the same size as two words that were pressable -- which makes a
+    third pressable word whatever it was meant to be. It does what it was read as doing:
+    it asks for a directory once, and sends every archive there until another mode is
+    picked.
+  * Two things stop being cut off in a narrow window. The Inspector yields to the entry
+    table rather than holding its full width, so the table keeps all four columns; and
+    the draft's button row wraps, which stops the refusal sentence, the empty-state text
+    and the staged rows beneath it being drawn into space the panel then throws away.
+  * Text is evenly spaced again, and the cursor row's filename is legible. A line
+    switching off sub-pixel binning had been added on the belief that a monospace face
+    gives a whole-pixel advance; Fira Mono's is 0.600 em, which at 13 px is 7.8 px, so
+    the gaps ran 8, 8, 7, 8, 8, 8. And the filename on the cursor row was painted in the
+    accent, on a ground already washed with the accent, at 2.91:1 -- it is the ordinary
+    text ink now, at 9.14:1.
+  * Nothing else changed in the program: the same eight formats, the same estimator and
+    its figures, the same rebuild, the same ten popups. This is the round that walked the
+    shipped 2.1 package end to end -- 158 steps, every denial answered -- so what changed
+    here is what that walk found.
+
+ -- sudo-megas <sudo-megas@users.noreply.github.com>  Fri, 14 Aug 2026 12:00:00 +0300
+
 indium (2.1.0-1) unstable; urgency=medium
 
   * Files first, Create last. Making an archive used to begin with the popup that asks
