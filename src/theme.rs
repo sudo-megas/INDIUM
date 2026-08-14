@@ -1610,6 +1610,209 @@ mod tests {
         );
     }
 
+    /// Read a file under the crate root at test time.
+    fn source(rel: &str) -> String {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
+        std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{rel} is readable: {e}"))
+    }
+
+    /// Every `.rs` file under `src/ui/`, so a scan cannot quietly find nothing.
+    fn ui_sources() -> Vec<(String, String)> {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir)
+                .expect("src/ui is readable")
+                .flatten()
+            {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut paths = Vec::new();
+        walk(&root.join("src/ui"), &mut paths);
+        assert!(
+            paths.len() >= 10,
+            "only {} file(s) under src/ui — a scan that found nothing must not read as a scan \
+             that found nothing wrong",
+            paths.len()
+        );
+        paths
+            .into_iter()
+            .map(|p| {
+                let name = p
+                    .strip_prefix(root)
+                    .unwrap_or(&p)
+                    .to_string_lossy()
+                    .into_owned();
+                let body = std::fs::read_to_string(&p).expect("a listed file is readable");
+                (name, body)
+            })
+            .collect()
+    }
+
+    const INK_TOKENS: [&str; 3] = ["TEXT_SECONDARY", "TEXT_MUTED", "TEXT"];
+
+    /// Resonance's clause 13, which INDIUM nearly satisfies already: a text token is text ink
+    /// and nothing else — never a fill, never a separator, never a rule.
+    ///
+    /// **This is the half that holds, and the census below is the half that does not.** Across
+    /// every file under `src/ui/` the three tokens appear only as a colour: `.color(…)` on a
+    /// `RichText`, a `painter.text` colour argument, or an `ink`/`dim` variable feeding one.
+    /// Zero fills and zero strokes, which is the property worth keeping and the reason to
+    /// spend a test on it.
+    ///
+    /// The scan normalises whitespace before looking, because the regression it is for does
+    /// not have to fit on one line — `rustfmt` breaks a long `rect_filled` across three, and a
+    /// line-at-a-time scan would read straight past it. What it cannot see is a text token put
+    /// into a variable and *then* used as a fill; that is the gap, and it is stated rather
+    /// than papered over. The census test below closes the other direction.
+    #[test]
+    fn a_text_token_in_the_window_is_only_ever_text() {
+        // Sinks, spelled as they appear immediately before a colour argument. The window is
+        // 32 characters because that is long enough to hold `rect_filled(rect, 0.0, ` and
+        // `Stroke::new(1.0, ` and short enough not to reach back over a builder chain that
+        // legitimately sets a fill and an ink in the same expression.
+        const SINKS: [&str; 7] = [
+            "fill(",
+            "filled(",
+            "stroke(",
+            "Stroke::new(",
+            "bg_fill",
+            "hline(",
+            "vline(",
+        ];
+        let mut seen = 0usize;
+        for (name, body) in ui_sources() {
+            // Code only. A comment is free to name a sink and a token in one breath — several
+            // in this crate do, explaining why the pairing would be wrong — and a scan that
+            // cannot tell prose from code would fire on the very notes that agree with it.
+            let flat: String = body
+                .lines()
+                .map(|l| l.trim())
+                .filter(|l| !l.starts_with("//"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            for token in INK_TOKENS {
+                let needle = format!("theme::{token}");
+                let mut from = 0;
+                while let Some(at) = flat[from..].find(&needle) {
+                    let at = from + at;
+                    from = at + needle.len();
+                    // `TEXT` is a prefix of the other two; only count the exact token.
+                    if flat[from..].starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+                        continue;
+                    }
+                    seen += 1;
+                    // Back up to a char boundary: this file's neighbours are full of em
+                    // dashes, and 32 bytes lands inside one sooner or later.
+                    let mut lo = at.saturating_sub(32);
+                    while lo < at && !flat.is_char_boundary(lo) {
+                        lo += 1;
+                    }
+                    let back = &flat[lo..at];
+                    if let Some(sink) = SINKS.iter().find(|s| back.contains(**s)) {
+                        panic!(
+                            "{name} puts {token} into `{sink}` — \"…{back}{needle}\". The three \
+                             text tokens are text ink and nothing else: a fill or a rule that \
+                             wants this weight takes it from the ground ramp or from \
+                             `HAIRLINE`, which are measured for the job"
+                        );
+                    }
+                }
+            }
+        }
+        // The scan must have found the tokens it was scanning for.
+        assert!(
+            seen >= 100,
+            "only {seen} text-token uses across src/ui — this scan is not reaching the code it \
+             is supposed to be checking"
+        );
+    }
+
+    /// The other direction: the places a text token is *not* text, all of which are here.
+    ///
+    /// The plan said **six** and then listed eight, which is the fifth figure in this round to
+    /// need re-deriving rather than transcribing — its line numbers had moved too, by the
+    /// width of everything 2c and 2e added. So the census is taken from the file at test time
+    /// and pinned by field name, and it is the field names that matter: a ninth entry means
+    /// someone has given a text token a job that is not text, and it should have to be written
+    /// down here to do it.
+    ///
+    /// They are not all the same kind of thing, and the plan's flat count is what hid that:
+    ///
+    /// - **Five `fg_stroke`s** are text in stroke's clothing. `fg_stroke` is what egui draws a
+    ///   widget's own label and glyphs with, so these are the ink following the widget state —
+    ///   the role, not a departure from it.
+    /// - **Three marks** genuinely are not text: the caret, and the two IME underlines. A
+    ///   caret is the ink's own cursor and an IME underline sits under the text it belongs to,
+    ///   so both take the ink deliberately; that is the argument, and it is worth having
+    ///   written down because it is the one a reviewer would otherwise have to reconstruct.
+    /// - **`override_text_color`** is listed because it is where the ink is *installed*, and a
+    ///   census with the origin missing would look complete while being the one line that
+    ///   matters most.
+    #[test]
+    fn the_only_text_tokens_that_are_not_text_are_these_nine() {
+        const CENSUS: [(&str, &str); 9] = [
+            ("override_text_color", "TEXT"),
+            ("widgets.noninteractive.fg_stroke", "TEXT_SECONDARY"),
+            ("widgets.inactive.fg_stroke", "TEXT_SECONDARY"),
+            ("widgets.hovered.fg_stroke", "TEXT"),
+            ("widgets.active.fg_stroke", "TEXT"),
+            ("widgets.open.fg_stroke", "TEXT"),
+            ("text_cursor.stroke", "TEXT"),
+            ("ime_composition.active_underline_stroke", "TEXT"),
+            ("ime_composition.inactive_underline_stroke", "TEXT_MUTED"),
+        ];
+
+        let body = source("src/theme.rs");
+        let start = body
+            .find("pub fn install_visuals(")
+            .expect("install_visuals is in this file");
+        let len = body[start..]
+            .find("\n}\n")
+            .expect("install_visuals has an end");
+        let scope = &body[start..start + len];
+
+        let mut found: Vec<(String, String)> = Vec::new();
+        for line in scope.lines() {
+            let line = line.trim();
+            if line.starts_with("//") || !line.starts_with("v.") {
+                continue;
+            }
+            let Some((lhs, rhs)) = line.split_once('=') else {
+                continue;
+            };
+            // `TEXT` is a prefix of the other two, so the longest match wins.
+            let Some(token) = INK_TOKENS.iter().find(|t| {
+                rhs.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                    .any(|w| w == **t)
+            }) else {
+                continue;
+            };
+            found.push((
+                lhs.trim().trim_start_matches("v.").to_string(),
+                (*token).to_string(),
+            ));
+        }
+
+        let expected: Vec<(String, String)> = CENSUS
+            .iter()
+            .map(|(f, t)| ((*f).to_string(), (*t).to_string()))
+            .collect();
+        assert_eq!(
+            found, expected,
+            "the census of text tokens inside `install_visuals` has changed. Every entry here \
+             is a place one of the three inks is something other than a `RichText` colour, and \
+             the list is exhaustive on purpose — a new one is a text token being given a \
+             second job, which is the thing clause 13 is about. If the new entry is right, add \
+             it with the reason; if it is a fill or a rule, it wants a ground token instead"
+        );
+    }
+
     /// "clicks doesnt feel anything" — the four states must actually differ.
     #[test]
     fn the_four_control_states_are_four_colours() {
@@ -2667,39 +2870,17 @@ mod tests {
     /// in this file are `floating` itself and the control leg above, and neither is a popup.
     #[test]
     fn every_popup_is_raised_through_floating() {
-        fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-            for entry in std::fs::read_dir(dir)
-                .expect("src/ui is readable")
-                .flatten()
-            {
-                let path = entry.path();
-                if path.is_dir() {
-                    rs_files(&path, out);
-                } else if path.extension().is_some_and(|e| e == "rs") {
-                    out.push(path);
-                }
-            }
-        }
-        let ui = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ui");
-        let mut files = Vec::new();
-        rs_files(&ui, &mut files);
-        // A walk that finds nothing must not read as a walk that found nothing wrong.
-        assert!(
-            files.len() >= 10,
-            "only {} file(s) under src/ui — this test found nothing to scan, which is not \
-             the same as finding nothing wrong",
-            files.len()
-        );
-
+        // The walk, and the "a scan that found nothing is not a scan that found nothing
+        // wrong" guard with it, are [`ui_sources`]. This test wrote both first; 2f needed the
+        // same two and copying them a second time is the shape 2c was deleting.
         let mut strays = Vec::new();
-        for file in &files {
-            let text = std::fs::read_to_string(file).expect("a source file is readable");
+        for (name, text) in ui_sources() {
             for (n, line) in text.lines().enumerate() {
                 if line.trim_start().starts_with("//") {
                     continue;
                 }
                 if line.contains("egui::Window::new") {
-                    strays.push(format!("{}:{}: {}", file.display(), n + 1, line.trim()));
+                    strays.push(format!("{name}:{}: {}", n + 1, line.trim()));
                 }
             }
         }
