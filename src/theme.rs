@@ -1415,12 +1415,31 @@ mod tests {
                     "SELECTION_WASH",
                     composite(ORANGE.linear_multiply(0.35), WINDOW),
                 ),
+                // The entry table's own hover, which the comment below has cited by number
+                // since P18 without any test computing it. `ui/table.rs:108` overrides
+                // `widgets.hovered.bg_fill` inside its scope only, and the well it overrides
+                // it in is `WINDOW` (`table.rs:48`), so this is the pair. It arrives measuring
+                // TEXT_MUTED at 5.20:1 — the figure that comment already quotes.
+                ("ROW_HOVER", composite(ROW_HOVER, WINDOW)),
             ])
             .collect();
+        // ORANGE and WARNING are inks, and until this round nothing measured them as inks.
+        // Both are painted as text: WARNING at `password.rs:113,127`, `settings.rs:45` and
+        // `mod.rs:3871-3888`; ORANGE at `tray.rs:60` as a label and as the ink of the three
+        // primary buttons — Apply in the tray and in Pending tasks, Create in the Create
+        // popup (`tray.rs:67`, `pending.rs:113`, `newarchive.rs:281`).
+        //
+        // **The two spinners are not in this list and must not be.** `mod.rs:3956` and
+        // `inspector.rs:557` paint ORANGE as a `Spinner`, which is a graphical object, not
+        // text: WCAG asks 3:1 of it (1.4.11), not 4.5, and ORANGE clears that on both grounds
+        // it spins over. Holding a spinner to a text floor would be measuring the wrong thing
+        // and would put a fifth entry in the list below that no reader could act on.
         let inks = [
             ("TEXT", TEXT),
             ("TEXT_SECONDARY", TEXT_SECONDARY),
             ("TEXT_MUTED", TEXT_MUTED),
+            ("ORANGE", ORANGE),
+            ("WARNING", WARNING),
         ];
 
         // Pairs the program must never paint. AUBERGINE_LIT is a control being held down —
@@ -1440,11 +1459,54 @@ mod tests {
         // before it draws: active, focused, selected, on the cursor. A hover is transient and
         // still paints the quiet half at 3.30:1. The entry table's own hover is not affected
         // — it overrides the fill to ROW_HOVER, where TEXT_MUTED measures 5.20:1.
-        const FORBIDDEN: [(&str, &str); 4] = [
+        //
+        // ORANGE joins the list on three grounds it is never painted on. It is an accent,
+        // not a text ramp: nothing draws orange words directly onto a popup's face, onto a
+        // selected row, or onto a hovered one — the orange in those places is the *fill*, and
+        // the ink over it is TEXT. Listed rather than omitted so that stays true.
+        const FORBIDDEN: [(&str, &str); 7] = [
             ("TEXT_MUTED", "AUBERGINE"),
             ("TEXT_MUTED", "AUBERGINE_LIT"),
             ("TEXT_SECONDARY", "AUBERGINE_LIT"),
             ("TEXT_MUTED", "SELECTION_WASH"),
+            ("ORANGE", "POPUP"),
+            ("ORANGE", "SELECTION_WASH"),
+            ("ORANGE", "ROW_HOVER"),
+        ];
+
+        // **These four are painted today, and they are under the floor.** That is a different
+        // statement from the list above and it does not get to share its name: `FORBIDDEN`
+        // means the program never does this, and the program does all four of these on every
+        // launch. Measuring ORANGE as an ink for the first time is what surfaced them.
+        //
+        // | pair | measures | drawn by |
+        // | --- | --- | --- |
+        // | ORANGE on PANEL | 4.44 | `tray.rs:60` — the staging summary, [`BODY`] in [`MONO`] |
+        // | ORANGE on CONTROL | 3.65 | Apply and Create at rest |
+        // | ORANGE on AUBERGINE | 2.58 | the same three buttons, hovered |
+        // | ORANGE on AUBERGINE_LIT | 2.06 | the same three, held down |
+        //
+        // The three buttons come from [`button`], which sets no fill when enabled, so the ink
+        // rides egui's own widget states: `weak_bg_fill` is CONTROL inactive, AUBERGINE
+        // hovered, AUBERGINE_LIT active (`install_visuals`).
+        //
+        // **The large-text exemption does not apply and cannot be made to.** WCAG's 3:1 tier
+        // wants 18pt regular or 14pt bold; [`BODY`] is 13px, which is 9.75pt, so the bold
+        // Apply is 9.75pt bold and short of the tier by a third. And the hovered and held
+        // figures — 2.58 and 2.06 — are under 3:1 as well, so no reading of the exemption
+        // reaches them even if the size did.
+        //
+        // **This is a finding, not a decision, and the decision is not mine.** ORANGE is
+        // CORE §6's palette and CORE §6 gives it the meaning *something will happen*, so
+        // every way out — darkening the token, giving the buttons an orange fill and a dark
+        // ink, or accepting the figures on the record — edits a clause only the maker edits.
+        // Until then the truth is pinned here rather than left unmeasured, and it is pinned
+        // in **both** directions: heal one of these and this fires and says to move it up.
+        const PAINTED_ANYWAY: [(&str, &str); 4] = [
+            ("ORANGE", "PANEL"),
+            ("ORANGE", "CONTROL"),
+            ("ORANGE", "AUBERGINE"),
+            ("ORANGE", "AUBERGINE_LIT"),
         ];
 
         for (gn, g) in &grounds {
@@ -1455,6 +1517,7 @@ mod tests {
                 let floor = if inn == "TEXT" && resting { 7.0 } else { 4.5 };
                 let seen = contrast(ink, *g);
                 let forbidden = FORBIDDEN.contains(&(inn, gn));
+                let painted_anyway = PAINTED_ANYWAY.contains(&(inn, gn));
                 if forbidden {
                     // The list is checked in both directions so it cannot rot. If a palette
                     // change ever made one of these legible, this fires and says to take it
@@ -1463,6 +1526,14 @@ mod tests {
                         seen < floor,
                         "{inn} on {gn} measures {seen:.2}:1 and clears {floor:.1} — it is no \
                          longer forbidden, so take it off the list"
+                    );
+                } else if painted_anyway {
+                    assert!(
+                        seen < floor,
+                        "{inn} on {gn} measures {seen:.2}:1 and now clears {floor:.1} — the \
+                         program paints this pair and it used to be under the floor, so \
+                         whatever just fixed it means this comes off PAINTED_ANYWAY and the \
+                         round document's open finding is closed"
                     );
                 } else {
                     assert!(
@@ -1479,6 +1550,64 @@ mod tests {
         // 2.64. TEXT_MUTED cannot reach 4.5 on AUBERGINE and stay muted: it would have to be
         // about #B3B3B1, which is TEXT_SECONDARY in all but name, and the ink ladder would
         // collapse from three tiers to two. So the call sites moved, not the palette.
+    }
+
+    /// [`SCRIM`]'s job is the opposite of every other figure in this file: the window behind
+    /// a modal has to stop being readable.
+    ///
+    /// **The plan asked for the scrim as a *ground*, and that framing does not survive being
+    /// run.** A backdrop is painted **over** the pixels behind it, so the ink is dimmed by the
+    /// same wash as the surface under it — modelling it as a ground dims only the ground, and
+    /// then the figures go the wrong way entirely: TEXT on WINDOW comes out at **16.65 against
+    /// its bare 15.13**, and the scrim reads as having *improved* legibility. It is the fourth
+    /// figure in this plan to change on contact with a measurement, and the most misleading,
+    /// because the wrong model returns a plausible number instead of an obvious error.
+    ///
+    /// Modelled the way it is painted, it does what it is for. TEXT on WINDOW falls
+    /// **15.13 → 1.72**, and the whole matrix lands between 1.27 and 1.75. So the assertion
+    /// here is a **ceiling**: nothing behind the scrim may reach 2.0, which is under even the
+    /// 1.6 CORE §6 asks of a hairline. Weakening the alpha to make the backdrop prettier is
+    /// the change this catches, and it is a plausible thing for someone to want.
+    ///
+    /// The floor legs elsewhere in this file are proved by a control that must fail them.
+    /// This one carries its own: the same arithmetic at **half the scrim's alpha** has to come
+    /// back **over** the ceiling, or the model is not responding to `SCRIM` at all and the
+    /// ceiling is being cleared by something other than the wash.
+    #[test]
+    fn the_scrim_puts_the_window_behind_it_out_of_reach() {
+        const CEILING: f32 = 2.0;
+        let inks = [
+            ("TEXT", TEXT),
+            ("TEXT_SECONDARY", TEXT_SECONDARY),
+            ("TEXT_MUTED", TEXT_MUTED),
+        ];
+        let mut worst: f32 = 0.0;
+        for (gn, g) in GROUNDS.iter() {
+            for (inn, ink) in inks {
+                let dimmed = contrast(composite(SCRIM, ink), composite(SCRIM, *g));
+                worst = worst.max(dimmed);
+                assert!(
+                    dimmed < CEILING,
+                    "behind the scrim, {inn} on {gn} still reads at {dimmed:.2}:1 — a modal's \
+                     backdrop is supposed to put the window out of reach, and at that figure \
+                     the two Modals are a tint rather than a scrim"
+                );
+            }
+        }
+        // The control: the same sum with the wash at half strength must break the ceiling.
+        let thin = SCRIM.linear_multiply(0.5);
+        let leaked = contrast(composite(thin, TEXT), composite(thin, WINDOW));
+        assert!(
+            leaked > CEILING,
+            "at half alpha the scrim still holds TEXT on WINDOW to {leaked:.2}:1, under the \
+             {CEILING:.1} ceiling — so the ceiling above is not being cleared by SCRIM and \
+             this test would pass with no scrim at all"
+        );
+        assert!(
+            worst > 1.0,
+            "nothing behind the scrim measured above 1.0:1, which is not suppression but an \
+             arithmetic fault — 1.0 is two identical colours"
+        );
     }
 
     /// "clicks doesnt feel anything" — the four states must actually differ.
