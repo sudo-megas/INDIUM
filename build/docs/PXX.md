@@ -38,8 +38,10 @@ checks and the §2 toolkit gate read the binary that actually ships instead of s
 
 **344 of 344.** Every test the repository contained has now been run and passed at once, which had
 never happened before. *(The table above is Phase 1's run and is left as it was taken. Phase 2e's
-fixes brought their own regression tests with them, so the same commands answer **350 passed, 0
-failed, 10 ignored — 360 in total** against the tree that becomes v2.2.)* The ten ignored tests divide three ways, and no single environment had
+fixes bring their own regression tests with them, so the count is a running one and every figure
+written here names the commit it was taken at: **350 passed, 10 ignored — 360** when the fixes
+first landed, **355 passed, 0 failed, 10 ignored — 365 in total** at `ab96461`. Phase 4 takes it
+once more and that is the number the freeze carries.)* The ten ignored tests divide three ways, and no single environment had
 ever satisfied all three: **eight** (`tests/package_path.rs`) want release artefacts that do not
 exist until a tag is pushed; **one** (`platform/clipboard.rs:174`) wants a live Wayland session
 and a `wl-paste` no CI runner has; **one** (`estimate.rs:977`) wants a `--release` build and quiet
@@ -326,3 +328,170 @@ regenerated and republished with every plan edit**, because tracking a generated
 source creates exactly the drift this round was built to find; Phase 4 verifies
 `checksheet.html` is byte-identical to a fresh regeneration, in the spirit of the nine
 doc-as-tests.
+
+---
+
+## Phase 2e — the question the maker raised before Phase 3
+
+Mid-round and unprompted, the maker said the window's text *"feels off"* and that *"the text
+readability all low"* — and was candid that he could not name the factor: not size, face,
+antialiasing, weight or colour, *"İ SIMPLY DONT KNOW"*. He offered a guess, that the Ubuntu
+Aubergine ground is too dark, and asked whether a lighter tint of the same hue would fix it.
+
+It is the only complaint in the round that is about the program as a whole rather than about a
+step, so it has no row on the sheet and could not be closed by one. Three findings, each measured
+rather than argued, and the third is the answer to his guess.
+
+### 1. Binning was off, and the reason written down for turning it off is false
+
+`theme.rs` carried `v.text_options.subpixel_binning = false`, set by P21, justified in a comment
+that read: *"§6 puts this entire window in monospace on a fixed advance: INDIUM cannot collect
+that benefit and was paying the blur for it at every size."*
+
+**The advance is fixed in em, not in pixels**, and the font file settles it rather than the
+argument. Read from `FiraMonoNerdFontMono-Regular.otf`'s own tables — `head.unitsPerEm` 1000,
+`hmtx.advanceWidth[0]` 600 — the advance is exactly 0.600 em. At the three sizes this window sets:
+
+| size | advance | rounded glyph-origin gaps over six glyphs | |
+| --- | --- | --- | --- |
+| 12.0 px | 7.200 px | 7, 7, 8, 7, 7, 7 | uneven |
+| 13.0 px | 7.800 px | 8, 8, 7, 8, 8, 8 | uneven |
+| 18.0 px | 10.800 px | 11, 11, 10, 11, 11, 11 | uneven |
+
+None of 7.2, 7.8 or 10.8 is an integer, so with binning off every glyph origin rounds and the ink
+gap swings a full pixel roughly every fifth character — at 13 px, on every line in the window. The
+even kerning the comment says INDIUM could not collect is precisely what it gave up. This is the
+only one of the three findings that is *systemic*, which is the shape the complaint had.
+
+### The A/B P21 promised and never ran
+
+`P21.md:551` set the terms itself: *"The verdict is the maker's, by eye, at 100% / 125% / 150% — a
+test cannot tell anyone that text got sharper. If the A/B refuses it, the line comes out, CORE §6
+is not touched."* `P21.md:673` — *"The binning A/B has been looked at, and kept or refused"* — was
+never ticked. The line shipped on an argument nobody had checked against the font it described.
+
+Run here at last: two builds differing in that line alone, the same archive at the same scroll, no
+keypress in either so neither view could drift. The windows landed pixel-identically — a title-bar
+strip compared with `magick compare -metric AE` returned `0 (0)` — so every difference below is
+the line and nothing else.
+
+- `indium-binning-off` — `6b1a3f92…`, what v2.2 would have shipped
+- `indium-binning-on` — `905da733…`
+
+The uneven spacing is visible magnified. **The finding that needs no eye at all is the wrap.** The
+same string, in the same panel, at the same width:
+
+| | the Details panel's `Contents` value |
+| --- | --- |
+| binning **off** | `23.4 MiB (24 576 000` ⏎ `bytes)` — **two lines** |
+| binning **on** | `23.4 MiB (24 576 000 bytes)` — one |
+
+Rounding every origin up widens a string enough to wrap it. So the line was not only costing
+sharpness, which is a matter of eyes; it was costing **layout**, silently, in the narrowest panel
+in the window — and a panel that wraps a value nobody asked it to wrap reads as cramped, which is
+one of the things *"feels off"* describes.
+
+**The verdict was the maker's and he gave it away**: *"i dont even comprehend the difference with
+human eye. i trust your verdict."* Given the arithmetic and the wrap, the line came out. Deleting
+it rather than writing `= true` is deliberate — egui's default is already `true`
+(`epaint-0.36.1/src/text/mod.rs:62`), so `P21.md:551`'s *"the line comes out"* is literally what
+happened, and the test now pins the toolkit's default instead of pinning an override of it.
+`the_window_does_not_pay_for_kerning_it_cannot_collect` is replaced by
+`a_fixed_em_advance_is_not_a_fixed_pixel_advance`, whose failure message carries the true
+arithmetic. CORE §6 is untouched, exactly as P21 said it would be.
+
+**`P21.md:673` is left unticked on purpose.** No round in this project's history has edited an
+earlier round's document — every commit touching `P21.md` is titled `P21:`, and the same holds for
+P20 and P19. The closure is recorded here instead, where it belongs, and the empty checkbox stands
+as evidence of what PXX inherited. `P21.md:545` still names the deleted test for the same reason.
+
+### 2. One ink failed AA, and it was the filename
+
+Measured off the screen rather than modelled: with `docs.tar.gz` open and the cursor moved with
+`Down` so the status bar reads `1 selected`, the wash sampled from a glyph-free part of the row is
+`#712322` — one unit down in two channels from the `#712422` the code computes.
+
+| ink on the selection wash | ratio | AA 4.5:1 |
+| --- | --- | --- |
+| `ORANGE` — what the Name column painted when focused | **2.91:1** | fails |
+| `TEXT_SECONDARY` — every other column on a selected row | 5.64:1 | passes |
+| `TEXT_MUTED` — what those columns would have been | 3.72:1 | fails |
+| `TEXT` — what the Name column paints now | 9.14:1 | passes |
+
+The row above it is the point: `table.rs` steps every *other* column up from `TEXT_MUTED` to
+`TEXT_SECONDARY` **for the express purpose of clearing AA on this exact ground**, and says so in a
+comment quoting these same 3.72 and 5.64. The one column carrying the filename was the one going
+the other way. And because moving the cursor also sets the selection, focused-and-selected is the
+ordinary state after any arrow key, not an edge case.
+
+CORE §6 forbade it twice over before contrast entered into it. The accent is *"reserved for
+exactly three meanings — the current selection, staged changes, and Apply/progress"*
+(`CORE.md:366`), of which the keyboard's position is none; and the Cursor row says that position
+is *"a line, not a colour"* (`CORE.md:370`). The ring has done that job since P12 — `table.rs`
+simply went on painting `ORANGE` in the Name column for three rounds afterwards, which is why the
+passage above the ring stood in the past tense while the code did not. **This is a fix that brings
+the code back to CORE, not a design change**, and the maker approved it as such.
+
+**One number was wrong in two places.** Both `table.rs` and `CORE.md:370` quoted **2.06:1** for
+that pair. 2.06 is what a *linear* blend gives — but `linear_multiply` composites in sRGB byte
+space, landing on `#712422`, the ground the same comment names one line later and derives its own
+two ratios from. So the file disagreed with itself, and CORE carried the disagreement. Corrected
+to **2.91:1** in both. Nothing either passage concludes changes; it failed AA at 2.91 as surely as
+at 2.06. Worth the edit only because a frozen repository should not carry a figure its own
+neighbouring line refutes — and because this is exactly the class of defect Phase 3's agent 10
+exists to hunt, found here by accident first.
+
+### 3. It is not the aubergine, and lightening it would have made every number worse
+
+His guess, tested rather than waved off. Ordinary text on the window ground:
+
+| ink on `WINDOW #300A24` | ratio |
+| --- | --- |
+| `TEXT #EEEEEC` | **15.13:1** |
+| `TEXT_SECONDARY #BDBDBB` | 9.34:1 |
+| `TEXT_MUTED #999997` | 6.16:1 |
+| `ORANGE #E95420` | 4.82:1 |
+
+15.13:1 is more than three times the AA floor. Every ink in the window clears AA against the
+ground, and the ground is dark **because** that is what buys the headroom — a lighter tint of the
+same hue lowers every one of these numbers. He was right that something was wrong, and wrong about
+the cause in the one direction that would have cost the most to act on. The palette is not
+touched, and no CORE §6 amendment is needed.
+
+### The deviation this creates, stated rather than absorbed
+
+**Every approval on the sheet was given against binning-off rendering**, because v2.1 is what the
+maker walked and v2.1 shipped P21's line. v2.2 places every glyph in the window differently. No
+step asserts sharpness, and `TESTPLAN.md` does not contain the word *orange* at all, so no stored
+answer is falsified by either change — but **round 13 is a layout check at three scale factors**
+(*"Nothing clips, nothing overlaps, every control reachable"* at 100% / 125% / 150%), and string
+width is precisely what moved. **13.1 through 13.4 therefore join the v2.2 re-walk**, which also
+happens to be the check `P21.md:551` wanted from the beginning and never got.
+
+### Three corrections to this document's own record
+
+An independent pass over the twenty ledger rows, checking each against the tree rather than
+against the ledger's own file names, resolved all twenty — ten closed in code, three false
+denials, five instrument-only, two cascades, none outstanding — and found two more rows that were
+wrong about themselves, in addition to the three already recorded above.
+
+- **3.1 is filed as `Code — ui/table.rs, virtualized row range`, and no code changed for it
+  anywhere.** `git log v2.1..HEAD -- src/ui/table.rs` shows two commits and both belong to 6.3 by
+  their own messages. It closed the way `71c7357` states: *"3.1 and 5.2 are closed the same way
+  12.6 was: the documented behaviour becomes part of the approve condition."* This is a worse kind
+  of mis-attribution than a wrong filename — a wrong file with the right disposition still tells
+  the next reader that code changed; a wrong disposition tells them the wrong kind of thing
+  happened at all.
+- **1.12 and 1.13 are filed as pure `Instrument`, and both needed code.** `install-desktop.sh`
+  invoked its payload by a path relative to the *caller's* working directory, so the corrected
+  wording — which sends the walker to `$HOME` deliberately — would still have failed against the
+  unfixed script. `5d903bb` makes both scripts resolve their own directory via `$0`. This is the
+  same miss as 8.11, in the same direction.
+- **The work plan's owning-file list is independently wrong for three rows.** It names
+  `ui/newarchive.rs` for 9.5 and 12.8 and `cli.rs` for 10.9; neither file was touched this round.
+  9.5 landed in `util.rs` (new `writable_parent`) called from `arch.rs` and `sevenz.rs`, 12.8's
+  orphan-temp half in `ui/mod.rs::on_exit`, and 10.9 in `sevenz.rs` alone.
+
+Which is the same lesson three times, and it is why the ledger is not the thing being frozen:
+**ask the program, not the record of it.** That applies to the checking pass too — its four commit
+citations were spot-checked against `git show` before being written down here.
