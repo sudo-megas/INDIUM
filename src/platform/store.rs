@@ -26,12 +26,31 @@ pub enum ExtractDefault {
     /// Into a directory named after the archive.
     #[default]
     Subdir,
+    /// Into one directory the user named once — the same one for every archive, until
+    /// they pick another mode.
+    ///
+    /// PXX 8.11: the row's label read as a button, and the maker clicked it expecting
+    /// exactly this. The word it was misread as is the word it keeps, because the
+    /// defect was never the word: it was that the word promised something to press.
+    ///
+    /// The path lives beside this variant rather than inside it. A payload would cost
+    /// `ExtractDefault` its `Copy`, which four call sites read by value, and the path is
+    /// worth keeping while another mode is active so that coming back does not mean
+    /// naming the directory twice.
+    Preselect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ExtractSettings {
     #[serde(default)]
     pub default: ExtractDefault,
+    /// Where `Preselect` points, empty until one is chosen.
+    ///
+    /// Empty is load-bearing: a `settings.toml` hand-edited to `default = "preselect"`
+    /// with no path names nowhere, and `extract_destination` falls back rather than
+    /// offering the window an empty string as a directory.
+    #[serde(default)]
+    pub preselect: String,
 }
 
 /// A named directory. P2 §2: "in an archiver a bookmark is an *extract destination*."
@@ -379,6 +398,10 @@ mod tests {
         let settings = Settings {
             extract: ExtractSettings {
                 default: ExtractDefault::Here,
+                // Set even though `Here` is the mode: PXX 8.11 keeps the path across a
+                // change of mode, so a round trip that only ever saw it empty would not
+                // be testing the thing that has to survive.
+                preselect: "/home/megas/somewhere else".into(),
             },
             bookmarks: vec![Bookmark {
                 name: "Downloads".into(),
@@ -678,6 +701,9 @@ mod tests {
         let settings = Settings {
             extract: ExtractSettings {
                 default: ExtractDefault::Subdir,
+                // PXX 8.11 added this field, which is exactly the event the test was
+                // written to catch. It holds a directory: a place, never a credential.
+                preselect: "/p/preselected".into(),
             },
             bookmarks: vec![Bookmark {
                 name: "n".into(),
@@ -688,5 +714,50 @@ mod tests {
         for forbidden in ["password", "passphrase", "secret", "token", "key"] {
             assert!(!text.contains(forbidden), "settings mention {forbidden}");
         }
+    }
+
+    /// PXX 8.11 added a field to a file that already exists in every install that has ever
+    /// run. A `settings.toml` written before it — which is all of them — has to keep
+    /// parsing, or an upgrade quietly costs the user their bookmarks and their mode.
+    ///
+    /// `#[serde(default)]` is what makes that true, and this is the test that says so
+    /// rather than the attribute saying it about itself.
+    #[test]
+    fn a_settings_file_written_before_preselect_existed_still_parses() {
+        let tmp = Tmp::new("preselect-upgrade");
+        let store = tmp.store();
+        std::fs::create_dir_all(store.settings_path().parent().unwrap()).unwrap();
+        std::fs::write(
+            store.settings_path(),
+            "[extract]\ndefault = \"here\"\n\n\
+             [[bookmark]]\nname = \"hagda\"\npath = \"/tmp/one\"\n",
+        )
+        .unwrap();
+
+        let loaded = store.load_settings();
+        assert!(!loaded.was_broken, "a pre-PXX settings.toml read as broken");
+        assert_eq!(loaded.value.extract.default, ExtractDefault::Here);
+        assert_eq!(
+            loaded.value.extract.preselect, "",
+            "an absent preselect is an empty one, not a parse failure"
+        );
+        assert_eq!(loaded.value.bookmarks.len(), 1, "the bookmarks survived");
+    }
+
+    /// The new mode has to survive the file as its own word: `rename_all = "lowercase"` is
+    /// what decides what gets written, and a variant that serialises to something the next
+    /// load cannot read is a setting that silently resets.
+    #[test]
+    fn preselect_round_trips_as_its_own_word() {
+        let settings = Settings {
+            extract: ExtractSettings {
+                default: ExtractDefault::Preselect,
+                preselect: "/home/megas/extracted".into(),
+            },
+            bookmarks: Vec::new(),
+        };
+        let text = toml::to_string_pretty(&settings).unwrap();
+        assert!(text.contains("default = \"preselect\""), "{text}");
+        assert_eq!(toml::from_str::<Settings>(&text).unwrap(), settings);
     }
 }

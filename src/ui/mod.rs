@@ -966,6 +966,25 @@ impl Indium {
                 }
                 PickerFor::Add => self.stage_adds(paths),
                 PickerFor::Draft => self.add_to_draft(paths),
+                // PXX 8.11. The mode is only taken up once a directory is actually named:
+                // a cancelled dialog is `Ok(vec![])` — `open_files` says so — and a user
+                // who changed their mind has not asked for their default to change.
+                //
+                // `extract_to_subdir` is cleared here rather than left to `settings.rs`,
+                // which syncs it right after a click. This answer does not arrive from a
+                // click; it arrives on a channel, frames later, with that row long since
+                // drawn. Without this line the popover would preselect the subdirectory
+                // it was told to stop preselecting.
+                PickerFor::Preselect => {
+                    if let Some(dir) = paths.into_iter().next() {
+                        let dir = dir.to_string_lossy().to_string();
+                        self.change_settings(move |s| {
+                            s.extract.preselect = dir;
+                            s.extract.default = ExtractDefault::Preselect;
+                        });
+                        self.extract_to_subdir = false;
+                    }
+                }
             }
         }
 
@@ -1974,13 +1993,14 @@ impl Indium {
         let (tx, rx) = channel();
         self.picker_rx = Some(rx);
         let ctx = ctx.clone();
-        let (title, multiple) = match what {
-            PickerFor::Open => ("Open archive", false),
-            PickerFor::Add => ("Add to archive", true),
-            PickerFor::Draft => ("Add to draft", true),
+        let (title, multiple, directory) = match what {
+            PickerFor::Open => ("Open archive", false, false),
+            PickerFor::Add => ("Add to archive", true, false),
+            PickerFor::Draft => ("Add to draft", true, false),
+            PickerFor::Preselect => ("Choose the preselect directory", false, true),
         };
         std::thread::spawn(move || {
-            let _ = tx.send((what, picker::open_files(title, multiple)));
+            let _ = tx.send((what, picker::open_files(title, multiple, directory)));
             ctx.request_repaint();
         });
     }
@@ -2569,6 +2589,50 @@ impl Indium {
             parent
         }
     }
+
+    /// Where the Extract popover opens pointing — which is not always beside the archive.
+    ///
+    /// PXX 8.11: `Preselect` names one directory for every archive, so it answers before
+    /// the archive's own parent is consulted. An empty path is not a directory, and a
+    /// hand-edited `settings.toml` can say `default = "preselect"` while naming nowhere,
+    /// so that case falls back to the walk the other two modes take rather than offering
+    /// the window an empty string.
+    ///
+    /// Deliberately **not** folded into `default_extract_dir`, which the Create popup
+    /// also calls for where a new archive is *written*. A rule about where things come
+    /// out is not a rule about where things are made, and one function answering both
+    /// questions is how it would quietly become one.
+    pub fn extract_destination(&self) -> PathBuf {
+        resolve_extract_destination(
+            self.settings.extract.default,
+            &self.settings.extract.preselect,
+            || self.default_extract_dir(),
+        )
+    }
+}
+
+/// The rule `Indium::extract_destination` applies, with nothing of the window in it.
+///
+/// **Free rather than a method, and that is the point** — the same reason `clipboard_chords`
+/// is free. `Indium::new` wants an `eframe::CreationContext`, which no test can conjure, so
+/// a rule that lives only on the struct is a rule no test can reach. PXX 8.11 made this one
+/// worth reaching: it decides between the directory the user named once and the one derived
+/// from the archive, and getting it wrong sends extractions somewhere nobody asked for.
+///
+/// `derived` is a closure rather than a value so that the archive walk is not paid for when
+/// `Preselect` answers first.
+fn resolve_extract_destination(
+    default: ExtractDefault,
+    preselect: &str,
+    derived: impl FnOnce() -> PathBuf,
+) -> PathBuf {
+    if default == ExtractDefault::Preselect {
+        let chosen = preselect.trim();
+        if !chosen.is_empty() {
+            return PathBuf::from(chosen);
+        }
+    }
+    derived()
 }
 
 /// Every regular file beneath `dir`, sorted, so the clipboard offer is stable.
@@ -3199,7 +3263,7 @@ impl Indium {
                     egui::Key::E => {
                         if self.has_archive() {
                             self.extract_path =
-                                self.default_extract_dir().to_string_lossy().to_string();
+                                self.extract_destination().to_string_lossy().to_string();
                             self.popup = Some(Popup::Extract);
                         }
                     }
@@ -4439,5 +4503,48 @@ mod tests {
         assert!(crate::util::format_ratio(1000, 1000).chars().count() <= LANE_RATIO);
         assert!(crate::util::format_ratio(0, 0).chars().count() <= LANE_RATIO);
         assert!(999_999usize.to_string().chars().count() <= LANE_COUNT);
+    }
+
+    /// PXX 8.11: the whole of what *Preselect* means — one directory, for every archive,
+    /// ahead of the one the archive's own parent would give.
+    #[test]
+    fn preselect_answers_before_the_archives_own_parent() {
+        let derived = || PathBuf::from("/beside/the/archive");
+        assert_eq!(
+            resolve_extract_destination(ExtractDefault::Preselect, "/named/once", derived),
+            PathBuf::from("/named/once")
+        );
+    }
+
+    /// `settings.toml` is a file a person can open, and `default = "preselect"` can be typed
+    /// into it without a path ever being chosen. Nowhere is not a destination: the window is
+    /// handed the derived directory rather than an empty string, which `Extract` would show
+    /// as a blank field and write to the process's cwd.
+    #[test]
+    fn a_preselect_naming_nowhere_falls_back_instead_of_naming_nowhere() {
+        let derived = || PathBuf::from("/beside/the/archive");
+        for nothing in ["", "   ", "\t"] {
+            assert_eq!(
+                resolve_extract_destination(ExtractDefault::Preselect, nothing, derived),
+                PathBuf::from("/beside/the/archive"),
+                "{nothing:?} is not a directory"
+            );
+        }
+    }
+
+    /// The path outlives the mode on purpose — picking *here* keeps it, so that pressing
+    /// *Preselect* again does not mean naming the directory a second time. This is the test
+    /// that says the stored path stays *inert* while another mode is lit, which is the other
+    /// half of that decision and the half that would be a defect if it were wrong.
+    #[test]
+    fn a_stored_preselect_is_inert_while_another_mode_is_lit() {
+        let derived = || PathBuf::from("/beside/the/archive");
+        for mode in [ExtractDefault::Here, ExtractDefault::Subdir] {
+            assert_eq!(
+                resolve_extract_destination(mode, "/named/once", derived),
+                PathBuf::from("/beside/the/archive"),
+                "{mode:?} read the preselect path"
+            );
+        }
     }
 }

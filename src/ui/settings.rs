@@ -17,6 +17,7 @@
 use eframe::egui;
 
 use super::{Indium, Popup};
+use crate::platform::picker::PickerFor;
 use crate::platform::store::{Bookmark, ExtractDefault};
 use crate::theme;
 
@@ -55,16 +56,12 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
             // settings file rather than to this window's copy of it, which needs `app`
             // mutably and cannot have it while the row is drawing.
             let mut changed: Option<ExtractDefault> = None;
+            let mut want_preselect = false;
             ui.horizontal(|ui| {
                 // Which default is chosen is "this mode is active", not "something will
                 // happen". The ink carries it too, because Aubergine alone sits 1.72:1
                 // against the panel. P6 §6.6.
                 theme::active_fill(ui);
-                ui.label(
-                    egui::RichText::new("Preselect")
-                        .size(13.0)
-                        .color(theme::TEXT_MUTED),
-                );
                 let cur = app.settings.extract.default;
                 let toggle = |ui: &mut egui::Ui, on: bool, text: &str| {
                     let text = egui::RichText::new(text).color(if on {
@@ -74,6 +71,21 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     });
                     ui.selectable_label(on, text).clicked()
                 };
+                // PXX 8.11. This was the row's *label*, and it was read as a button — by
+                // the maker, who wrote the rule it was obeying. A word set beside two
+                // pressable words, in the same row, at the same size, is a third pressable
+                // word no matter what it was meant to be, and the walk denied the step for
+                // exactly that reason. The fix is to mean it rather than to restyle it
+                // into something quieter: the word it was misread as is the word it keeps.
+                //
+                // It raises the picker on every click, including while it is already the
+                // active mode, because that is the only route to changing the directory it
+                // points at. The mode itself is not taken up here — that happens when a
+                // directory comes back, in `ui::mod`'s `PickerFor::Preselect` arm, since a
+                // cancelled dialog must leave the setting exactly as it found it.
+                if toggle(ui, cur == ExtractDefault::Preselect, "Preselect") {
+                    want_preselect = true;
+                }
                 if toggle(ui, cur == ExtractDefault::Here, "here") && cur != ExtractDefault::Here {
                     changed = Some(ExtractDefault::Here);
                 }
@@ -83,9 +95,34 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                     changed = Some(ExtractDefault::Subdir);
                 }
             });
+            // The directory gets its own line. A path is as long as the filesystem is deep
+            // and this row does not wrap — P7 §1 — so putting it beside the toggles is how
+            // the toggles leave the panel. Shown whenever one is set rather than only while
+            // Preselect is lit, because it is what pressing *Preselect* would return to.
+            if !app.settings.extract.preselect.is_empty() {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(&app.settings.extract.preselect)
+                            .family(theme::MONO)
+                            .size(13.0)
+                            .color(
+                                if app.settings.extract.default == ExtractDefault::Preselect {
+                                    theme::TEXT
+                                } else {
+                                    theme::TEXT_MUTED
+                                },
+                            ),
+                    );
+                });
+            }
             if let Some(want) = changed {
                 app.change_settings(move |s| s.extract.default = want);
                 app.extract_to_subdir = app.settings.extract.default == ExtractDefault::Subdir;
+            }
+            // After the row and never inside it: `request_picker` takes `app` mutably, and
+            // the closure above is still holding it while it draws.
+            if want_preselect {
+                app.request_picker(ctx, PickerFor::Preselect);
             }
 
             // --- 2. Bookmarks -------------------------------------------------

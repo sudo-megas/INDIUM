@@ -245,8 +245,16 @@ bar has a hierarchy, and it is part of this document rather than a matter of tas
 5. **Settings** (`,`). One small panel, and **exactly three groups**: *Extract*'s default
    destination, *Bookmarks*, and *Recent files* — the last carrying a **Clear list** that
    empties the history, which is the only destructive control in the panel and the reason
-   the count is written here rather than left to be discovered. TOML behind it. This item
-   named two of the three from P2 until P19; §9 has already decided the absent ones.
+   the count is written here rather than left to be discovered. TOML behind it. The first
+   group is three choices and not two: *here*, *into a subdirectory*, and **Preselect**,
+   which names one directory and sends every archive there until another is picked. PXX
+   made that third one real, and the reason is worth keeping: *Preselect* had been the
+   row's label, and it was read as a button by the maker himself — a word set beside two
+   pressable words, in the same row and at the same size, is a third pressable word
+   whatever it was meant to be. The word it was misread as is the word it keeps. Until
+   then this line said *destination* while the setting stored only a mode; it now stores
+   both, so the line is true rather than merely old. This item named two of the three from
+   P2 until P19; §9 has already decided the absent ones.
 6. **About** (`A`). The mark, the maker, the version and date, the source address and the
    licence in full. Addresses are text you can select but not click — INDIUM opens no
    browser and follows no link, by design.
