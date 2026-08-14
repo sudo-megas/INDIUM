@@ -142,6 +142,47 @@ pub const TEXT_MUTED: Color32 = Color32::from_rgb(0x99, 0x99, 0x97);
 /// nothing could.
 pub const WARNING: Color32 = Color32::from_rgb(0xFF, 0xD8, 0x00);
 
+// --- The cast -----------------------------------------------------------------
+
+/// The colour a zone casts into the gutter, alpha included. Amber, and deliberately not
+/// black.
+///
+/// **CORE §6 permits this since P23's draft B**, in a sentence that binds it by measurement
+/// rather than by hex: a cast *"is measured rather than eyeballed, at ΔE 8–12 against the
+/// gutter it falls on. Under that floor it is invisible and merely costs; over it, it is a
+/// glow, and a glow is decoration."* `the_cast_lands_in_the_band_core_gives_it` is that
+/// sentence as a test.
+///
+/// **Why not [`WARNING`], which is the palette's existing gold.** `CORE.md:368` forbids it in
+/// its own words — *"It is not an accent and never decorates"* — and a cast that borrowed it
+/// would put the wrong-password colour under every zone in the window. The cast needs its own
+/// token and this is it. It is **not a ground**: the five-rung ladder and
+/// `the_ground_ladder_is_the_one_core_six_lists` do not know about it and should not.
+///
+/// **Why amber rather than black.** The maker asked for the counter-hue research and it came
+/// back agreeing with his guess. The window's grounds are a disciplined single hue — `VOID`,
+/// `WINDOW`, `PANEL` and `CONTROL` all sit at **318°** — and the colourists' answer for
+/// aubergine is green, yellow and gold, which is also where that hue's triad lands (78°).
+/// Material's dark-theme guidance says the same thing from the other end: elevation on dark
+/// is carried by a *lighter* surface, and a tinted shadow should be a tint of the surface
+/// rather than black.
+///
+/// **The alpha is sampled, not modelled, and that distinction has already cost this project
+/// once.** egui composites [`Color32::linear_multiply`] in sRGB byte space rather than in
+/// linear space, so a modelled composite and the painted pixel disagree — an orange wash
+/// modelled at `#963323` measured `#712322` on screen. The modelled table in P23 §2a-shadow
+/// put this alpha at roughly 0.05–0.08; the figure here is the one the running window
+/// actually produced.
+pub const GLOW: Color32 = Color32::from_rgb(0xE8, 0xA3, 0x3D);
+
+/// How much of [`GLOW`] reaches the gutter, as an alpha out of 255.
+///
+/// Kept apart from the colour because they answer to different things: the hue is the
+/// research above and the maker's counter-hue, and this number is the *measurement* CORE
+/// binds — the one figure in the pair that a sampled ΔE can move. `#E8A33D` at α 0.25
+/// modelled ΔE 27.4 over `VOID`, which is neon; the band CORE asks for is 8–12.
+pub const GLOW_A: u8 = 52;
+
 // --- Lines --------------------------------------------------------------------
 //
 // Two weights and no third. **Inside** a zone, a hairline. **Around** a zone, a popup or a
@@ -668,11 +709,18 @@ pub fn install_visuals(ctx: &egui::Context) {
     v.window_corner_radius = R_POPUP.into();
     v.menu_corner_radius = R_POPUP.into();
 
-    // A popup is the only thing in INDIUM that is genuinely above something else, so it is
-    // the only thing that casts. P5 turned both of these off without recording a reason,
-    // which reads as part of its "write the defaults down" sweep rather than a decision.
-    // Zones cast nothing: a zone sits *in* the gutter, not above it, and a shadow there
-    // would leak onto its neighbour — which is decoration, and CORE §6 forbids it.
+    // A popup casts the deepest, because it is the only thing that covers the whole window.
+    // P5 turned both of these off without recording a reason, which reads as part of its
+    // "write the defaults down" sweep rather than a decision.
+    //
+    // **Zones cast too, since P23 §2a-shadow — see [`cast`].** The comment that used to stand
+    // here said they could not: *"a zone sits in the gutter, not above it, and a shadow there
+    // would leak onto its neighbour — which is decoration, and CORE §6 forbids it."* The
+    // second half was a correct reading of §6 and the maker amended §6. The first half was
+    // wrong on two counts, and the measurement is what showed it: a shadow on `VOID` is
+    // perceptible, not "very nearly invisible" as the argument against it assumed, and the
+    // leak is not a property of shadows but of *these numbers* — blur 20 with an offset of 8
+    // reaches 18px below the caster, into a gutter of 8.
     let shadow = egui::epaint::Shadow {
         offset: [0, 8],
         blur: 20,
@@ -918,6 +966,33 @@ pub fn zone(fill: Color32) -> egui::Frame {
         .corner_radius(R_ZONE)
         .inner_margin(egui::Margin::same(PAD))
         .outer_margin(egui::Margin::same(GUTTER / 2))
+        .shadow(cast())
+}
+
+/// What a zone casts into the gutter: [`GLOW`], softly, and never as far as its neighbour.
+///
+/// **The geometry is the whole of why zones cast nothing before P23.** `Shadow::margin` in
+/// epaint 0.36 is `spread + blur/2 ± offset` per side, so the popup's `blur: 20, offset:
+/// [0, 8]` reaches **18px** below its caster. Two zones are [`GUTTER`] apart — 8, applied as
+/// half per side — so those numbers put one zone's shadow well inside the next zone's rect
+/// before it had finished resolving. That is the leak the old refusal described, and it was
+/// read as a fact about shadows when it was a fact about twenty pixels of blur.
+///
+/// At `blur: 8, offset: [0, 2]` the reach is 6 below, 2 above and 4 to each side. Every one
+/// of those is under the 8 between two zones, so the cast falls on `VOID` and stops there —
+/// which is what CORE's *"one zone's cast never reaches its neighbour"* asks for, and what
+/// `a_zone_s_cast_stays_in_its_own_gutter` asserts rather than trusts.
+///
+/// The offset is small and downward: 2px is enough to say *above* without the cast reading as
+/// a light source in the room, and CORE's sentence is about a zone being above the gutter,
+/// not about where the sun is.
+pub fn cast() -> egui::epaint::Shadow {
+    egui::epaint::Shadow {
+        offset: [0, 2],
+        blur: 8,
+        spread: 0,
+        color: Color32::from_rgba_unmultiplied(GLOW.r(), GLOW.g(), GLOW.b(), GLOW_A),
+    }
 }
 
 /// A popup that opens in the middle of the window and can then be dragged anywhere.
@@ -1331,6 +1406,45 @@ mod tests {
         ("CONTROL", CONTROL),
     ];
 
+    /// CIE L\*a\*b\*, D65 — the space CORE §6's cast is bounded in.
+    ///
+    /// A contrast *ratio* is the wrong instrument for a cast: it asks whether text can be
+    /// read, and the cast carries no text. What CORE asks of it is whether a person can see
+    /// that the gutter is not bare, which is a perceptual *distance*, and ΔE is the measure
+    /// for that. The two live side by side here because §6 now uses both.
+    fn lab(c: Color32) -> [f32; 3] {
+        let f = |v: u8| {
+            let v = v as f32 / 255.0;
+            if v <= 0.04045 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let (r, g, b) = (f(c.r()), f(c.g()), f(c.b()));
+        // sRGB D65 → XYZ, each axis divided through by the white point.
+        let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+        let k = |t: f32| {
+            if t > 216.0 / 24389.0 {
+                t.cbrt()
+            } else {
+                (841.0 / 108.0) * t + 4.0 / 29.0
+            }
+        };
+        let (fx, fy, fz) = (k(x), k(y), k(z));
+        [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
+    }
+
+    /// CIE76, which is the formula P23 §2a-shadow's table was built with. Later formulae
+    /// (94, 2000) are better instruments and would silently move every figure already on the
+    /// record, so the round keeps the one it started with and says which.
+    fn delta_e(a: Color32, b: Color32) -> f32 {
+        let (p, q) = (lab(a), lab(b));
+        ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
+    }
+
     /// Composite a premultiplied translucent colour over an opaque ground.
     ///
     /// The palette's lines are translucent, so their declared byte value means nothing on
@@ -1722,6 +1836,140 @@ mod tests {
             );
             last = seen;
         }
+    }
+
+    /// The gutter pixel a zone's cast actually painted, read off the running window.
+    ///
+    /// **Every ΔE in P23 §2a-shadow's table is modelled, and a modelled composite is not
+    /// admissible for setting this alpha.** egui multiplies alpha in sRGB byte space rather
+    /// than in linear space, so the model and the screen disagree — the round that learned
+    /// this modelled an orange wash at `#963323` and measured `#712322`. So the figure below
+    /// is a *sample*: INDIUM built, launched, captured with `spectacle -a`, and the gutter
+    /// between the sidebar and the entry table read pixel by pixel with `magick … txt:`.
+    ///
+    /// At `GLOW_A` = 52 the profile across that 8px gutter runs
+    /// **9.5 · 7.1 · 4.1 · 1.1 · 1.4 · 4.3 · 7.4 · 9.5** — symmetric, because both zones cast
+    /// into the gutter they share — and the strongest gutter pixel anywhere in the window is
+    /// `#2B1316` at **ΔE 10.1**, beside the sidebar's outer edge. That pixel is this constant.
+    ///
+    /// **A sampled figure goes stale silently, so it is fenced by
+    /// [`a_zone_s_cast_stays_in_its_own_gutter`]**, which pins `GLOW_A` and every number in
+    /// [`cast`]. Change any of them and that test fails and says to re-sample; this one then
+    /// checks the sample still satisfies the document. Neither test alone is enough, and that
+    /// is the arrangement rather than an oversight.
+    const CAST_SAMPLED: Color32 = Color32::from_rgb(0x2B, 0x13, 0x16);
+
+    /// CORE §6: a cast is *"measured rather than eyeballed, at **ΔE 8–12 against the gutter
+    /// it falls on**. Under that floor it is invisible and merely costs; over it, it is a
+    /// glow, and a glow is decoration."*
+    ///
+    /// **The band is read out of the document, not restated here.** It is the maker's number
+    /// and it arrived in `CORE.md` seven commits ago; a test that copied it would be a second
+    /// place to change it, and the two would part company the first time he moved one. Every
+    /// other doc-as-test in this crate works the same way, and this is the first that parses
+    /// a *range*.
+    #[test]
+    fn the_cast_lands_in_the_band_core_six_gives_it() {
+        let core = include_str!("../CORE.md");
+        let six = core
+            .split_once("## 6. LOOK")
+            .expect("CORE has a section 6 heading")
+            .1;
+        let after = six
+            .split_once("ΔE ")
+            .expect("CORE §6 states the band a cast is measured in")
+            .1;
+        let band: String = after
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '–')
+            .collect();
+        let (lo, hi) = band
+            .split_once('–')
+            .expect("CORE §6's cast band is a range, low–high");
+        let (lo, hi): (f32, f32) = (
+            lo.parse().expect("the low end is a number"),
+            hi.parse().expect("the high end is a number"),
+        );
+        assert!(lo < hi && lo > 0.0, "CORE §6's band reads {lo}–{hi}");
+
+        let seen = delta_e(CAST_SAMPLED, VOID);
+        assert!(
+            (lo..=hi).contains(&seen),
+            "the cast measured {seen:.1} against VOID and CORE §6 asks for {lo}–{hi}. Under \
+             the floor it is invisible and merely costs; over it, it is a glow, and §6 calls \
+             a glow decoration. The figure is sampled from the running window, so if the \
+             window has not been rebuilt and re-captured since GLOW_A moved, this is \
+             measuring a screenshot that no longer exists"
+        );
+
+        // The sample has to *be* GLOW over VOID, or it is some other pixel that happens to
+        // sit in the band — a screenshot of a different window would pass the assert above.
+        let alphas: Vec<f32> = [
+            (CAST_SAMPLED.r(), GLOW.r(), VOID.r()),
+            (CAST_SAMPLED.g(), GLOW.g(), VOID.g()),
+            (CAST_SAMPLED.b(), GLOW.b(), VOID.b()),
+        ]
+        .iter()
+        .map(|(p, g, v)| (*p as f32 - *v as f32) / (*g as f32 - *v as f32))
+        .collect();
+        let mean = alphas.iter().sum::<f32>() / 3.0;
+        for a in &alphas {
+            assert!(
+                (a - mean).abs() < 0.01,
+                "the sampled pixel is not GLOW over VOID at one alpha — the three channels \
+                 imply {alphas:?}, which do not agree. Either the capture caught something \
+                 other than a gutter, or GLOW's hue moved after the sample was taken"
+            );
+        }
+        // Against the nominal alpha this is the blur's own falloff: the strongest gutter
+        // pixel sits one pixel out from the caster, not at its centre, so it never receives
+        // the whole of GLOW_A. Recorded because it is what makes the two numbers differ.
+        let nominal = GLOW_A as f32 / 255.0;
+        assert!(
+            mean < nominal,
+            "the painted gutter cannot be stronger than the shadow that paints it: sampled \
+             {mean:.3} against a nominal {nominal:.3}"
+        );
+    }
+
+    /// CORE §6: *"one zone's cast never reaches its neighbour"*.
+    ///
+    /// **This is the sentence the old refusal got right for the wrong reason.** `theme.rs`
+    /// used to say a zone could not cast because a shadow *"would leak onto its neighbour"*,
+    /// and read that as a fact about shadows. It is a fact about twenty pixels of blur:
+    /// `Shadow::margin` is `spread + blur/2 ± offset` per side, so the popup's `blur: 20,
+    /// offset: [0, 8]` reaches **18px** below its caster, into a [`GUTTER`] of 8. [`cast`]
+    /// reaches 6 at its furthest.
+    ///
+    /// It also pins the inputs of [`CAST_SAMPLED`], which is a measurement of the running
+    /// window and cannot notice that the window has changed under it. Every number a
+    /// re-sample would invalidate is asserted here, so moving one fails *this* test with an
+    /// instruction rather than leaving the other one quietly measuring the past.
+    #[test]
+    fn a_zone_s_cast_stays_in_its_own_gutter() {
+        let m = cast().margin();
+        for (side, reach) in [
+            ("left", m.left),
+            ("right", m.right),
+            ("top", m.top),
+            ("bottom", m.bottom),
+        ] {
+            assert!(
+                reach < GUTTER as f32,
+                "the cast reaches {reach} to the {side} and two zones are {GUTTER} apart, so \
+                 it lands on its neighbour rather than in the gutter. CORE §6 permits a cast \
+                 on the condition that it does not"
+            );
+        }
+
+        let c = cast();
+        assert_eq!(
+            (c.blur, c.offset, c.spread, GLOW_A),
+            (8, [0, 2], 0, 52),
+            "the cast's geometry or strength moved. `CAST_SAMPLED` is a pixel read off a \
+             build with the old numbers and is now measuring a window that does not exist — \
+             rebuild, re-capture, re-read the gutter, and update it before changing this line"
+        );
     }
 
     /// [`SCRIM`]'s job is the opposite of every other figure in this file: the window behind
