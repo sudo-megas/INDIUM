@@ -620,14 +620,51 @@ echo "-- 10. the copyright names the font that ships"
 # first line moves when the face does, and this check moves with it.
 hdr=build/package/deb/copyright.header
 
-# `tr -d '\r'` is load-bearing: the OFL ships CRLF and all 93 of its lines carry one.
-want=$(sed -n '1s/^Digitized data copyright (c) //p' LICENSES/OFL-1.1.txt | tr -d '\r')
+# The licence's own copyright block, joined into one line and normalised.
+#
+#   $1  the file to read
+#   $2  the prefix every line of it carries — empty for the repository copy; a single
+#       space for the packaged one, where make-deb.sh indents the whole licence as DEP-5
+#       continuation content and rewrites blank lines as ` .`
+#
+# **Both tiers derive through this one function, and that is the point.** They used to
+# carry two separate `sed` expressions differing only in a leading space, which is a pair
+# that can be half-updated — and a check whose two halves disagree by construction proves
+# less than one half alone.
+#
+# Two openers are accepted because the two faces this project has shipped write the line
+# two ways. Fira's OFL opens `Digitized data copyright (c) …` and fits on one line;
+# Cascadia's opens `Copyright (c) …` and runs onto a second carrying the Reserved Font
+# Name. Reading to the end of the block rather than taking line 1 is what makes the second
+# shape work at all — and the RFN is kept rather than trimmed, because it is an operative
+# term of the licence and a `Copyright:` field that drops it understates the grant.
+#
+# The `\r` strip is load-bearing whichever face is in: Fira's OFL shipped CRLF on all 93
+# of its lines, Cascadia's ships LF, and neither fact is allowed to matter here.
+ofl_holder() {
+  awk -v pre="$2" '
+    { line = $0; sub(/\r$/, "", line)
+      if (pre != "") { if (index(line, pre) != 1) next; line = substr(line, length(pre) + 1) }
+      if (line == "" || line == ".") { if (started) exit; else next }
+      if (!started) {
+        if (line !~ /^(Digitized data copyright|Copyright) \(c\) /) next
+        sub(/^Digitized data copyright \(c\) /, "", line)
+        sub(/^Copyright \(c\) /, "", line)
+        started = 1
+      }
+      out = (out == "" ? line : out " " line)
+    }
+    END { gsub(/[ \t]+/, " ", out); gsub(/^ +| +$/, "", out); print out }
+  ' "$1"
+}
+
+want=$(ofl_holder LICENSES/OFL-1.1.txt "")
 
 if [ -z "$want" ]; then
-  # Deliberately a FAIL and not a SKIP. The licence no longer opens with the line this
-  # check derives from, which means the font was swapped and nothing told the check — the
+  # Deliberately a FAIL and not a SKIP. The licence no longer opens with a copyright line
+  # this check can read, which means the font was swapped and nothing told the check — the
   # exact failure it exists to catch. A gate that skips proves nothing.
-  bad "LICENSES/OFL-1.1.txt has no 'Digitized data copyright (c)' line to derive from"
+  bad "LICENSES/OFL-1.1.txt opens with no copyright line to derive from"
 else
   got=$(sed -n '/^Files: assets\/fonts\/\*/,/^$/{s/^Copyright: //p}' "$hdr")
   if [ "$got" = "$want" ]; then
@@ -638,9 +675,14 @@ else
 fi
 
 # The face name is checked against the files actually embedded, not against a second
-# string. "Fira Mono Nerd Font Mono" -> "FiraMonoNerdFontMono" -> a real basename in
-# assets/fonts/. "JetBrains Mono NL Nerd Font" -> "JetBrainsMonoNLNerdFont" -> nothing,
+# string. "CaskaydiaMono Nerd Font Mono" -> "CaskaydiaMonoNerdFontMono" -> a real basename
+# in assets/fonts/. "JetBrains Mono NL Nerd Font" -> "JetBrainsMonoNLNerdFont" -> nothing,
 # which is the shipped defect, caught mechanically rather than by reading.
+#
+# It catches the cut as well as the family, which P23 turned out to need: "CaskaydiaCove"
+# and "CaskaydiaMono" differ by one word and by whether a filename holding `->` renders as
+# an arrow. This match is on the whole basename, so naming one while embedding the other
+# fails here.
 face=$(sed -n 's/^Comment: \(.*\), regular and bold.*/\1/p' "$hdr" | tr -d ' ')
 if [ -z "$face" ]; then
   bad "copyright.header's Comment: names no face"
@@ -661,7 +703,7 @@ else
     bad "no usr/share/doc/indium/copyright in the package payload"
   else
     sgot=$(sed -n '/^Files: assets\/fonts\/\*/,/^$/{s/^Copyright: //p}' "$shipped")
-    sofl=$(sed -n 's/^ Digitized data copyright (c) //p' "$shipped" | head -1)
+    sofl=$(ofl_holder "$shipped" " ")
     if [ "$sgot" = "$want" ] && [ "$sofl" = "$want" ]; then
       ok "the packaged copyright names one holder in both places: $want"
     else

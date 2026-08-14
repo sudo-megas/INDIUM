@@ -606,8 +606,9 @@ fn neither_package_ships_a_rar_association() {
 /// the OFL text that names the other holder.
 ///
 /// Both expectations are **derived, never typed a second time.** The holder comes off the
-/// licence's own first line, and the face is matched against the files actually embedded —
-/// so swapping the font again moves both, and a header that did not move fails here.
+/// licence's own opening copyright block, and the face is matched against the files actually
+/// embedded — so swapping the font again moves both, and a header that did not move fails
+/// here. P23 swapped the font again, and this is one of the four places that said so.
 #[test]
 fn the_copyright_header_names_the_font_that_ships() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -615,14 +616,33 @@ fn the_copyright_header_names_the_font_that_ships() {
     let header = std::fs::read_to_string(root.join("build/package/deb/copyright.header"))
         .expect("no copyright header");
 
-    // `trim_end` is load-bearing, not tidying: the OFL ships CRLF and every one of its
-    // lines carries a carriage return. Comparing without it fails on an invisible byte.
-    let want = ofl
+    // The licence's own copyright block: every line before the first blank one, joined into
+    // one. **Not `lines().next()`, which is what this read until P23** — Fira's OFL opened
+    // `Digitized data copyright (c) …` and fitted on one line, and Cascadia's opens
+    // `Copyright (c) …` and runs onto a second carrying the Reserved Font Name. A test that
+    // reads only line 1 cannot see the second shape at all, and the RFN is an operative term
+    // of the licence, so a `Copyright:` field that dropped it would understate the grant.
+    //
+    // This is deliberately the same derivation as `verify.sh`'s `ofl_holder`, which does it
+    // in awk over the same two files plus the packaged copy. Two implementations of one rule
+    // is a thing that can drift, and the answer to that is that they are tested against each
+    // other every time this suite runs beside that script — not that either is dropped,
+    // because they catch the failure at different moments: this one before a commit, that
+    // one inside the built `.deb`.
+    //
+    // `trim_end` is load-bearing, not tidying: Fira's OFL shipped CRLF on every one of its
+    // 93 lines and Cascadia's ships LF. Comparing without it fails on an invisible byte.
+    let joined = ofl
         .lines()
-        .next()
-        .and_then(|l| l.trim_end().strip_prefix("Digitized data copyright (c) "))
+        .map(str::trim_end)
+        .take_while(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let want = joined
+        .strip_prefix("Digitized data copyright (c) ")
+        .or_else(|| joined.strip_prefix("Copyright (c) "))
         .expect(
-            "LICENSES/OFL-1.1.txt no longer opens with the line this test derives from. \
+            "LICENSES/OFL-1.1.txt no longer opens with a copyright line this test can read. \
              That means the font was swapped and nothing told this test — which is the \
              failure it exists to catch, so it is an error and not a reason to skip.",
         );
@@ -643,7 +663,7 @@ fn the_copyright_header_names_the_font_that_ships() {
         "the .deb copyright names a different holder than the licence it ships beside it"
     );
 
-    // "Fira Mono Nerd Font Mono" -> "FiraMonoNerdFontMono" -> a real basename in
+    // "CaskaydiaMono Nerd Font Mono" -> "CaskaydiaMonoNerdFontMono" -> a real basename in
     // assets/fonts/. "JetBrains Mono NL Nerd Font" -> "JetBrainsMonoNLNerdFont" -> nothing,
     // which is the defect P17 found, caught mechanically rather than by reading.
     let face: String = stanza

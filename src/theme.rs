@@ -4,7 +4,7 @@
 //! theme setting." Every value below is transcribed from that section; none of them is
 //! configurable, and CORE §9 forbids adding a control that would make them so.
 //!
-//! The typeface is Fira Mono Nerd Font, in two weights, and it is the only one:
+//! The typeface is CaskaydiaMono Nerd Font Mono, in two weights, and it is the only one:
 //! CORE §6 puts the whole window in monospace rather than splitting chrome from values,
 //! so chrome and values are told apart by weight and colour instead of by family.
 
@@ -245,6 +245,10 @@ pub const CONTROL_H: f32 = 20.0;
 /// P13: it is the *line box* egui gives an 18.2pt glyph, which does not. The bar grew for
 /// that, which is the trade the maker asked for in as many words: "icons only sensible when
 /// they are big enough."
+///
+/// Held by [`the_status_bar_row_fits_the_icon_it_was_grown_for`], which P23 added when it
+/// swapped the face: this number was fitted to Fira Mono's line box and pinned by nothing,
+/// so it was one `include_bytes!` away from being wrong in silence.
 pub const SB_ROW: f32 = 24.0;
 /// Between status-bar rows.
 pub const SB_GAP: f32 = 4.0;
@@ -352,7 +356,7 @@ pub const SANS: FontFamily = FontFamily::Proportional;
 /// which this theme sets to the same `TEXT` that `override_text_color` already forces, so
 /// `.strong()` renders identically to ordinary text and always did.
 pub fn bold() -> FontFamily {
-    FontFamily::Name("fira-bold".into())
+    FontFamily::Name("caskaydia-bold".into())
 }
 
 /// The two faces, named once so [`install_fonts`] and the tests read the same bytes.
@@ -360,9 +364,10 @@ pub fn bold() -> FontFamily {
 /// Same shape as [`MARK`], and for the same reason: a second `include_bytes!` on the same
 /// path is a second copy in the binary, and a test that parses a *different* copy from the
 /// one the window draws with is a test that proves nothing.
-pub const FACE_REGULAR: &[u8] = include_bytes!("../assets/fonts/FiraMonoNerdFontMono-Regular.otf");
+pub const FACE_REGULAR: &[u8] =
+    include_bytes!("../assets/fonts/CaskaydiaMonoNerdFontMono-Regular.ttf");
 /// The bold cut; see [`FACE_REGULAR`].
-pub const FACE_BOLD: &[u8] = include_bytes!("../assets/fonts/FiraMonoNerdFontMono-Bold.otf");
+pub const FACE_BOLD: &[u8] = include_bytes!("../assets/fonts/CaskaydiaMonoNerdFontMono-Bold.ttf");
 
 /// CORE §6: "Icons are glyphs of that same face … from the **Font Awesome** range the Nerd
 /// Font patches in, and no second range is mixed with it."
@@ -432,13 +437,27 @@ pub mod icon {
 /// Embed the typeface and make it the only one.
 ///
 /// The files are bundled assets, not dependencies (CORE §2), under the SIL Open Font
-/// Licence 1.1 in `LICENSES/`. Fira Mono carries **no ligatures at all** — that is Fira
-/// *Code*'s job, and this is not Fira Code — so a filename holding `->` or `!=` renders as
-/// the bytes the archive stores and cannot do otherwise. `…NerdFontMono…` is the
+/// Licence 1.1 in `LICENSES/`. Cascadia **Mono** carries no ligatures — that is Cascadia
+/// *Code*'s job, and this is not Cascadia Code — so a filename holding `->` or `!=` renders
+/// as the bytes the archive stores and cannot do otherwise. `…NerdFontMono…` is the
 /// single-cell icon cut, so an icon occupies one column and the entry table stays aligned.
 ///
-/// These are OTF, with CFF outlines, where the face before them was TrueType. egui
-/// rasterizes through Fontations — `skrifa`, `read-fonts`, `harfrust` — which reads CFF
+/// **That first sentence is load-bearing, and P23 nearly shipped the face that breaks it.**
+/// The reasoning it replaced claimed the guarantee came from the toolkit — that egui applies
+/// no OpenType shaping, so `liga` and `calt` could never fire whatever the face offered. That
+/// is false. `epaint` 0.36 shapes through **`harfrust`**, a HarfBuzz port: `font.rs:361`
+/// holds a `ShaperData` of the parsed GSUB/GPOS, and `text_layout.rs` calls
+/// `shaper.shape(buffer, ShapeOptions::new())` — *default* options, which is HarfBuzz's
+/// default horizontal feature set, `calt` included. Cascadia implements its ligatures in
+/// `calt`, so they fire. Measured on the Cove cut: all twenty probes in
+/// [`a_filename_is_the_characters_it_holds`] substitute, and `www` collapses to one
+/// 23-pixel glyph followed by two zero-width continuations. In a program whose subject is
+/// the names inside an archive, `a->b` drawn as `a⟶b` is not a cosmetic difference.
+///
+/// So the face is chosen for the property, and a test holds it rather than a comment.
+///
+/// These are TrueType, with `glyf` outlines, where the face before them was OTF/CFF. egui
+/// rasterizes through Fontations — `skrifa`, `read-fonts`, `harfrust` — which reads both
 /// natively, so the format is not a special case. `assets/fonts/README.md` records the
 /// provenance and the measured coverage of both faces.
 pub fn install_fonts(ctx: &egui::Context) {
@@ -448,34 +467,40 @@ pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::empty();
 
     fonts.font_data.insert(
-        "fira".to_owned(),
+        "caskaydia".to_owned(),
         Arc::new(FontData::from_static(FACE_REGULAR)),
     );
     fonts.font_data.insert(
-        "fira-bold".to_owned(),
+        "caskaydia-bold".to_owned(),
         Arc::new(FontData::from_static(FACE_BOLD)),
     );
 
     // One face in both default families, because CORE §6 puts the whole window in
     // monospace. There is no fallback behind it and no pretending otherwise: this face
-    // carries 12,132 codepoints — Latin including the whole Turkish set, Greek, Cyrillic,
-    // the arrows and box-drawing, and some ten thousand Nerd icons — but no CJK, no emoji,
-    // and no Vietnamese, so a filename using those renders as tofu. That is the honest
-    // cost of embedding one face and linking no fontconfig, and it is stated here so it is
-    // a known limit, not a bug report waiting to happen. A glyph the face cannot draw is
-    // still a name INDIUM read correctly and will write back correctly; since P11 the
-    // reading does not depend on the drawing.
+    // carries 12,938 codepoints — Latin including the whole Turkish set, Greek, Cyrillic,
+    // the arrows and box-drawing, and some ten thousand Nerd icons — but no CJK and no
+    // emoji, so a filename using those renders as tofu. That is the honest cost of
+    // embedding one face and linking no fontconfig, and it is stated here so it is a known
+    // limit, not a bug report waiting to happen. A glyph the face cannot draw is still a
+    // name INDIUM read correctly and will write back correctly; since P11 the reading does
+    // not depend on the drawing.
+    //
+    // **Both numbers are re-measured at each face swap and neither was carried across this
+    // one.** The count moved 12,132 → 12,938, and the limit got shorter rather than longer:
+    // Fira Mono had no Vietnamese and this face does — `U+1EA1` and the rest of the
+    // precomposed set are present in both weights — so a sentence that still said "no
+    // Vietnamese" would now be understating the program.
     for family in [FontFamily::Proportional, FontFamily::Monospace] {
         fonts
             .families
             .entry(family)
             .or_default()
-            .insert(0, "fira".to_owned());
+            .insert(0, "caskaydia".to_owned());
     }
 
     fonts.families.insert(
-        FontFamily::Name("fira-bold".into()),
-        vec!["fira-bold".to_owned(), "fira".to_owned()],
+        FontFamily::Name("caskaydia-bold".into()),
+        vec!["caskaydia-bold".to_owned(), "caskaydia".to_owned()],
     );
 
     ctx.set_fonts(fonts);
@@ -624,12 +649,19 @@ pub fn install_visuals(ctx: &egui::Context) {
     // that §6 puts the window in monospace on a fixed advance, so the even kerning binning
     // buys was already there and only its blur — epaint's own "It also lead to text looking
     // more blurry" — was being paid for. The argument is false, and the font file says so:
-    // `FiraMonoNerdFontMono-Regular.otf` reports `head.unitsPerEm` 1000 and an advance of
-    // 600, so the advance is fixed at 0.600 *em* and not at a whole pixel. At the three
-    // sizes this window sets it is 7.200 / 7.800 / 10.800 px, none of them integral — so
-    // with binning off each glyph origin rounds to a pixel and the gaps at 13px run
-    // 8, 8, 7, 8, 8, 8. The window was paying uneven spacing for a benefit it had been told
-    // it could not collect.
+    // `CaskaydiaMonoNerdFontMono-Regular.ttf` reports `head.unitsPerEm` 2048 and an advance
+    // of 1200, so the advance is fixed at 0.586 *em* and not at a whole pixel. At the three
+    // sizes this window sets — 12, 13 and 17 — it is 7.031 / 7.617 / 9.961 px, none of them
+    // integral, so with binning off each glyph origin rounds to a pixel and the gaps at 13px
+    // run 8, 7, 8, 7, 8, 8. The window was paying uneven spacing for a benefit it had been
+    // told it could not collect.
+    //
+    // **Every figure in that paragraph was re-measured at P23's face swap and the sizes were
+    // wrong before it.** This comment said "12 / 13 / 18" while `install_spacing` below has
+    // set Heading to 17 for as long as it has existed. The conclusion survived the face
+    // change untouched — Fira was 600/1000 and this face is 1200/2048, and neither lands on
+    // a pixel — which is the point: the argument is about the *shape* of the number, so a
+    // reader must not have to wonder whether it was ever re-checked.
     //
     // P21 owed the line an experiment and never ran it — `P21.md:551`, *"if the A/B refuses
     // it, the line comes out"*, with `P21.md:673` left unticked. PXX ran it: two builds
@@ -1064,22 +1096,29 @@ mod tests {
     ///
     /// P21 turned sub-pixel binning off and pinned it off here, on the reading that CORE §6's
     /// one monospace face means the advance is already whole-pixel and only binning's blur
-    /// was being paid for. Fira Mono is 600 units on a 1000-unit em — 0.600 em — so at this
-    /// window's 12 / 13 / 18 px that is 7.200 / 7.800 / 10.800 px. None is integral, and with
-    /// binning off the rounded origins at 13px sit 8, 8, 7, 8, 8, 8 apart. The evenness was
-    /// never already there.
+    /// was being paid for. Cascadia Mono is 1200 units on a 2048-unit em — 0.586 em — so at
+    /// this window's 12 / 13 / 17 px that is 7.031 / 7.617 / 9.961 px. None is integral, and
+    /// with binning off the rounded origins at 13px sit 8, 7, 8, 7, 8, 8 apart. The evenness
+    /// was never already there.
     ///
-    /// Now pinned the other way, and for the same structural reason P21 pinned it: the value
-    /// is egui's default rather than something this function sets, so a toolkit upgrade that
-    /// flipped that default would otherwise change how every glyph in the window is placed
-    /// without one line of INDIUM saying so.
+    /// **P23 changed the face and every number in that paragraph with it, and the conclusion
+    /// did not move.** Fira was 600 on 1000; this face is 1200 on 2048. Two different
+    /// fractions, neither of them a whole pixel at any size the window sets — which is the
+    /// reason this test asserts the *setting* and not an arithmetic result. A face whose
+    /// advance did land on a pixel would still not make binning-off correct at every zoom,
+    /// and CORE §9's 100/125/150% are three more scales this would have to hold at.
+    ///
+    /// Pinned for the structural reason P21 pinned it the other way: the value is egui's
+    /// default rather than something this function sets, so a toolkit upgrade that flipped
+    /// that default would otherwise change how every glyph in the window is placed without
+    /// one line of INDIUM saying so.
     #[test]
     fn a_fixed_em_advance_is_not_a_fixed_pixel_advance() {
         assert!(
             visuals().text_options.subpixel_binning,
             "sub-pixel binning is off — either something set it, or egui's default moved. \
-             0.600 em x 13 px = 7.8 px, so the glyph origins round to gaps of 8, 8, 7, 8, 8, \
-             8 and the window pays uneven spacing for even kerning it never had"
+             0.586 em x 13 px = 7.617 px, so the glyph origins round to gaps of 8, 7, 8, 7, \
+             8, 8 and the window pays uneven spacing for even kerning it never had"
         );
     }
 
@@ -1697,5 +1736,143 @@ mod tests {
                 l.trim()
             );
         }
+    }
+
+    /// CORE §2: *"a filename holding `->` must render as the two characters the archive
+    /// stores, and a face that cannot form the ligature cannot get that wrong."*
+    ///
+    /// **The clause had no test for sixteen milestones, and P23 is the round that found out
+    /// why it needed one.** The redesign set out to swap in CaskaydiaCove — Cascadia *Code*,
+    /// the ligature cut — on the reasoning that egui applies no OpenType shaping, so the
+    /// face's ligatures could never fire. That reasoning was wrong. `epaint` 0.36 shapes
+    /// through `harfrust`, a HarfBuzz port, with `ShapeOptions::new()` — HarfBuzz's *default*
+    /// feature set, which has `calt` on, and `calt` is where Cascadia keeps its ligatures.
+    /// The Cove cut substitutes on every sequence below. `www` is the clearest: one glyph
+    /// 23 pixels wide followed by two zero-width continuations, in place of three `w`s.
+    ///
+    /// So the guarantee comes from the face after all, exactly as §2 always said — and it is
+    /// held here rather than asserted in a comment, because the next swap will be made by
+    /// someone who did not run this experiment. Both weights, because the bold cut is a
+    /// separate file with a separate GSUB.
+    ///
+    /// **Sub-pixel binning is switched off inside this test and nowhere else.** With it on —
+    /// which is what ships, and what
+    /// [`a_fixed_em_advance_is_not_a_fixed_pixel_advance`] pins — one glyph is cached as
+    /// several rasters, one per fractional origin, so the same `w` at x=7.62 and at x=15.24
+    /// occupies different atlas slots at different pixel sizes. That is *position*, and this
+    /// test is about *identity*: without switching it off, every glyph after the first
+    /// reports as substituted and the check is worthless. It cost an hour to find.
+    #[test]
+    fn a_filename_is_the_characters_it_holds() {
+        // Every sequence Cascadia Code ligates that can legally appear in a filename. `/`
+        // cannot be in a name, but it can be in an archive *path*, which the entry table
+        // draws — and `//` ligates too.
+        const SEQUENCES: &[&str] = &[
+            "->", "=>", "<-", "!=", "==", "===", ">=", "<=", "|>", "::", "++", "--", "&&", "||",
+            "//", "/*", "*/", "<>", ">>", "<<", "?.", "??", "~~", "www", "a->b", ".hpp", "0xFF",
+            "#!", "__",
+        ];
+
+        for weight in ["regular", "bold"] {
+            let ctx = egui::Context::default();
+            install(&ctx);
+            // See the note above: identity, not position.
+            ctx.all_styles_mut(|st| st.visuals.text_options.subpixel_binning = false);
+            let mut warm = ctx.run_ui(Default::default(), |_| {});
+            warm.textures_delta.clear();
+
+            let family = if weight == "bold" { bold() } else { MONO };
+            let font = egui::FontId::new(13.0, family);
+            let render = |s: &str| -> Vec<(char, f32, String)> {
+                let galley =
+                    ctx.fonts_mut(|f| f.layout_no_wrap(s.to_owned(), font.clone(), Color32::WHITE));
+                galley.rows[0]
+                    .glyphs
+                    .iter()
+                    .map(|g| (g.chr, g.advance_width, format!("{:?}", g.uv_rect)))
+                    .collect()
+            };
+
+            for seq in SEQUENCES {
+                let drawn = render(seq);
+
+                // One glyph per character. A ligature that replaced two with one would fail
+                // here first.
+                assert_eq!(
+                    drawn.len(),
+                    seq.chars().count(),
+                    "the {weight} face draws {seq:?} as {} glyphs for {} characters",
+                    drawn.len(),
+                    seq.chars().count()
+                );
+
+                for (i, (chr, advance, uv)) in drawn.iter().enumerate() {
+                    // A ligature in a monospace face keeps the cell count by emitting
+                    // zero-width continuation glyphs — `epaint`'s own mechanism, named in
+                    // `text_layout.rs`. So the width is not evidence and the *ink* is.
+                    assert!(
+                        *advance > 0.0,
+                        "the {weight} face draws {seq:?} glyph #{i} ({chr:?}) with no \
+                         advance — a zero-width continuation, which is what a ligature \
+                         leaves behind"
+                    );
+
+                    // The decisive one: the glyph drawn in context is the glyph drawn
+                    // alone. Anything else is a substitution, whatever it looks like.
+                    let alone = render(&chr.to_string());
+                    assert_eq!(
+                        &alone[0].2, uv,
+                        "the {weight} face draws {chr:?} differently inside {seq:?} than on \
+                         its own — GSUB substituted it, and a name is no longer the \
+                         characters the archive stores"
+                    );
+                }
+            }
+        }
+    }
+
+    /// [`SB_ROW`] is tall enough for the glyph it was sized for — and now says so.
+    ///
+    /// **It was fitted to a face and pinned by nothing.** P13 grew the status-bar row from 20
+    /// to 24 because an icon at [`ICON_SCALE`] does not fit a 20px row — not the 18.2pt glyph
+    /// itself, but the *line box* egui gives it, which is the number that actually drives
+    /// layout. That measurement was taken against Fira Mono and then left as a literal, so
+    /// the next face swap could have shrunk the bar's headroom to nothing without one test
+    /// noticing. P23 is that swap.
+    ///
+    /// Measured rather than assumed, and the swap made it roomier rather than tighter:
+    /// Fira's line box at 18.2px was 21.844 and Cascadia Mono's is 21.125, so the slack went
+    /// from 2.156px to 2.875px. **`SB_ROW` therefore does not move** — the bar keeps the
+    /// height thirteen milestones of screenshots were taken at, and this test is what makes
+    /// that a decision rather than a coincidence nobody re-checked.
+    #[test]
+    fn the_status_bar_row_fits_the_icon_it_was_grown_for() {
+        let ctx = egui::Context::default();
+        install(&ctx);
+        let mut warm = ctx.run_ui(Default::default(), |_| {});
+        warm.textures_delta.clear();
+
+        // The tallest thing the bar draws: an icon beside Body text, which is 13.0.
+        let icon = egui::FontId::new(13.0 * ICON_SCALE, MONO);
+        let line_box = ctx.fonts_mut(|f| f.row_height(&icon));
+
+        assert!(
+            line_box <= SB_ROW,
+            "an icon at {}px has a {line_box}px line box and SB_ROW is {SB_ROW} — the status \
+             bar is shorter than the glyph it exists to carry, which is the defect P13 grew \
+             the row to fix",
+            13.0 * ICON_SCALE
+        );
+
+        // The other half, and the reason this is not simply `<=`: a bar with a great deal of
+        // slack is a bar nobody re-derived. Two pixels of headroom is the row doing its job;
+        // eight would mean the constant had stopped tracking the face entirely.
+        assert!(
+            SB_ROW - line_box <= 6.0,
+            "SB_ROW is {SB_ROW} and the icon's line box is only {line_box}px — that is \
+             {}px of unexplained headroom, so the constant has drifted away from the face \
+             it is supposed to be fitted to",
+            SB_ROW - line_box
+        );
     }
 }

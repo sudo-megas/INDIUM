@@ -971,8 +971,8 @@ mod tests {
     /// One frame of the real Draft section — [`draft_buttons`] then [`draft_row`] — in a centre
     /// panel `outer` points wide, wearing the frame `show` gives it and the fonts the window
     /// runs. The fonts are not optional: in egui's default face these two buttons fit at widths
-    /// where Fira Mono's do not, so a test without [`theme::install`] passes while measuring a
-    /// program nobody runs.
+    /// where the embedded face's do not, so a test without [`theme::install`] passes while
+    /// measuring a program nobody runs.
     ///
     /// `shipped: false` swaps in a plain `ui.horizontal` button row and changes nothing else.
     /// It is the control — a copy on purpose, so that every assertion below has a leg that
