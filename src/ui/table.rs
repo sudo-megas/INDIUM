@@ -346,6 +346,13 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
         // it, and it is square for the same reason: that fill is `CornerRadius::ZERO`, and a
         // rounded ring around a square wash reads as a mistake. `Inside` keeps the 2px
         // within the row instead of bleeding onto its neighbours.
+        //
+        // **The zero is written as a zero.** This read `theme::R_ZONE` until P23 §2a, and it
+        // passed for three rounds only because that constant *was* zero — the paragraph above
+        // gives the ring's reason as the wash it encircles, which is a row, and a row is not
+        // a zone. The alias was invisible until the zones rounded, and it would have turned
+        // the cursor into the exact mistake the paragraph names, in the one place no test
+        // looks: nothing in the suite reads a painted ring's radius.
         if let Some(r) = cursor_rect {
             // The trait `round_ui` hangs off; `egui_extras` rounds its fill the same way, and
             // half a pixel of disagreement between ring and wash is visible on a 20px row.
@@ -353,7 +360,7 @@ fn archive_view(app: &mut Indium, ui: &mut egui::Ui, rows: &[Row]) {
             let gapless = r.expand2(0.5 * ui.spacing().item_spacing).round_ui();
             ui.painter().with_clip_rect(ui.clip_rect()).rect_stroke(
                 gapless,
-                theme::R_ZONE,
+                egui::CornerRadius::ZERO,
                 theme::edge_hot(),
                 egui::StrokeKind::Inside,
             );

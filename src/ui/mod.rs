@@ -3502,6 +3502,46 @@ fn sb_frame() -> egui::Frame {
     theme::zone(theme::STATUS_BAR).inner_margin(egui::Margin::symmetric(12, 10))
 }
 
+/// Where the proportion bar is painted, given the status bar's content lane: its run, and the
+/// clip it is drawn under.
+///
+/// Lifted out of [`status_bar`] by P23 §2a for the reason the round keeps finding: the
+/// arithmetic sat inside a closure that needs a window, so when §2a gave this bar an arc to
+/// clear, nothing in the suite could ask whether it did.
+/// [`tests::the_proportion_bar_clears_the_corner_it_runs_into`] is what can ask now.
+///
+/// **Out to the frame's own edge rather than the content lane's**: the inner margin is where
+/// the padding starts, so backing out by it lands on the line the 2px stroke draws.
+///
+/// **Then both ends pulled in by [`theme::R_ZONE`]**, which is the price of that line. This
+/// bar is the only thing in the window that paints against a zone's own rect instead of its
+/// content lane, so the inner margin that clears the arc for every other zone does not clear
+/// it here — by construction, since backing out of that margin is the whole point. At
+/// `R_ZONE = 6` the top edge is only straight between `left + 6` and `right - 6`; a run
+/// starting at the frame's own left would begin *inside* the top-left arc, where the fill has
+/// been cut away and there is no edge to lie along, so every small fraction would draw a
+/// six-pixel orange stub floating in the notch against `VOID`. Both ends and not just the
+/// left: the bar is a proportion, and a proportion whose ends are measured from different
+/// insets has stopped being one.
+///
+/// **Upward**, and the anchor is the underside rather than the top: the bar still ends exactly
+/// where the 2px line ended, and every one of the extra pixels is spent above it. The clip has
+/// to be let up by the same amount or it would crop back the growth it was widened for.
+fn sb_progress_geometry(lane: egui::Rect, frac: f32) -> (egui::Rect, egui::Rect) {
+    let pad = sb_frame().inner_margin;
+    let edge = lane
+        .expand2(egui::vec2(pad.left as f32, pad.top as f32))
+        .shrink2(egui::vec2(f32::from(theme::R_ZONE), 0.0));
+    let up = PROGRESS_H - 2.0;
+    let run = egui::Rect::from_min_size(
+        edge.left_top() - egui::vec2(0.0, up),
+        egui::vec2(edge.width() * frac, PROGRESS_H),
+    );
+    let mut clip = edge;
+    clip.min.y -= up;
+    (run, clip)
+}
+
 /// Three rows, each exactly [`theme::SB_ROW`] tall, in a panel that never changes size.
 ///
 /// The old bar was one row, content-driven, and it **moved**: a `Cancel` button and a
@@ -3578,22 +3618,7 @@ fn status_bar(app: &mut Indium, ui: &mut egui::Ui) {
                 } else {
                     ((p.done as f32 + p.within) / p.total as f32).clamp(0.0, 1.0)
                 };
-                // Out to the frame's own edge rather than the content lane's: the inner
-                // margin is where the padding starts, so backing out by it lands on the
-                // line the 2px stroke draws.
-                let pad = sb_frame().inner_margin;
-                let edge = lane.expand2(egui::vec2(pad.left as f32, pad.top as f32));
-                // **Upward**, and the anchor is the underside rather than the top: the bar
-                // still ends exactly where the 2px line ended, and every one of the extra
-                // pixels is spent above it. The clip has to be let up by the same amount or
-                // it would crop back the growth it was widened for.
-                let up = PROGRESS_H - 2.0;
-                let run = egui::Rect::from_min_size(
-                    edge.left_top() - egui::vec2(0.0, up),
-                    egui::vec2(edge.width() * frac, PROGRESS_H),
-                );
-                let mut clip = edge;
-                clip.min.y -= up;
+                let (run, clip) = sb_progress_geometry(lane, frac);
                 ui.painter()
                     .with_clip_rect(clip)
                     .rect_filled(run, 0.0, theme::ORANGE);
@@ -4090,6 +4115,66 @@ mod tests {
     fn the_status_bar_is_as_tall_as_it_says() {
         let content = 3.0 * theme::SB_ROW + 2.0 * theme::SB_GAP;
         assert_eq!(content + sb_frame().total_margin().sum().y, SB_HEIGHT);
+    }
+
+    /// The proportion bar begins and ends on the *straight* part of the status bar's top edge.
+    ///
+    /// P23 §2a moved [`theme::R_ZONE`] off zero, and this bar is the one thing in the window
+    /// that paints against a zone's own rect rather than its content lane: every other zone
+    /// clears its arc through an inner margin, and this one deliberately backs out of that
+    /// margin to sit on the line the stroke draws. So the arc is a hazard here and nowhere
+    /// else, and the failure is not a crash — at a small fraction the run would be a six-pixel
+    /// orange stub standing in the notch the arc cuts, outside the fill, against `VOID`.
+    ///
+    /// Measured against the frame the running window actually paints: at scale 1 the status
+    /// bar's rect is x 69..1240, its arc occupies x 69..75, and the unpulled run started at
+    /// **71** — four pixels inside the curve. Those are read pixels, not modelled ones.
+    ///
+    /// The lane is derived from `sb_frame`'s own margins rather than restated, so the two
+    /// cannot drift; and the last assertion is the leg, because a test whose premise has
+    /// quietly become true measures nothing.
+    #[test]
+    fn the_proportion_bar_clears_the_corner_it_runs_into() {
+        let r = f32::from(theme::R_ZONE);
+        let pad = sb_frame().inner_margin;
+        // The frame as the window paints it, and the content lane inside its stroke and
+        // padding — which is the rect `status_bar` hands the bar.
+        let frame = egui::Rect::from_min_max(egui::pos2(69.0, 693.0), egui::pos2(1240.0, 796.0));
+        let lane = egui::Rect::from_min_max(
+            frame.min + egui::vec2(2.0 + f32::from(pad.left), 2.0 + f32::from(pad.top)),
+            frame.max - egui::vec2(2.0 + f32::from(pad.right), 2.0 + f32::from(pad.bottom)),
+        );
+
+        for frac in [0.0, 0.001, 0.01, 0.5, 0.999, 1.0] {
+            let (run, clip) = sb_progress_geometry(lane, frac);
+            assert!(
+                run.left() >= frame.left() + r,
+                "at {frac} the run starts at {}, and the fill is cut away left of {} — the bar \
+                 would stand in the top-left notch",
+                run.left(),
+                frame.left() + r
+            );
+            assert!(
+                run.right() <= frame.right() - r,
+                "at {frac} the run reaches {}, past where the top edge stops being straight \
+                 at {}",
+                run.right(),
+                frame.right() - r
+            );
+            assert!(
+                clip.left() >= frame.left() + r && clip.right() <= frame.right() - r,
+                "the clip readmits what the run was pulled in from, so the pull-in is decorative"
+            );
+        }
+
+        let unpulled = lane.expand2(egui::vec2(f32::from(pad.left), f32::from(pad.top)));
+        assert!(
+            unpulled.left() < frame.left() + r,
+            "the frame's own edge at {} already clears the arc at {}, so the pull-in this test \
+             exists to check is doing nothing and the test has stopped measuring it",
+            unpulled.left(),
+            frame.left() + r
+        );
     }
 
     /// CORE §4's numbered list of popups, and the enum that holds them, are the same length.

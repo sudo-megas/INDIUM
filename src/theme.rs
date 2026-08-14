@@ -185,14 +185,42 @@ pub fn edge_hot() -> Stroke {
 // Three radii, declared. Before P7 the window mixed five — 0, 2, 3, 6 and a 9px progress
 // pill — not one of which was written down anywhere.
 
-/// Zones are square, and that is a decision rather than an omission.
+/// Zones are rounded, and the number is the one the tightest zone can afford.
 ///
-/// `egui::Frame` does **not** clip its children: it builds one `RectShape` and paints it
-/// *behind* the content. A rounded table card would therefore let the header row, and a
-/// selected first or last row's full-bleed orange fill, overhang the arc. Square corners
-/// make that impossible, they suit a monospace window, and the gutter plus the 2px edge do
-/// all the floating.
-pub const R_ZONE: u8 = 0;
+/// **The hazard is real and has not gone away.** `egui::Frame` does **not** clip its
+/// children: it builds one `RectShape` and paints it *behind* the content. Nothing stops a
+/// header row or a selected first row's full-bleed orange fill from overhanging an arc — the
+/// frame will happily paint the fill across a corner it has already cut away. Zones were
+/// square for sixteen milestones because that made the question moot.
+///
+/// What P23 §2a changed is not the hazard but the arithmetic. A rounded rect of radius `R`
+/// admits a point `(c, c)` in from its corner when `c ≥ R(1 − 1/√2)` — **1.76px at R = 6** —
+/// and every zone insets its content by `inner_margin + 2` for the stroke: sidebar 14 and
+/// 16, inspector 14, tray 12 and 8, status bar 14 and 12, and the table, which is the
+/// tightest at **4 + 2 = 6**. Six clears 1.76 by a factor of three, and the table's content
+/// corner lands exactly on the arc's own centre — the furthest inside the shape a corner can
+/// be. So no corner covers, no inset first row, and no rounded clipping, which epaint 0.36
+/// does not offer in any case.
+///
+/// **The ceiling is about 13, and it is not the fill that sets it.** The obvious sum — the
+/// table's content inset against `R(1 − 1/√2)` — gives R ≈ 20.5, and that number is wrong,
+/// because the table draws one thing *outside* its content lane. The cursor ring is
+/// `gapless_rect`, the row expanded by `0.5 * item_spacing`, which is 4 horizontally — exactly
+/// the table's inner margin — so the ring reaches `frame.left + 2` and sits on the fill's own
+/// boundary. Measured, not derived: at scale 1 the table's rect starts at x 271 and the ring
+/// is painted at **x 273**.
+///
+/// Its worst corner is bottom-left, at `(left + 2, bottom − 6)` against an arc centred
+/// `(left + R, bottom − R)`, which stays inside while `(R−2)² + (R−6)² ≤ R²` — that is
+/// **R ≤ 12.9**. At 6 the ring's corner is 4.0 from a centre 6 away, so it clears with two
+/// pixels of radial slack. A later hand raising this constant re-runs that comparison and not
+/// the content-inset one, and re-checks the class below.
+///
+/// **What the inset argument does not cover is anything painted against a zone's own rect.**
+/// Content is inset; a painter is not. The status bar's progress track is the one member of
+/// that class — it backs out of the inner margin deliberately, to sit on the line the stroke
+/// draws — and it is pulled in by this constant at both ends where it is drawn.
+pub const R_ZONE: u8 = 6;
 /// Hand-rolled rows, text fields, checkboxes, and any button not built through [`button`] —
 /// the two raw `ui.button()` calls in the tray still land here. Buttons and chips made the
 /// theme's way take [`R_PILL`] instead. The status bar's progress track used this until P13
@@ -751,7 +779,7 @@ fn install_spacing(ctx: &egui::Context) {
 
 // --- The shapes CORE §4 and §6 are made of ------------------------------------
 
-/// One of CORE §4's five zones: a fill, a 2px edge all round, square corners, and half a
+/// One of CORE §4's five zones: a fill, a 2px edge all round, [`R_ZONE`] corners, and half a
 /// gutter of `VOID` outside it.
 ///
 /// **Budget for the edge.** `Frame::total_margin()` is `inner_margin + stroke.width +
