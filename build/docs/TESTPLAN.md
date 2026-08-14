@@ -272,10 +272,10 @@ worth running again. **‡** marks a step P22 left unticked and this round inher
 
 | | Do | Must happen | Holds |
 | --- | --- | --- | --- |
-| 13.1 ‡ | Set the desktop to **100%** and walk rounds 2 and 6 | Nothing clips, nothing overlaps, every control reachable. | §6 |
+| 13.1 ‡ | Set the desktop to **100%** and walk rounds 2 and 6 | Nothing clips, nothing overlaps, every control reachable. A popup you moved earlier stays where you put it — see 13.4. | §6 |
 | 13.2 ‡ | **125%** | The same. | §6 |
 | 13.3 ‡ | **150%** | The same. | §6 |
-| 13.4 | At 150%, open every one of the ten popups | Each fits on a 1080p 15" screen without being cut off. | §6 |
+| 13.4 | At 150%, open every one of the ten popups | Each fits on a 1080p 15" screen without being cut off. **Popups can be dragged from v2.3, and a popup's position is read once per run**: one you have moved reopens where you left it, and after a scale change even an untouched one opens where it last opened rather than back in the middle. Both are the fix working, not a placement bug — what this step asks is whether the popup **fits**, from wherever it opens. Drag it to the middle if you need to see it whole, or relaunch to put them all back. | §6 |
 
 ## Round 14 — leaving no trace
 
