@@ -495,3 +495,45 @@ wrong about themselves, in addition to the three already recorded above.
 Which is the same lesson three times, and it is why the ledger is not the thing being frozen:
 **ask the program, not the record of it.** That applies to the checking pass too — its four commit
 citations were spot-checked against `git show` before being written down here.
+
+### The roster — 25 rows, and where it had been scattered
+
+Everything above adds rows to the maker's next walk, and until now it added them **in three
+different documents**: the plan carried the 17-row after-fix batch, the section above added round
+13, and `3fecc0c` corrected a step that no list mentioned at all. A roster split across three
+places is not a roster, and the walk is the one part of this round that is not mine to run — so
+it is written once, here, and nowhere else.
+
+It is derived mechanically rather than remembered. The sheet the maker walked is
+`git show 71c7357:build/docs/TESTPLAN.md`; comparing every step row in it against HEAD with the
+generator's own `STEP_RE` gives **158 steps both sides, none added, none removed, and eight whose
+text changed**: 1.8, 8.8, 8.11, 10.5, 10.8, 10.9, 11.9, 12.7. That check is worth more than the
+recollection it replaced, which had 3.8 on the list — 3.8 *was* rewritten, in `71c7357`, which is
+**before** the re-walk, so its answer already stands against the words it now carries.
+
+**The count, by subtraction.** 158 steps, **139 approved** — so **19 are not green**, and the
+sheet shows him every one of them without being told. What the sheet *cannot* show him is a row
+that is green and should not be, and there are **six**:
+
+| Row | Green against | What moved under it |
+| --- | --- | --- |
+| 1.8 | v2.1 | It named *"a `.deb` from `/var/cache/pacman/pkg/`"*. Arch's cache holds 133 `.pkg.tar.zst` and **not one `.deb`** — the step could not be performed as written, and was approved anyway. It now names the `.deb` this repository builds |
+| 8.8 | v2.1 | The step is unchanged in what it requires and changed in how it is reached: *Preselect* was the row's label when it was written, and 8.11 made it a **third control**. The two mode buttons are clicked directly now |
+| 13.1–13.4 | v2.1 | Sub-pixel binning is on in v2.2, so **every glyph in the window sits somewhere else** and string widths moved with them. Round 13 is the layout check at 100% / 125% / 150% — clipping and overlap are exactly what a width change disturbs |
+
+**19 + 6 = 25.** The six are the whole reason this section exists: a regeneration preserves stored
+answers by design, which is what keeps 130 approvals from having to be re-earned every time a
+step is reworded — and the price of that design is that a stale green is silent. Naming them is
+the only thing that makes them visible.
+
+**All 25 run against the v2.2 build, in one pass.** The five instrument-only rows — 1.8, 10.5,
+10.8, 10.9, 11.9 — could in principle be re-ticked against v2.1 without waiting, and they are not,
+for a reason found by looking rather than assumed: **v2.1 is no longer installed.** `pacman -Q
+indium` returns nothing and `~/.local/bin/indium` points at `target/release/indium` again. That is
+not damage; it is step 14.6 doing its job. 14.6 is `pacman -R indium` and the batch was ordered to
+put it last precisely so it would. Re-installing a superseded package to re-tick five rows whose
+program behaviour v2.2 does not change — none of the round's fixes touch `cat`'s member lookup —
+would buy a certification that Phase 4's install of the published v2.2 packages provides anyway.
+
+**One order constraint survives, unchanged and for the same reason.** 14.6 and 14.7 are the
+uninstall pair, so they run **last**; every row above them needs an installed binary.
