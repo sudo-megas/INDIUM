@@ -36,11 +36,10 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
     let mut open = true;
     let mut go: Option<PathBuf> = None;
 
-    egui::Window::new("Extract")
+    theme::floating(ctx, "Extract")
         .max_height(theme::popup_max_height(ctx))
         .collapsible(false)
         .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .open(&mut open)
         .show(ctx, |ui| {
             ui.set_min_width(520.0);

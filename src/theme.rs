@@ -894,6 +894,45 @@ pub fn zone(fill: Color32) -> egui::Frame {
         .outer_margin(egui::Margin::same(GUTTER / 2))
 }
 
+/// A popup that opens in the middle of the window and can then be dragged anywhere.
+///
+/// **The maker asked whether popups could float and be moved by mouse freely. They could not,
+/// and not by accident** — every one of them called
+/// `.anchor(Align2::CENTER_CENTER, Vec2::ZERO)`, and `Area::anchor` ends
+/// `self.movable(false)` (egui-0.36.1 `area.rs:333-336`). The centring and the immovability
+/// were the same call, which is why they were never separated: nobody had asked for one
+/// without the other.
+///
+/// **Deleting that line does not leave a centred popup, it leaves a cascading one.** With no
+/// anchor and no default position, `Area::begin` falls through to `automatic_area_position`
+/// (`area.rs:461`, `:702-719`), which returns the constrain rect's top-left plus 16 and then
+/// steps sideways per already-open window. So the anchor is replaced rather than removed, by
+/// the two calls that say the same thing without the third meaning: a default position, and
+/// the pivot to hang it from.
+///
+/// **The position is [`egui::Context::content_rect`]'s centre because that is the rect the
+/// anchor was centring in** — `constrain_rect` defaults to `ctx.content_rect()`
+/// (`area.rs:439`) and the anchor aligned within it, so a popup opens exactly where it opened
+/// before. It is the viewport less any safe-area inset, which on this compositor is the
+/// viewport; the two are not the same call, and the inset one is the one already used by
+/// [`popup_max_height`] and [`list_height`].
+///
+/// **Where a popup opens the second time is egui's answer, and it is kept.** `pivot_pos` is
+/// set through `get_or_insert_with` (`area.rs:459-462`), so `default_pos` is read once and a
+/// popup that has been dragged reopens where it was left. That state lives in egui's memory,
+/// and `eframe` is built here with `default-features = false` — **no `persistence`** — so it
+/// dies with the process: moved within a run, centred again on the next launch. Nothing in
+/// this file makes that happen; it is written down because it is the behaviour, and the next
+/// hand to add `persistence` for some other reason will change it without meaning to.
+///
+/// The two modals are not here. Password and Measure are `egui::Modal`, fixed by
+/// construction, and CORE §4.10 rests on Measure being the one popup drawn *over* another.
+pub fn floating<'a>(ctx: &egui::Context, title: &'a str) -> egui::Window<'a> {
+    egui::Window::new(title)
+        .default_pos(ctx.content_rect().center())
+        .pivot(egui::Align2::CENTER_CENTER)
+}
+
 /// The tallest a popup may be before it starts losing its own edges.
 ///
 /// `egui::Window` sizes itself from its content and is then **clipped** by the viewport
@@ -915,9 +954,11 @@ pub fn popup_max_height(ctx: &egui::Context) -> f32 {
 /// **Asked of the viewport, not of the `Ui`.** Measuring looks like the better answer and is
 /// not: an `egui::Window` sizes itself from its content, so inside one `available_height` is
 /// effectively unbounded and every list quietly kept the height it already had. Anchoring
-/// the sum on the window's own cursor instead makes it circular — a centre-anchored popup's
-/// position depends on the height being computed. The viewport is the one term in the
-/// arithmetic that does not move.
+/// the sum on the window's own cursor instead makes it circular — a popup that centres on
+/// the viewport hangs from its own midpoint, so where it sits depends on the height being
+/// computed here. That was written of an `.anchor()` call and it survived that call's
+/// removal unchanged: [`floating`]'s `CENTER_CENTER` pivot derives the rect from the size
+/// the same way. The viewport is the one term in the arithmetic that does not move.
 ///
 /// The floor of 56 is two rows. A popup that cannot show two rows is one the user has to
 /// resize the window for, and two rows with a foot beats six rows and no way to act on them.
@@ -2248,6 +2289,170 @@ mod tests {
              and refuses file-type icons because a 13pt glyph will not fit a 20px row. Those \
              two sentences are the maker's to change (CORE.md:3-5), so this constant cannot \
              move ahead of them."
+        );
+    }
+
+    /// One popup, driven through six frames with a mouse egui can actually feel.
+    ///
+    /// **The pointer goes in through `RawInput::events`, which is the only door that
+    /// works here.** P23 spent an afternoon on `ydotool` before this: `--absolute` is inert
+    /// on this compositor, relative moves are accelerated, and no synthetic press ever
+    /// reached the window. All of that is the OS layer. `Event::PointerButton` is on the
+    /// far side of it, and egui cannot tell it from a hand.
+    ///
+    /// `anchored` swaps [`floating`] back for the `.anchor()` call it replaced. It is the
+    /// control leg: every assertion below is also run against the popup as it shipped, so a
+    /// harness that cannot drag anything fails the test it is supposed to pass.
+    ///
+    /// Returns where the popup opened and where it ended up.
+    fn drag_popup(anchored: bool, drag: egui::Vec2) -> (egui::Rect, egui::Rect, egui::Rect) {
+        let ctx = egui::Context::default();
+        install(&ctx);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+        let mut content = egui::Rect::NOTHING;
+
+        let run = |events: Vec<egui::Event>| -> egui::Rect {
+            let mut rect = egui::Rect::NOTHING;
+            let mut full = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                },
+                |root| {
+                    let ctx = root.ctx().clone();
+                    let w = if anchored {
+                        egui::Window::new("Drag me")
+                            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    } else {
+                        floating(&ctx, "Drag me")
+                    };
+                    if let Some(r) = w.collapsible(false).resizable(false).show(&ctx, |ui| {
+                        ui.set_min_width(300.0);
+                        ui.label("something to give the window a size");
+                    }) {
+                        rect = r.response.rect;
+                    }
+                },
+            );
+            // `FullOutput` panics on drop with an unapplied delta; nothing here paints it.
+            full.textures_delta.clear();
+            rect
+        };
+
+        // The first frame is a sizing pass — `Area::begin` marks it uninteractable on
+        // purpose — so the popup is only really open on the second.
+        run(vec![]);
+        let opened = run(vec![]);
+        ctx.input(|i| content = i.content_rect());
+
+        // Grab the middle of the title band, a few pixels down from the top edge.
+        let grab = opened.center_top() + egui::vec2(0.0, 8.0);
+        run(vec![egui::Event::PointerMoved(grab)]);
+        run(vec![egui::Event::PointerButton {
+            pos: grab,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::default(),
+        }]);
+        run(vec![egui::Event::PointerMoved(grab + drag)]);
+        (opened, run(vec![]), content)
+    }
+
+    /// The maker's question — *"Can popups float and be moved by mouse freely?"* — as an
+    /// assertion rather than an answer.
+    ///
+    /// Two properties, because [`floating`] replaced one call that did two things. The popup
+    /// still opens where the anchor put it: dead centre of the content rect, which is the
+    /// rect the anchor was aligning within. And it now moves when dragged, which the anchored
+    /// leg proves is not something this harness would report either way.
+    #[test]
+    fn a_popup_opens_centred_and_can_then_be_dragged_off_centre() {
+        let drag = egui::vec2(120.0, -60.0);
+
+        let (opened, moved, content) = drag_popup(false, drag);
+        assert!(
+            (opened.center() - content.center()).length() < 1.0,
+            "a floating popup opens at {:?}, which is not the centre of {:?} — \
+             `default_pos` and the pivot are supposed to reproduce exactly where \
+             `.anchor(CENTER_CENTER, ZERO)` put it, and dropping the anchor without them \
+             leaves egui's cascading top-left instead",
+            opened.center(),
+            content.center()
+        );
+        assert!(
+            (moved.min - opened.min - drag).length() < 1.0,
+            "dragged by {drag:?} the popup went from {:?} to {:?} — it is supposed to \
+             follow the pointer, and `Area::anchor` ending in `movable(false)` is the only \
+             reason it ever did not",
+            opened.min,
+            moved.min
+        );
+
+        let (anchored_open, anchored_moved, _) = drag_popup(true, drag);
+        assert_eq!(
+            anchored_moved.min, anchored_open.min,
+            "the anchored control moved, so this harness cannot tell a movable popup from a \
+             fixed one and neither assertion above means anything"
+        );
+    }
+
+    /// Every popup is built by [`floating`], and the next one will be too.
+    ///
+    /// The test above proves a popup *can* be dragged; this one is why the ninth popup will be
+    /// draggable without anybody remembering to make it so. A `Window` raised directly in
+    /// `src/ui/` gets egui's defaults — the cascading corner from `automatic_area_position`,
+    /// and none of the reasoning in `floating`'s doc — and it would look like a placement bug
+    /// long before anyone traced it back to a missing call.
+    ///
+    /// Scoped to `src/ui/` on purpose, and with **no exceptions**: the two `Window::new` calls
+    /// in this file are `floating` itself and the control leg above, and neither is a popup.
+    #[test]
+    fn every_popup_is_raised_through_floating() {
+        fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir)
+                .expect("src/ui is readable")
+                .flatten()
+            {
+                let path = entry.path();
+                if path.is_dir() {
+                    rs_files(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let ui = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ui");
+        let mut files = Vec::new();
+        rs_files(&ui, &mut files);
+        // A walk that finds nothing must not read as a walk that found nothing wrong.
+        assert!(
+            files.len() >= 10,
+            "only {} file(s) under src/ui — this test found nothing to scan, which is not \
+             the same as finding nothing wrong",
+            files.len()
+        );
+
+        let mut strays = Vec::new();
+        for file in &files {
+            let text = std::fs::read_to_string(file).expect("a source file is readable");
+            for (n, line) in text.lines().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                if line.contains("egui::Window::new") {
+                    strays.push(format!("{}:{}: {}", file.display(), n + 1, line.trim()));
+                }
+            }
+        }
+        assert!(
+            strays.is_empty(),
+            "{} popup(s) raise an egui::Window directly instead of theme::floating:\n{}\n\n\
+             `floating` is what centres a popup and lets it be dragged; a bare Window gets \
+             egui's cascading top-left and cannot be moved into place because it was never \
+             put in one. If this is deliberately not a popup, it does not belong in src/ui.",
+            strays.len(),
+            strays.join("\n")
         );
     }
 }

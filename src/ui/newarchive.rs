@@ -35,11 +35,10 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
     // spawning the worker needs `&mut self` methods the closure cannot hold.
     let mut measure = false;
 
-    egui::Window::new("Create")
+    theme::floating(ctx, "Create")
         .max_height(theme::popup_max_height(ctx))
         .collapsible(false)
         .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .open(&mut open)
         .show(ctx, |ui| {
             ui.set_min_width(620.0);

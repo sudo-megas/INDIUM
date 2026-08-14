@@ -3987,10 +3987,9 @@ fn open_path_popup(app: &mut Indium, ctx: &egui::Context) {
         return;
     }
     let mut open = true;
-    egui::Window::new("Open archive")
+    theme::floating(ctx, "Open archive")
         .collapsible(false)
         .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .open(&mut open)
         .show(ctx, |ui| {
             ui.set_min_width(460.0);

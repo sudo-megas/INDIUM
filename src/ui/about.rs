@@ -33,12 +33,11 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
         return;
     }
     let mut open = true;
-    egui::Window::new("About INDIUM")
+    theme::floating(ctx, "About INDIUM")
         .max_height(theme::popup_max_height(ctx))
         .collapsible(false)
         .resizable(true)
         .default_size([620.0, 480.0])
-        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .open(&mut open)
         .show(ctx, |ui| {
             // About is the one popup whose fixed part alone — a 150px mark, a title, five
