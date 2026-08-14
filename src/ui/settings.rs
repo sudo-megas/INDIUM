@@ -149,7 +149,9 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                             .color(theme::TEXT_MUTED),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if theme::small_button(ui, egui::RichText::new("×"), true).clicked() {
+                        if theme::small_button(ui, egui::RichText::new(theme::REMOVE), true)
+                            .clicked()
+                        {
                             remove = Some(i);
                         }
                     });

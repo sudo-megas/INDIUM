@@ -703,7 +703,9 @@ fn bookmarks_view(app: &mut Indium, ui: &mut egui::Ui) {
                             // the hit test outright — removing a bookmark does not also
                             // move the cursor onto it. That is `UiBuilder::sense`'s stated
                             // property, not a coincidence of geometry.
-                            if theme::small_button(ui, egui::RichText::new("×"), true).clicked() {
+                            if theme::small_button(ui, egui::RichText::new(theme::REMOVE), true)
+                                .clicked()
+                            {
                                 remove = Some(i);
                             }
                         });
@@ -831,7 +833,7 @@ fn draft_row(ui: &mut egui::Ui, dest: &str, source: &str, focused: bool) -> (egu
                 // A real `Button`, so it wins the hit test over the row's own sense and
                 // removing an item does not also move the cursor onto it —
                 // `UiBuilder::sense`'s stated property, as in the two lists.
-                if theme::small_button(ui, egui::RichText::new("×"), true).clicked() {
+                if theme::small_button(ui, egui::RichText::new(theme::REMOVE), true).clicked() {
                     dropped = true;
                 }
             });

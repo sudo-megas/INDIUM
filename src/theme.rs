@@ -875,6 +875,36 @@ pub fn button(ui: &mut egui::Ui, text: egui::RichText, enabled: bool) -> egui::R
     }
 }
 
+/// The remove mark, `×` U+00D7 — the one place it is written.
+///
+/// Four rows carry a remove control: bookmarks and staged operations in the table, a watched
+/// path in Settings, a queued task in Pending. Each typed this character inline, and because
+/// it sits outside `mod icon` it escaped **all four** icon tests — including
+/// `the_icon_registry_is_the_only_way_an_icon_is_defined`, which scans only inside the
+/// module. That is the defect P23 §2d found, and this constant plus
+/// `no_second_remove_mark_is_typed_into_the_source` is the whole of the fix.
+///
+/// **The other half of §2d's plan — moving it to `fa-times` U+F00D — measurement withdrew.**
+/// The premise was that a mathematical operator drawn from the text portion of the face
+/// "shares neither weight nor ink density with the Font Awesome marks beside it", and both
+/// halves are false. Rastered at a common 18.2pt (`13.0 * ICON_SCALE`) and summing coverage
+/// over each glyph's own `uv_rect`, `×` fills **45.4%** of a 9×8 box and `fa-times` **46.1%**
+/// of an 11×12 — the same weight, in a smaller box, which is what a glyph sized to text
+/// rather than to an icon looks like. And no Font Awesome mark stands beside it in any of the
+/// four rows: every one is a label or two and then this button, right-aligned, against 13pt
+/// text. The swap would have made the mark *larger* than the row it ends.
+///
+/// `REMOVE` and not `CLOSE` because that is the job. CORE §4 writes "its own remove ✕" at
+/// both places it names one, and none of the four closes anything.
+///
+/// **CORE writes `✕` U+2715 and the screen has always drawn `×` U+00D7.** The document's
+/// character is in neither embedded face, so a literal reading of §4 would ship tofu, and
+/// this silent divergence is the only reason those controls render at all. Which character
+/// §4 should name is CORE's to settle and the amendment is drafted in `build/docs/P23.md`;
+/// until it lands, the prose that quotes §4 keeps the document's `✕`, because a quotation
+/// stays accurate even when the quoted text is wrong.
+pub const REMOVE: &str = "×";
+
 /// The same, for a `×` or a `+` that must not be a full-height button.
 ///
 /// **It gives up the one-pixel geometry and keeps the other two channels, deliberately.**
@@ -1736,6 +1766,95 @@ mod tests {
                 l.trim()
             );
         }
+    }
+
+    /// [`REMOVE`] is where the remove mark is written, and the only place.
+    ///
+    /// The four rows that draw one had each typed `×` inline, and because the character lives
+    /// outside `mod icon` every icon test looked straight past it —
+    /// [`the_icon_registry_is_the_only_way_an_icon_is_defined`] scans between `pub mod icon {`
+    /// and its closing brace and cannot see anything else by construction. This scans the
+    /// whole of `src/` from disk instead, so a fifth copy is caught in a file that does not
+    /// exist yet as readily as in one of the four that started it.
+    ///
+    /// It matches the quoted token `"×"` rather than the bare character, and skips comment
+    /// lines, so prose stays free to name the mark: every mention in the tree writes it in
+    /// backticks, and the two rules together let a doc comment quote CORE's own sentence
+    /// verbatim without tripping a test about what the screen draws.
+    ///
+    /// **`✕` U+2715 is asserted absent for a harder reason than tidiness: neither embedded
+    /// face carries it.** CORE §4 names it in two places, so a hand correcting the code to
+    /// match the document would ship a tofu box in four rows and see nothing wrong in the
+    /// diff. That is not hypothetical elsewhere — `keys.rs` draws `⇄` U+21C4 from §4's own
+    /// keyboard table, which is absent too and therefore ships as tofu today. The general
+    /// form of this check, over every non-ASCII character in every drawn literal, is owed to
+    /// P23 §2f, where it can land green behind a named exception; here the scope is the one
+    /// mark this constant replaced.
+    #[test]
+    fn no_second_remove_mark_is_typed_into_the_source() {
+        fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).expect("a readable directory under src/") {
+                let p = e.expect("a readable entry").path();
+                // The dotfile skip is lib.rs's, for lib.rs's reason: an editor's lock file is
+                // `.#theme.rs`, whose extension is `rs` and whose contents are not source.
+                let hidden = p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with('.'));
+                if p.is_dir() {
+                    rs_files(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") && !hidden {
+                    out.push(p);
+                }
+            }
+        }
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rs_files(&root, &mut files);
+        files.sort();
+        assert!(
+            files.len() > 10,
+            "only {} .rs files found under {} — this test would otherwise pass by absence",
+            files.len(),
+            root.display()
+        );
+
+        let mut drawn: Vec<(String, String)> = Vec::new();
+        let mut tofu: Vec<String> = Vec::new();
+        for p in &files {
+            let text = std::fs::read_to_string(p).expect("a readable .rs file");
+            let name = p.strip_prefix(&root).unwrap_or(p).display().to_string();
+            for (i, l) in text.lines().enumerate() {
+                if l.trim_start().starts_with("//") {
+                    continue;
+                }
+                if l.contains("\"\u{00d7}\"") {
+                    drawn.push((format!("src/{name}:{}", i + 1), l.trim().to_string()));
+                }
+                if l.contains("\"\u{2715}\"") {
+                    tofu.push(format!("src/{name}:{}", i + 1));
+                }
+            }
+        }
+
+        assert!(
+            tofu.is_empty(),
+            "`✕` U+2715 is in neither embedded face and would draw as a tofu box; CORE §4 \
+             names it but the screen has never drawn it. Written at {tofu:?}"
+        );
+        assert_eq!(
+            drawn.len(),
+            1,
+            "`×` should be written once, in theme.rs's REMOVE; found it at {:?}",
+            drawn.iter().map(|(w, _)| w).collect::<Vec<_>>()
+        );
+        let (where_, line) = &drawn[0];
+        assert!(
+            line.starts_with("pub const REMOVE"),
+            "the one `×` in the tree is at {where_}, which is {line:?} rather than REMOVE's \
+             own declaration"
+        );
     }
 
     /// CORE §2: *"a filename holding `->` must render as the two characters the archive

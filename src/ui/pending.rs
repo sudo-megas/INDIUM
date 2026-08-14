@@ -65,10 +65,17 @@ pub fn show(app: &mut Indium, ctx: &egui::Context) {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    // `×` U+00D7, which the embedded face carries and
-                                    // which `settings.rs` already uses for the same job.
-                                    if theme::small_button(ui, egui::RichText::new("×"), true)
-                                        .clicked()
+                                    // The comment this replaces said the character was "what
+                                    // `settings.rs` already uses for the same job", which was
+                                    // true and was the problem: four rows had each typed it,
+                                    // and none was checked by anything. [`theme::REMOVE`] is
+                                    // where it is written now, and why it is that character.
+                                    if theme::small_button(
+                                        ui,
+                                        egui::RichText::new(theme::REMOVE),
+                                        true,
+                                    )
+                                    .clicked()
                                     {
                                         remove = Some(i);
                                     }
