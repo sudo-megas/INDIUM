@@ -1472,6 +1472,11 @@ impl Writer {
     /// options are all set before the file is opened, because opening "freezes the
     /// settings".
     pub fn create(path: &Path, recipe: &Recipe) -> Result<Writer, String> {
+        // PXX 9.5, and see [`crate::util::writable_parent`] for what it is for. First, so
+        // that a missing folder is answered before a handle is allocated and before
+        // libarchive is given a chance to name the temp file instead of the folder.
+        util::writable_parent(path)?;
+
         // The write half needs it for the same reason the read half does: a name is
         // converted on its way *into* an archive as well as out of one.
         ensure_ctype_locale();

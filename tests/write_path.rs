@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use indium::arch::{self, Entry};
-use indium::tasks::{Meta, Method, Recipe, Sink};
+use indium::tasks::{Container, Meta, Method, Recipe, Sink};
 
 // ---------------------------------------------------------------------------
 // A temporary directory, hand-written.
@@ -207,32 +207,59 @@ fn recipe(path: &Path, method: Method) -> Recipe {
 /// Three faults in one line. It printed a Rust struct at a person. It named
 /// `.indium-new` — an internal temp file nobody asked for and nobody can act on. And it
 /// never mentioned the one thing that would have fixed it: the folder is missing.
+///
+/// **Every container, not just the one that was demonstrated.** The walk built a `.7z` and
+/// so that is the branch with the Rust struct in it, but a `.tar.gz` into the same missing
+/// folder went to libarchive and came back `Failed to open '…/.archive.tar.gz.indium-new'`
+/// — a different sentence with the same two faults left in it. A round that freezes the
+/// repository forever does not get to fix the format that was reported and leave the rest.
+///
+/// What is handed to each writer is the **temp path**, `.name.indium-new`, because that is
+/// what `build_and_verify` hands it. Passing the plain name here would let the no-leak
+/// assertion pass on a message that had no `.indium-new` available to leak.
 #[test]
 fn a_missing_destination_folder_is_named_plainly() {
     let dir = TempDir::new("nodir");
     let missing = dir.join("not-there");
-    let target = missing.join("archive.7z");
 
-    // 7z is a *container*, chosen by the extension; `Lzma2` is the coder inside it, which
-    // is what `recipe.container()` reads back as `Container::SevenZ`.
-    let recipe = recipe(&target, Method::Lzma2);
+    for (name, method) in [
+        ("archive.7z", Method::Lzma2),
+        ("archive.tar", Method::Store),
+        ("archive.tar.gz", Method::Gzip),
+        ("archive.tar.xz", Method::Xz),
+        ("archive.tar.zst", Method::Zstd),
+        ("archive.tar.bz2", Method::Bzip2),
+        ("archive.zip", Method::Deflate),
+    ] {
+        // The recipe names the archive a person asked for; the writer is opened on the
+        // temp file beside it. Both come from `Apply`, and only the first is speakable.
+        let target = missing.join(name);
+        let recipe = recipe(&target, method);
+        let temp = missing.join(format!(".{name}.indium-new"));
 
-    // `Writer` carries a live archive handle and deliberately implements no `Debug`, so
-    // this cannot be an `expect_err`.
-    let err = match indium::sevenz::Writer::create(&target, &recipe, None) {
-        Err(e) => e,
-        Ok(_) => panic!("writing into a folder that does not exist must fail"),
-    };
+        // `Writer` carries a live archive handle and deliberately implements no `Debug`, so
+        // neither arm of this can be an `expect_err`.
+        let err = match recipe.container() {
+            Container::SevenZ => match indium::sevenz::Writer::create(&temp, &recipe, None) {
+                Err(e) => e,
+                Ok(_) => panic!("{name}: writing into a folder that does not exist must fail"),
+            },
+            _ => match arch::Writer::create(&temp, &recipe) {
+                Err(e) => e,
+                Ok(_) => panic!("{name}: writing into a folder that does not exist must fail"),
+            },
+        };
 
-    assert!(
-        err.contains(&missing.display().to_string()),
-        "the message must name the missing folder: {err:?}"
-    );
-    for leak in ["Io(", "Os {", "code: 2", ".indium-new"] {
         assert!(
-            !err.contains(leak),
-            "the message still leaks {leak:?}: {err:?}"
+            err.contains(&missing.display().to_string()),
+            "{name}: the message must name the missing folder: {err:?}"
         );
+        for leak in ["Io(", "Os {", "code: 2", ".indium-new", "Failed to open"] {
+            assert!(
+                !err.contains(leak),
+                "{name}: the message still leaks {leak:?}: {err:?}"
+            );
+        }
     }
 }
 

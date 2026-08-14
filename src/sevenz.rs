@@ -303,21 +303,11 @@ impl Writer {
         recipe: &Recipe,
         passphrase: Option<&Secret>,
     ) -> Result<Writer, String> {
-        // PXX 9.5. Naming a destination folder that does not exist reported
-        // `could not open the 7z for writing: Io(Os { code: 2, kind: NotFound, … },
-        // "…/.archivesadfad.7z.indium-new")` — three failures in one line. It printed a
-        // Rust struct at a person; it named `.indium-new`, an internal temp file the user
-        // never asked for and cannot act on; and it never mentioned the one fact that
-        // would have fixed it, which is that the folder is not there. Checked before the
-        // open so the sentence can say so plainly.
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() && !parent.is_dir() {
-                return Err(format!(
-                    "{} does not exist, so there is nowhere to write the archive",
-                    parent.display()
-                ));
-            }
-        }
+        // PXX 9.5, and see [`crate::util::writable_parent`] for what it is for. Checked
+        // before the open, because after it the only thing left to report is what the
+        // failing library chose to say about a temp file the person never named.
+        crate::util::writable_parent(path)?;
+
         let mut inner = ArchiveWriter::create(path)
             .map_err(|e| format!("could not open the 7z for writing: {e}"))?;
 

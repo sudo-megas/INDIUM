@@ -299,6 +299,40 @@ pub fn parent_dir(path: &str) -> &str {
     }
 }
 
+/// The one thing worth checking before a writer opens its file: that the folder it is being
+/// asked to write into is there.
+///
+/// **PXX 9.5.** Naming a destination folder that does not exist reported
+/// `could not open the 7z for writing: Io(Os { code: 2, kind: NotFound, … },
+/// "…/large/.archivesadfad.7z.indium-new")` — three faults in one line. It printed a Rust
+/// struct at a person; it named `.indium-new`, an internal temp file nobody asked for and
+/// nobody can act on; and it never mentioned the one fact that would have fixed it, which is
+/// that the folder is not there.
+///
+/// It lives here rather than in either writer because **both writers have the fault and only
+/// one of them was reported.** The walk built a `.7z`, so that is the branch the maker saw; a
+/// `.tar.gz` into the same missing folder went to libarchive instead and came back
+/// `could not open the archive for writing: Failed to open '…/.archive.tar.gz.indium-new'`
+/// — no Rust struct, and no better an answer, still naming a file the person never chose and
+/// still not saying the folder is missing. A round that freezes the repository forever does
+/// not get to fix the format that was demonstrated and leave the other six.
+///
+/// What it deliberately does not do is check whether the folder is *writable*. That is a
+/// question only the open can answer honestly — permissions, mounts and ACLs all get a vote —
+/// and a pre-flight that guessed at it would either refuse a write that would have worked or
+/// pass one that then failed with a second, worse sentence.
+pub fn writable_parent(path: &std::path::Path) -> Result<(), String> {
+    match path.parent() {
+        // A bare filename has no parent to check; `Path::parent` also yields `""` for one,
+        // which is the current directory and always exists.
+        Some(dir) if !dir.as_os_str().is_empty() && !dir.is_dir() => Err(format!(
+            "{} does not exist, so there is nowhere to write the archive",
+            dir.display()
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// Shorten `s` to at most `cells` columns by taking the middle out, not the end.
 ///
 /// CORE §4: *"The directory is elided in the middle, never at the end, because the end is
@@ -699,5 +733,36 @@ mod tests {
                 "{len} bytes grew an empty row"
             );
         }
+    }
+
+    /// PXX 9.5. The three shapes a destination path comes in, and what each is owed.
+    ///
+    /// The sentence itself is asserted end-to-end by `write_path.rs`'s
+    /// `a_missing_destination_folder_is_named_plainly`, once per writable container. What is
+    /// checked here is the part that is easy to get subtly wrong: which paths have a parent
+    /// worth checking at all. `Path::parent` answers `Some("")` for a bare filename, and an
+    /// empty path is not a directory, so a naive check refuses `archive.7z` — a perfectly
+    /// ordinary thing to type — on the grounds that the current directory does not exist.
+    #[test]
+    fn only_a_parent_that_is_named_and_missing_is_refused() {
+        use std::path::Path;
+
+        // A real folder, checked against the one directory every run is guaranteed to have.
+        assert!(writable_parent(Path::new("/tmp/archive.7z")).is_ok());
+        // No parent to speak of, and `Some("")` for a parent, are both the current
+        // directory. Neither may be refused.
+        assert!(writable_parent(Path::new("archive.7z")).is_ok());
+        assert_eq!(Path::new("archive.7z").parent(), Some(Path::new("")));
+
+        let err = writable_parent(Path::new("/tmp/indium-no-such-folder-9c1f/archive.7z"))
+            .expect_err("a folder that is not there must be refused");
+        assert!(
+            err.contains("/tmp/indium-no-such-folder-9c1f"),
+            "the folder is the whole point of the sentence: {err:?}"
+        );
+        assert!(
+            !err.contains("archive.7z"),
+            "and the file is not what is missing: {err:?}"
+        );
     }
 }
