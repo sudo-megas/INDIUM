@@ -2106,6 +2106,15 @@ mod tests {
         const EXCEPTIONS: [(&str, u32); 1] = [("src/ui/keys.rs", 0x21C4)];
 
         /// The string literals on one line, escapes skipped.
+        ///
+        /// It counts quotes, so a `char` literal that *is* a quote — `'"'` — opens a string
+        /// that never closes and the rest of that line is lost. The damage stops at the
+        /// newline: `inside` does not outlive the call. Two such lines are in scanned code,
+        /// both in `src/platform/apps.rs`, which parses `.desktop` `Exec=` lines and draws
+        /// nothing at all; the rest are inside test modules, which are cut. Raw strings
+        /// escape differently and are likewise all in test modules. The python survey this
+        /// was cross-checked against shares the same blindness, so its agreement is not
+        /// coverage of this.
         fn literals(line: &str) -> Vec<String> {
             let (mut out, mut cur, mut inside) = (Vec::new(), String::new(), false);
             let mut chars = line.chars();
