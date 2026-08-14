@@ -102,6 +102,80 @@ shipped this way and so did every release before it. If 10.2 is approved it goes
 5 as a CLI observation; if it is denied it becomes work in this round under R3, like any other
 denial.)*
 
+### The re-walk came back, and four of its five denials were the instrument's
+
+**139 approved, 14 denied, 5 unanswered.** The five unanswered are the appended steps — 3.14, 8.12,
+10.14, 12.11, 14.7 — which cannot be answered until v2.2 exists, so they are correctly blank rather
+than skipped. 10.2 was approved, which resolves the paragraph above: the packed column goes to
+Phase 3's agent 5 as an observation and not as work in this round.
+
+Of the 23 denials the first walk left, **nine flipped**. Fourteen rows were eligible, so five stayed
+red, and the count is worth stating that way because it is arrived at by subtraction: the other nine
+denials belong to the after-fix batch and were never walked here. Checking each of the five against
+the corpus and the source — rather than against either side's word, which is the rule the pre-walk
+corrections established — **four are this round's own instrument and one is the program's.**
+
+**10.5** was denied with the note *"picked deny but didnt understand what this does"*, and the output
+quoted back beside it was **correct**: `large.tar` holds exactly three members, so `Extracted 3
+entries.` is the whole archive and not a truncation of it. A step that produces a right answer and a
+denial is a step nobody could read. It was one sentence carrying three commands; it is now three
+commands with their own expected output and a line saying what the step is for.
+
+**10.8 and 10.9** name one member each and both were walked against a different archive — `large.tar`
+in place of `photos.zip`, and a path in place of `f.txt`. Both members were verified present before a
+word was changed: `README.txt` is in `photos.zip` and `f.txt` is `secret.7z`'s only member. The
+likely cause is recoverable rather than mysterious, and it indicts the instrument twice: **`photos.zip`
+did not exist during the first walk** — this round rebuilt it — so substituting `large.tar` was
+reasonable then and habit the second time. What INDIUM printed both times (`no such entry`, and the
+encrypted-header error for a wrong password on v2.1) is a correct program answering the question it
+was actually asked.
+
+**11.9** came back, for the second round running, as *"you check for me"*. The step never said which
+directory the archives were in. That is the entire defect; it names `~/indium-test/realfile/` now and
+gives one command that reads all nine. Run there: **eight of eight valid**, and the ninth,
+`archiveencry.7z`, refuses with *"The archive header is encrypted"* — step 3.9's behaviour seen from
+outside, which is a pass.
+
+**8.11 is the real one**, and the maker's ruling on it is worth recording in his own words because it
+is also the justification for treating it as a defect rather than a feature: *"i always thought
+'preselect' was a button for persistent location. So we treat it as a bugfix than rather new
+feature. Do not change its name, Preselect stands. Convert it into a clickable button. It must ask
+user a persistent path."* The document's own account is that the UI misled the person who wrote the
+rule it was obeying — a word set beside two pressable words, in the same row and at the same size, is
+a third pressable word whatever it was meant to be. **That is what keeps "PXX ships no feature"
+honest**: the affordance was already promised on screen and the round is delivering what was
+promised, not adding something new. It landed in `8986ac6` with five tests, and CORE §4's popup 5 —
+which had said *destination* while the setting stored only a mode — is true rather than merely old.
+
+### Three ledger rows that were wrong about themselves
+
+Checking 8.11's neighbours turned up something the freeze should not swallow: **the ledger's file
+attributions are unreliable, while its fixes are real.** All three were found by looking for the
+behaviour rather than for the named file.
+
+**4.13 was a false denial and the ledger filed it as code.** It reads *"Code — `ui/keys.rs`"*, and
+that file is only the help-screen key table; nothing in it handles a chord. The guard the step is
+actually about — `ctrl_c && self.has_archive() && !typing && !selecting_text` — is at `ui/mod.rs:2967`
+**in the shipped v2.1**, with a comment naming the four fields it protects. So no fix was needed and
+none was made. The walker approved the step this round while describing the opposite in the note, and
+asked directly whether he had tested the wrong thing: he had. The path he copied
+(`/run/user/1000/indium/co-6203-22/…`) is what `Ctrl+C` puts on the clipboard **with the table
+focused**, which is step 4.1 and correct. The approval stands; the reasoning under it did not.
+
+**3.2 is fixed, in `ui/mod.rs::ascend`, not in `ui/table.rs` where the ledger put it** — the doc
+comment there opens *"PXX 3.2:"* and the restore is `position(|r| r.path == left)`, absent from v2.1.
+**6.2 is fixed too**, at `ui/mod.rs:2777`, with the sentence *"N folders left out: INDIUM adds files,
+not folders."* and two tests. Both were briefly suspected of having been dropped, on the strength of
+a search against the filenames the ledger named. **The lesson is the search, not the ledger**: on a
+repository about to be frozen, "is this closed?" has to be asked of the program.
+
+**14.4's denial note describes a crash that did not happen in this walk.** The journal's last two
+abnormal INDIUM ends are 23:19 and 23:27 on the previous day — the `9/KILL` and the `6/ABRT` already
+analysed in finding 2, both the maker's own hand. Nothing crashed during the re-walk. The note is a
+stored answer from the first walk, which is what a sheet that preserves answers across a regeneration
+is supposed to do, and reading it as new evidence would have sent a hunt after a defect with no event
+behind it.
+
 ### What the estimator measured, and one thing it found
 
 Eight candidates over this repository's own `src/`, **936.1 KiB weighed whole** (under the 2 MiB
