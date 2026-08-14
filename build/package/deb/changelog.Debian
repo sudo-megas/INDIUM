@@ -1,3 +1,44 @@
+indium (2.3.0-1) unstable; urgency=medium
+
+  * The window is drawn in Cascadia Mono rather than Fira Mono. Both are monospaced and
+    both carry the icon set INDIUM draws from; the swap is the maker's call about the face
+    he wants to read. The `Mono` cut is the one that ships and a test now says why: the
+    proportional cut draws its icons two cells wide, which would leave every column in the
+    entry table half a character out without anything looking broken enough to report.
+  * Zones have corners. Every pane -- the sidebar, the entry table, the Inspector, the
+    status bar -- was a square-cornered rectangle and is now rounded by 6px. The window
+    still uses three radii and no fourth; the zone's was the one that had been zero.
+  * A zone casts a warm glow into the gutter it floats in, which is the depth cue that
+    tells a pane sitting above the background apart from one painted onto it. It is
+    bounded so it cannot become decoration: one zone's cast never reaches its neighbour,
+    and its strength is measured against the gutter rather than judged by eye.
+  * Text is set at six named levels rather than eight numbers spread across nine files.
+    Two of them moved: a pane's heading and a chooser row go from 14 to 15, which puts two
+    points between a heading and the value beneath it instead of one point and a weight,
+    and Measure's heading comes down from 16 to join them.
+  * Popups can be dragged. All eight -- About, Keys, Settings, Extract, Create, Open With,
+    Pending tasks and Open archive -- had been pinned to the middle of the window by a call
+    that also refused the mouse, so the centring and the immovability were one thing and
+    were never separated. They still open centred, they now go where they are put, and a
+    popup that has been moved reopens where it was left until the program closes. Password
+    and Measure are modal and stay fixed.
+  * The Space row of the Keys popup drew an empty box. The arrow it asked for is in
+    neither weight of either face, old or new, so it has been a box in every release that
+    had a Keys popup to open. It is an arrow that exists now, and a test walks every
+    character the program can draw against both faces so a second one cannot appear.
+  * Apply and Create fill with the accent instead of tinting a word with it. Orange as ink
+    measured 3.65:1 on the face it was painted on -- under the 4.5 every other pairing in
+    the window holds to -- and as a fill under dark text it reads 5.40, rising as the
+    button is hovered and pressed rather than dimming.
+  * The remove mark is one character with one name. Four of them had been typed into the
+    layout rather than drawn from the icon set, so they came from the text part of the
+    face and sat at a different weight to the marks beside them.
+  * Nothing changed about what the program does: the same eight formats, the same
+    estimator and its figures, the same rebuild, the same ten popups. This is the round
+    that redraws the window, and the walk against it is what decides whether it ships.
+
+ -- sudo-megas <sudo-megas@users.noreply.github.com>  Fri, 14 Aug 2026 23:30:00 +0300
+
 indium (2.2.0-1) unstable; urgency=medium
 
   * Archives made with `tar -cf x.tar -C dir .` extract again. Their first member is the

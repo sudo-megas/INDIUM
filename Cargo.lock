@@ -1335,7 +1335,7 @@ dependencies = [
 
 [[package]]
 name = "indium"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "ashpd",
  "eframe",
