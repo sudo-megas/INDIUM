@@ -619,14 +619,27 @@ pub fn install_visuals(ctx: &egui::Context) {
     // flatly: "This setting does not affect text." It smooths shape edges. Raising it would
     // blur the rules and leave every glyph exactly as it was.
     //
-    // What *is* worth turning off is sub-pixel binning. It renders each glyph at four
-    // fractional horizontal offsets to even out kerning, and epaint is candid about the
-    // price — "It also lead to text looking more blurry." Even kerning is the payoff, and
-    // §6 puts this entire window in monospace on a fixed advance: INDIUM cannot collect that
-    // benefit and was paying the blur for it at every size. Set on `v` rather than through
-    // `Options` — `text_options` lives on `Visuals` — so the write below covers both styles
-    // for exactly the reason the note under it gives.
-    v.text_options.subpixel_binning = false;
+    // PXX. **Sub-pixel binning is left at egui's default, which is on**, and the line that
+    // turned it off is gone. P21 set `text_options.subpixel_binning = false` here, arguing
+    // that §6 puts the window in monospace on a fixed advance, so the even kerning binning
+    // buys was already there and only its blur — epaint's own "It also lead to text looking
+    // more blurry" — was being paid for. The argument is false, and the font file says so:
+    // `FiraMonoNerdFontMono-Regular.otf` reports `head.unitsPerEm` 1000 and an advance of
+    // 600, so the advance is fixed at 0.600 *em* and not at a whole pixel. At the three
+    // sizes this window sets it is 7.200 / 7.800 / 10.800 px, none of them integral — so
+    // with binning off each glyph origin rounds to a pixel and the gaps at 13px run
+    // 8, 8, 7, 8, 8, 8. The window was paying uneven spacing for a benefit it had been told
+    // it could not collect.
+    //
+    // P21 owed the line an experiment and never ran it — `P21.md:551`, *"if the A/B refuses
+    // it, the line comes out"*, with `P21.md:673` left unticked. PXX ran it: two builds
+    // differing in this line alone, the same archive open at the same scroll, no keypress in
+    // either, the window landing pixel-identically (a title-bar strip differing by 0 pixels).
+    // With binning off the Details panel wrapped `23.4 MiB (24 576 000 bytes)` onto a second
+    // line; with it on the same string fits. Rounding every origin up widens a string enough
+    // to wrap it, so the line was costing *layout* and not only sharpness — silently, in the
+    // narrowest panel in the window. The line comes out, as P21 said it would, and CORE §6
+    // is not touched.
 
     // Both styles, not just the current one. `set_visuals` writes only the theme egui thinks
     // it is in, and `Options::theme()` is refreshed from the platform on every pass — so a
@@ -1047,21 +1060,26 @@ mod tests {
         ctx.style_of(egui::Theme::Dark).visuals.clone()
     }
 
-    /// P21: the window does not pay for kerning it cannot collect.
+    /// PXX: a fixed *em* advance is not a fixed *pixel* advance.
     ///
-    /// Sub-pixel binning renders every glyph at four fractional horizontal offsets to even
-    /// out kerning, and epaint is candid about the price — "It also lead to text looking
-    /// more blurry." CORE §6 puts the whole window in monospace on a fixed advance, so the
-    /// evenness is already there and the blur was being paid for nothing.
+    /// P21 turned sub-pixel binning off and pinned it off here, on the reading that CORE §6's
+    /// one monospace face means the advance is already whole-pixel and only binning's blur
+    /// was being paid for. Fira Mono is 600 units on a 1000-unit em — 0.600 em — so at this
+    /// window's 12 / 13 / 18 px that is 7.200 / 7.800 / 10.800 px. None is integral, and with
+    /// binning off the rounded origins at 13px sit 8, 8, 7, 8, 8, 8 apart. The evenness was
+    /// never already there.
     ///
-    /// Pinned because the upstream default is `true`: without this, an egui upgrade turns
-    /// it back on silently and nothing in the program would say so.
+    /// Now pinned the other way, and for the same structural reason P21 pinned it: the value
+    /// is egui's default rather than something this function sets, so a toolkit upgrade that
+    /// flipped that default would otherwise change how every glyph in the window is placed
+    /// without one line of INDIUM saying so.
     #[test]
-    fn the_window_does_not_pay_for_kerning_it_cannot_collect() {
+    fn a_fixed_em_advance_is_not_a_fixed_pixel_advance() {
         assert!(
-            !visuals().text_options.subpixel_binning,
-            "sub-pixel binning is on again — every glyph is being rasterised at four \
-             offsets to even out kerning that a fixed advance makes even already"
+            visuals().text_options.subpixel_binning,
+            "sub-pixel binning is off — either something set it, or egui's default moved. \
+             0.600 em x 13 px = 7.8 px, so the glyph origins round to gaps of 8, 8, 7, 8, 8, \
+             8 and the window pays uneven spacing for even kerning it never had"
         );
     }
 
