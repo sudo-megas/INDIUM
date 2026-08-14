@@ -202,19 +202,32 @@ pub fn edge_hot() -> Stroke {
 /// be. So no corner covers, no inset first row, and no rounded clipping, which epaint 0.36
 /// does not offer in any case.
 ///
-/// **The ceiling is about 13, and it is not the fill that sets it.** The obvious sum — the
-/// table's content inset against `R(1 − 1/√2)` — gives R ≈ 20.5, and that number is wrong,
-/// because the table draws one thing *outside* its content lane. The cursor ring is
-/// `gapless_rect`, the row expanded by `0.5 * item_spacing`, which is 4 horizontally — exactly
-/// the table's inner margin — so the ring reaches `frame.left + 2` and sits on the fill's own
-/// boundary. Measured, not derived: at scale 1 the table's rect starts at x 271 and the ring
-/// is painted at **x 273**.
+/// **The ceiling is 8.46, and it is not the fill that sets it.** The obvious sum — the table's
+/// content inset against `R(1 − 1/√2)` — gives R ≈ 20.5, and that number is wrong, because the
+/// table draws one thing *outside* its content lane. The cursor ring is `gapless_rect`, the row
+/// expanded by `0.5 * item_spacing` — which is **4 horizontally and 2.5 vertically, the latter
+/// rounded to 3 on the pixel grid** by `round_ui`. Four is exactly the table's inner margin, so
+/// the ring reaches `frame.left + 2`, the fill's own boundary; three is more than half of it, so
+/// the ring also hangs **3px below** the lane it was drawn in and stops at `frame.bottom − 3`.
 ///
-/// Its worst corner is bottom-left, at `(left + 2, bottom − 6)` against an arc centred
-/// `(left + R, bottom − R)`, which stays inside while `(R−2)² + (R−6)² ≤ R²` — that is
-/// **R ≤ 12.9**. At 6 the ring's corner is 4.0 from a centre 6 away, so it clears with two
-/// pixels of radial slack. A later hand raising this constant re-runs that comparison and not
-/// the content-inset one, and re-checks the class below.
+/// Its worst corner is bottom-left, at `(left + 2, bottom − 3)` against an arc centred
+/// `(left + R, bottom − R)`, which stays inside while `(R−2)² + (R−3)² ≤ R²` — that is
+/// **R ≤ 8.46**. At 6 the ring's corner is 5.0 from a centre 6 away: one pixel of radial slack,
+/// not two. A later hand raising this constant re-runs *that* comparison, not the content-inset
+/// one, and re-checks the class below. It does not have to remember to:
+/// `the_cursor_ring_s_corner_stays_inside_the_zone_s_arc` (`ui/table.rs`) runs that comparison
+/// on every build, from the margins rather than from literals.
+///
+/// **This number was written down three times before it was measured once.** The groundwork said
+/// R ≤ 8 by modelling the *fill's* corner at an inset of 4 — it omitted the 2px stroke, and it
+/// judged against the stroke's inner arc rather than the shape's edge — two errors pointing
+/// opposite ways, landing near a true answer on a shape that does not bind at all. A first draft
+/// of this comment said 20.5, from that same fill with the inset corrected. §2a then committed
+/// 12.9, which found the right shape and then credited the ring with a bottom inset of 6 that
+/// the ring does not take. The 8.46 above is the fourth number and the only one read off a
+/// screenshot: at scale 1, with fifty entries and the last row cursored, the table's rect is
+/// `left 271, bottom 685`, its arc centre is `(277, 679)`, and the ring's bottom-left outer
+/// corner is `(273, 682)` — 5.00 away.
 ///
 /// **What the inset argument does not cover is anything painted against a zone's own rect.**
 /// Content is inset; a painter is not. The status bar's progress track is the one member of

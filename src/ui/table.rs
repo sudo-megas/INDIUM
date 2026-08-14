@@ -1121,4 +1121,64 @@ mod tests {
             c.row_right - c.clip_right
         );
     }
+
+    /// The cursor ring is the shape that sets the ceiling on [`theme::R_ZONE`], and it sets it
+    /// from a corner nothing else in the window reaches.
+    ///
+    /// `gapless_rect` expands the row by `0.5 * item_spacing` on **both** axes. Horizontally
+    /// that is 4 — exactly the table's inner margin — so the ring's left edge lands on the
+    /// frame's own stroke at `left + 2`. Vertically it is 2.5, and the last row's ring therefore
+    /// also hangs past the bottom of the lane it was drawn in, stopping 3px short of the frame
+    /// rather than the lane's 6. Its bottom-left outer corner is `(left + 2, bottom − 3)`, and
+    /// that corner has to stay inside the arc the zone cuts away — or the cursor paints into the
+    /// notch, which is the exact defect rounding the zones was supposed to avoid.
+    ///
+    /// Read off a window at scale 1, fifty entries, last row cursored: frame `left 271,
+    /// bottom 685`, arc centre `(277, 679)`, ring corner `(273, 682)` — 5.00 from a centre 6
+    /// away, one pixel of slack. This runs that comparison from the constants on every build,
+    /// because prose did not hold it: the ceiling was written down as 8, then as 12.9, and
+    /// neither number had been read off a window when it was written.
+    #[test]
+    fn the_cursor_ring_s_corner_stays_inside_the_zone_s_arc() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        // `style_of`, because egui 0.36 keeps one style per theme; `install_spacing` writes
+        // both through `all_styles_mut`, so either answers.
+        let spacing = ctx.style_of(egui::Theme::Dark).spacing.item_spacing;
+
+        // The table's own frame, quoted from where it is built rather than assumed.
+        let frame = theme::zone(theme::WINDOW).inner_margin(egui::Margin::same(4));
+        let stroke = frame.stroke.width;
+        let lane = stroke + f32::from(frame.inner_margin.left);
+
+        // How far the ring's outer corner sits in from the frame, per axis. The ring cannot
+        // push past the stroke, so the horizontal leg floors at `stroke`. The vertical one
+        // takes `floor`, not the exact 3.5: `round_ui` snaps the rect to the pixel grid and can
+        // carry the edge a further half-pixel outward, which is what the screen shows it doing.
+        let dx = (lane - 0.5 * spacing.x).max(stroke);
+        let dy = (lane - 0.5 * spacing.y).max(stroke).floor();
+        assert_eq!(
+            (dx, dy),
+            (2.0, 3.0),
+            "the ring's corner moved off ({}, {}) — the screenshot this test was written \
+             against no longer describes the program, so re-measure before trusting the bound \
+             below",
+            2.0,
+            3.0
+        );
+
+        let r = f32::from(theme::R_ZONE);
+        let reach = ((r - dx).powi(2) + (r - dy).powi(2)).sqrt();
+        // `(R−dx)² + (R−dy)² = R²` has roots `(dx+dy) ± √(2·dx·dy)`; the upper one is the
+        // ceiling, and it is 8.46 for the legs above.
+        let ceiling = (dx + dy) + (2.0 * dx * dy).sqrt();
+        assert!(
+            reach <= r,
+            "R_ZONE = {r} puts the cursor ring's bottom-left corner {reach:.2} from an arc \
+             centre only {r} away, so the ring paints outside the zone. The ceiling is \
+             {ceiling:.2} — and it is the ring that sets it, not the fill, which clears with \
+             room to spare. Raising the radius past that needs the ring pulled in first, and \
+             the result read off a window rather than derived."
+        );
+    }
 }
