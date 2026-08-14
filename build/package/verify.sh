@@ -748,12 +748,28 @@ else
   if [ ! -f "$shipped" ]; then
     bad "no usr/share/doc/indium/copyright in the package payload"
   else
+    # Three conditions, three messages — it was one `if` with one message until P23 §2d
+    # sabotaged the tree's licence file and watched this print *"the packaged copyright
+    # disagrees with itself"* underneath two strings that were identical. Both fields were
+    # compared against `$want` and only the fields were named, so a package that agreed with
+    # itself perfectly and merely predated a change to the tree was reported as internally
+    # inconsistent, and the file actually at fault — the one in the tree — was not mentioned.
+    # The same fabricated-diagnosis shape as the guard above, in the check next door.
+    #
+    # The self-comparison runs first and needs no `$want`: an artefact whose stanza and
+    # inlined licence disagree is broken whatever the tree says. Only then is the tree
+    # brought in, and if it has no block to offer, tier one has already said so and this
+    # stays quiet rather than blaming the package for the tree's missing line.
     sgot=$(sed -n '/^Files: assets\/fonts\/\*/,/^$/{s/^Copyright: //p}' "$shipped")
     sofl=$(ofl_holder "$shipped" " ")
-    if [ "$sgot" = "$want" ] && [ "$sofl" = "$want" ]; then
+    if [ "$sgot" != "$sofl" ]; then
+      bad "the packaged copyright disagrees with itself — stanza '$sgot', licence '$sofl'"
+    elif [ -z "$want" ]; then
+      : # already reported above: the tree has no copyright block to compare the package to
+    elif [ "$sgot" = "$want" ]; then
       ok "the packaged copyright names one holder in both places: $want"
     else
-      bad "the packaged copyright disagrees with itself — stanza '$sgot', licence '$sofl'"
+      bad "the packaged copyright says '$sgot'; LICENSES/OFL-1.1.txt says '$want' — the .deb and the tree are not the same build"
     fi
 
     # The CRLF pair, in the artefact. A lone CR is not valid DEP-5 continuation content,
