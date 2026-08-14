@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# make-testdata.sh — build the GB-scale corpus that `build/docs/TESTPLAN.md` rounds 11-13
-# are written against.
+# make-testdata.sh — build the corpus that `build/docs/TESTPLAN.md` is written against:
+# the GB-scale fixtures rounds 11-13 need, and the two small ones rounds 1, 3, 4 and 10 name.
 #
 # The corpus itself is deliberately NOT in the repository. It is gigabytes, it is
 # regenerable, and P6 §9 was written after two release tarballs came within one `git add -A`
@@ -20,9 +20,19 @@
 #                  Encrypted preset, from the `bigsecret-input.bin` this script does write.
 #                  Building it is a test of the write path rather than setup for one.
 #
-#   the small fixtures from the P11 round — photos.zip, large.tar, docs.tar.gz, backup.7z,
-#                  secret.7z, notrar.rar, to-add/ — which already exist in the corpus
-#                  directory and are left alone. This script only adds what rounds 11-13 need.
+#   the rest of the P11-round fixtures — large.tar, backup.7z, secret.7z, notrar.rar,
+#                  notanarchive.zip, a.zip, b.zip, to-add/ — which are still in the corpus
+#                  directory and are left alone. `secret.7z` in particular is byte-identical
+#                  to `tests/fixtures/secret-headers.7z`, so the repository already pins it
+#                  and its pass phrase; there is nothing here to reproduce.
+#
+# Two of that round's fixtures are built here, and the reason is worth writing down. This
+# script used to say photos.zip and docs.tar.gz "already exist in the corpus directory and
+# are left alone". By the end of PXX's certification walk they did not: photos.zip had been
+# extracted into ~/indium-test/photos/ and the archive itself was gone. Nine steps name it —
+# 1.7, 3.1, and seven of round 10's thirteen — and R10 re-walks round 10 in full, so a
+# missing fixture is not a nuisance but a stop. A corpus the plan calls regenerable has to
+# actually be regenerable, or the claim freezes into the repository as a false one.
 #
 # Usage:
 #   build/make-testdata.sh                  # into ~/indium-test
@@ -51,7 +61,7 @@ while [ $# -gt 0 ]; do
 		shift
 		;;
 	-h | --help)
-		sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'
+		sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'
 		exit 0
 		;;
 	*)
@@ -181,6 +191,137 @@ text() { # text <path> <MiB>
 }
 
 # ---------------------------------------------------------------------------
+
+# Both of the small fixtures below are built with **explicit member names**, never with
+# `-C dir .`, and the difference is not cosmetic. `-C dir .` stores a `./` root entry —
+# which is exactly what under-limit.tar does two steps down, deliberately — and v2.1, the
+# released build round 10 is walked against, refuses any archive that contains one. That is
+# the defect PXX found at 12.6 and fixed. A reconstruction built the convenient way could
+# not be opened by the very program it exists to certify.
+
+step "photos.zip — the P11 album [TESTPLAN 1.7, 3.1-3.5, 4.1, 4.5, 4.7, 10.1-10.8]"
+if skip_or_build photos.zip; then
+	python3 - "$DIR/photos.zip" <<-'PY'
+		import base64, sys, zipfile
+
+		out = sys.argv[1]
+
+		# A real 96x64 baseline JPEG, 517 bytes, minted once with ImageMagick and carried
+		# here as base64 so this script needs no image tool of its own. Step 3.4 asks for
+		# "image as image", and a file that merely ends in .jpg cannot answer that: the
+		# `image` crate is what decodes it (Cargo.toml pins png/jpeg/gif/bmp), and it will
+		# refuse nonsense. The fixture this replaces was 19 bytes.
+		JPEG = base64.b64decode(
+		    "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBAUEBAYFBQUGBgYHCQ4JCQgICRINDQoOFRIWFhUS"
+		    "FBQXGiEcFxgfGRQUHScdHyIjJSUlFhwpLCgkKyEkJST/2wBDAQYGBgkICREJCREkGBQYJCQkJCQk"
+		    "JCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCT/wAARCABAAGADASIA"
+		    "AhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAUH/8QAFhAAAwAAAAAAAAAAAAAAAAAAABRh/8QA"
+		    "FgEBAQEAAAAAAAAAAAAAAAAAAAUE/8QAFREBAQAAAAAAAAAAAAAAAAAAABP/2gAMAwEAAhEDEQA/"
+		    "AMhVgVhWWgWhRuxTSVYFYVloFoLk0lWBWFZaBaC5NJVgVhWWgWguTSVYFYVloFoLk0lWBWFZaBaC"
+		    "5NXWgWhWVgVhHu3zSVoFoVlYFYLk0laBaFZWBWC5NJWgWhWVgVguTSVoFoVlYFYLk0laBaFZWBWC"
+		    "5NWVgVhWWgWhHuoTSVYFYVloFoLk0lWBWFZaBaC5NJVgVhWWgWguTSVYFYVloFoLk0lWBWFZaBaC"
+		    "5NXWgWhWVgVhHu3zSVoFoVlYFYLk0laBaFZWBWC5NJWgWhWVgVguTSVoFoVlYFYLk0laBaFZWBWC"
+		    "5N//2Q=="
+		)
+
+		# Non-text bytes for the hex view, deterministic by construction rather than by
+		# seed. Step 3.4's "not text with holes in it" is what this is here to answer.
+		BINARY = bytes((i * 37 + 11) & 0xFF for i in range(4096))
+
+		# One fixed timestamp for every member, so two runs of this script on two machines
+		# produce the same archive byte for byte — the same rule the AES-CTR filler follows.
+		STAMP = (2026, 8, 10, 0, 0, 0)
+
+
+		def add(z, name, body):
+		    info = zipfile.ZipInfo(name, date_time=STAMP)
+		    info.compress_type = zipfile.ZIP_DEFLATED
+		    info.external_attr = 0o644 << 16
+		    z.writestr(info, body)
+
+
+		def adddir(z, name):
+		    info = zipfile.ZipInfo(name.rstrip("/") + "/", date_time=STAMP)
+		    info.external_attr = (0o755 << 16) | 0x10
+		    z.writestr(info, b"")
+
+
+		with zipfile.ZipFile(out, "w") as z:
+		    # Thirty captions, so PgUp/PgDn/Home/End in step 3.1 have somewhere to travel
+		    # and Ctrl+F in 3.5 has a fragment that narrows to a knowable number of rows:
+		    # "caption-1" matches ten of them, "caption-01" exactly one.
+		    for i in range(1, 31):
+		        add(z, f"caption-{i:02d}.txt", f"Caption for photograph {i:02d}.\n".encode())
+
+		    # Step 10.8 names this file and the byte count `wc -c` must print for it, so
+		    # its contents are fixed here rather than described.
+		    add(
+		        z,
+		        "README.txt",
+		        b"INDIUM test album\n"
+		        b"\n"
+		        b"Built by build/make-testdata.sh for the TESTPLAN rounds that need a small\n"
+		        b"archive with awkward names in it. Nothing here is precious.\n",
+		    )
+		    add(z, "index.md", b"# Album\n\nSee README.txt.\n")
+
+		    # The names step 4.1 selects and pastes into a file manager. The emoji one is
+		    # in the plan's record too: 4.1 was approved with a note that INDIUM draws it
+		    # as `emoji-?-box.txt`, which is the one-face rule of CORE 6 showing through
+		    # and not a defect. Keeping the file keeps that note reproducible.
+		    add(z, "beach day.jpg", JPEG)
+		    add(z, "köpek.txt", "Bir köpek fotoğrafı.\n".encode())
+		    add(z, "ÇAĞDAŞ-ÖĞÜT-ŞİŞLİ.txt", b"Istanbul.\n")
+		    add(z, "emoji-\U0001f4e6-box.txt", b"A box.\n")
+		    add(z, "trailing.space .txt", b"The name ends in a space.\n")
+
+		    # Step 10.7: `indium extract photos.zip -- --weird-name`. A member whose name
+		    # is shaped like a flag is the only thing that can prove `--` ends the flags.
+		    add(z, "--weird-name", b"Named like a flag, extracted like a file.\n")
+
+		    add(z, "thumb.bin", BINARY)
+
+		    # Somewhere to descend into and come back out of, for step 3.2's Enter and
+		    # Backspace. Stored as real directory entries so `indium list` shows them too.
+		    adddir(z, "2026")
+		    adddir(z, "2026/summer")
+		    adddir(z, "2026/winter")
+		    add(z, "2026/summer/sunset.jpg", JPEG)
+		    add(z, "2026/summer/notes.txt", b"Warm.\n")
+		    add(z, "2026/winter/frost.txt", b"Cold.\n")
+	PY
+	say "$(du -h "$DIR/photos.zip" | cut -f1) — 40 rows at the top level, no ./ root"
+fi
+
+step "docs.tar.gz — a plain gzipped tar that must simply open [TESTPLAN 1.8]"
+if skip_or_build docs.tar.gz; then
+	python3 - "$DIR/docs.tar.gz" <<-'PY'
+		import gzip, io, sys, tarfile
+
+		out = sys.argv[1]
+
+
+		def add(tar, name, body):
+		    info = tarfile.TarInfo(name)
+		    info.size = len(body)
+		    info.mtime = 1754784000
+		    info.mode = 0o644
+		    tar.addfile(info, io.BytesIO(body))
+
+
+		# The gzip member carries its own timestamp, and the default is "now" — which would
+		# make this the one fixture in the corpus whose bytes changed between two runs for
+		# no reason anybody could see. mtime=0 and an empty stored filename settle it.
+		with open(out, "wb") as raw:
+		    with gzip.GzipFile(filename="", mtime=0, fileobj=raw, mode="wb") as gz:
+		        with tarfile.open(fileobj=gz, mode="w") as tar:
+		            add(tar, "docs/guide.md", b"# Guide\n\nHow to use the thing.\n")
+		            add(tar, "docs/reference.md", b"# Reference\n\nEvery flag, once.\n")
+		            add(tar, "docs/CHANGELOG.md", b"# Changelog\n\n- It exists.\n")
+		            add(tar, "docs/notes/todo.txt", b"Nothing outstanding.\n")
+	PY
+	say "$(du -h "$DIR/docs.tar.gz" | cut -f1) — four members under docs/, no ./ root"
+fi
 
 step "under-limit.tar — ${UNDER_MIB} MiB, under the 1 GiB RAM_LIMIT [TESTPLAN 12.6]"
 if skip_or_build under-limit.tar; then

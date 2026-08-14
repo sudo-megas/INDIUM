@@ -38,6 +38,16 @@ elsewhere. Run it on `/home` and not on `/tmp`, `$XDG_RUNTIME_DIR` or the overfl
 those three are `nosuid,nodev`, and an extraction test that passes there passed because the mount
 forbade the thing rather than because INDIUM did.
 
+The same script also builds the two small ones the early rounds name — **`photos.zip`** and
+**`docs.tar.gz`**. It did not always: they came from the P11 round, the script recorded them as
+already present and left them alone, and by the end of the first certification walk they were
+gone — `photos.zip` had been extracted into `~/indium-test/photos/` and the archive itself
+deleted. Nine steps name it. A corpus this document calls regenerable has to actually be
+regenerable, so they are built here now, and **`photos.zip` is a reconstruction rather than the
+original**: same shape, same awkward names, contents chosen to answer the steps that name it. The
+remaining P11 fixtures — `large.tar`, `backup.7z`, `secret.7z`, `notrar.rar`, `notanarchive.zip`,
+`a.zip`, `b.zip`, `to-add/` — are still in the corpus and are left alone.
+
 **Notation.** `[R1.4]` is round 1, step 4. **†** marks a step recovered from the P11/P12 round —
 either quoted verbatim or located by the coordinate `P11.md` gives it; where that round reported
 a defect, the step says what went wrong then, because a step that once failed is the step most
@@ -50,7 +60,7 @@ worth running again. **‡** marks a step P22 left unticked and this round inher
 | | Do | Must happen | Holds |
 | --- | --- | --- | --- |
 | 1.1 | `sudo pacman -U indium-2.1.0-1-x86_64.pkg.tar.zst` | Installs with no dependency INDIUM did not declare, and no prompt about replacing a file another package owns. | §2, §8 |
-| 1.2 | `pacman -Ql indium \| wc -l`, then look for the icons | Every one of the ten hicolor sizes is on the disk, plus the desktop entry and both licence files. | §8 |
+| 1.2 | `pacman -Ql indium \| wc -l`, then look for the icons | **42.** The package carries 45 tar entries and three of them — `.PKGINFO`, `.BUILDINFO`, `.MTREE` — are metadata `pacman -Ql` does not count. Every one of the ten hicolor sizes is on the disk, plus the desktop entry and both licence files. | §8 |
 | 1.3 | Find INDIUM in the desktop's application menu | It is there, under its own name and its own icon, without logging out. | §8 |
 | 1.4 | `indium --version`, then `indium --help` | `indium 2.1.0`. The help names `list`, `extract`, `cat` and nothing that does not exist. | §4 |
 | 1.5 | Launch INDIUM with no argument | A window opens with no archive in it. The table says so and offers the way in rather than being blank. | §4 |
@@ -60,8 +70,8 @@ worth running again. **‡** marks a step P22 left unticked and this round inher
 | 1.9 | Open `notrar.rar` | *"RAR is not supported."* — a plain sentence, no popup, no crash. Not read, not offered. | §5 |
 | 1.10 | Open `notanarchive.zip` (53 bytes of nonsense) | Refused with a sentence naming the file. The window stays usable. | §5 |
 | 1.11 | Open a file that does not exist | Refused with a sentence. No empty window, no silent nothing. | §4 |
-| 1.12 † | `build/install-desktop.sh` from a directory that is not the repository root | It works from anywhere. *(P11 round 4 step 2 — it failed then with `./build/install-payload.sh: No such file or directory`.)* | §8 |
-| 1.13 | `build/install-desktop.sh --set-default`, then double-click a `.zip` in the file manager | INDIUM opens it. Undo afterwards if you would rather keep your own association. | §8 |
+| 1.12 † | **`cd ~` first**, so you are standing somewhere that is not the repository, then run it by its full path: `~/INDIUM/build/install-desktop.sh` | It works from anywhere — it finds its own payload by resolving its own path, not by trusting the working directory. *(P11 round 4 step 2 — it failed then with `./build/install-payload.sh: No such file or directory`. The step is written this way because the first walk read it as a relative path and denied the program for the plan's omission.)* | §8 |
+| 1.13 | Still in `~`, run `~/INDIUM/build/install-desktop.sh --set-default`, then double-click a `.zip` in the file manager | INDIUM opens it. Undo afterwards if you would rather keep your own association. | §8 |
 
 ## Round 2 — the window's furniture
 
@@ -84,19 +94,20 @@ worth running again. **‡** marks a step P22 left unticked and this round inher
 
 | | Do | Must happen | Holds |
 | --- | --- | --- | --- |
-| 3.1 | Open `photos.zip`, walk the table with arrows, `PgUp`/`PgDn`, `Home`/`End` | The cursor moves as named. `Home` reaches the first row, `End` the last. | §4 |
+| 3.1 | Open `photos.zip` (40 rows at the top level), walk the table with arrows, `PgUp`/`PgDn`, `Home`/`End` | The cursor moves as named. `Home` reaches the first row, `End` the last. **One documented behaviour is part of the pass, not against it:** under a *held* key the bottom row's text steps between two brightnesses at the key-repeat rate and settles back the moment you let go. It was measured rather than guessed — one row, identical geometry, identical background, a uniform intensity multiplier that reaches even the Size cell, whose colour no branch in INDIUM's row code can change. That exonerates the row code and puts it in the toolkit's paint-and-present layer, where this repository has no line to fix. Approve if the cursor lands where it is named; the stepping is expected. | §4 |
 | 3.2 | Press `Enter` on a directory, then `Backspace` | Descends, then goes back up. The breadcrumb follows both ways. | §4 |
 | 3.3 | Press `Space` on a file | Details ⇄ Preview. Press again to go back. | §4 |
 | 3.4 | Preview a text file, then a `.jpg`, then a binary | Text as text, image as image, binary as hex — not text with holes in it. | §4 |
 | 3.5 | Press `Ctrl+F`, type a fragment | The filter bar takes it and the table narrows. `Esc` closes it and the table returns. | §4 |
 | 3.6 | With the filter closed, press a bare letter | It is a shortcut, not a search. There is deliberately no type-to-jump. | §4 |
 | 3.7 | `Ctrl+A` | Every row in the current view is selected — and only the current view if a filter is on. | §4 |
-| 3.8 | Open `many-entries.zip`, press `End` | It lists and scrolls without stalling; the table virtualizes rather than drawing all of it. | §4 |
-| 3.9 | Open `secret.7z` | The password popup appears **at open**, before any entry is listed — its headers are encrypted, so the listing is itself the moment of use. (`bsdtar -tf secret.7z` refuses it too: *"The archive header is encrypted"*.) | §4.7 |
+| 3.8 | Open `many-entries.tar`, press `End` | It lists and scrolls without stalling; the table virtualizes rather than drawing all of it. | §4 |
+| 3.9 | Open `secret.7z`. **Its password is `indium`** — the fixture's, written down here because it is a fixture's, and `tests/fixtures/README.md` has said so since P1. It holds one member, `f.txt` | The password popup appears **at open**, before any entry is listed — its headers are encrypted, so the listing is itself the moment of use. (`bsdtar -tf secret.7z` refuses it too: *"The archive header is encrypted"*.) | §4.7 |
 | 3.10 | Give it the wrong password | Refused with a sentence, and asked again. Nothing partial is listed. | §4.7 |
-| 3.11 | Give it the right one, then close and reopen the archive | It asks **again**. The password nowhere survives its use. | §4.7, §9 |
+| 3.11 | Give it the right one — `indium` — then close and reopen the archive | It lists `f.txt`, and on reopening it asks **again**. The password nowhere survives its use. | §4.7, §9 |
 | 3.12 | Open `deep.tar` (60 levels, long names, spaces, tabs, a newline, Turkish, emoji) | The breadcrumb elides in the middle rather than growing off the edge; every name is listed as one row, and the one containing a newline does not become two. | §4, §6 |
 | 3.13 | Extract **all** of `deep.tar` into `~/indium-test/sandbox` — **that directory and nowhere else** — then `ls ~/indium-test` and `ls ~` (the two places the four members aim at: one up and via-middle land in the first, two-up and the absolute one in the second) | It carries four traversal members (`../`, `../../`, one via a middle component, and one absolute — `/home/megas/escaped-absolute.txt`). `path_escapes` (`arch.rs:940-946`) must refuse every one, saying so rather than silently dropping them. **Deny** if any `escaped-*.txt` exists afterwards outside the sandbox. All four aim at paths this user really can write, `$HOME` included — a member aimed at `/` would be stopped by `EACCES` whether or not INDIUM refused it, and would pass for the wrong reason. This is the only step in the plan that could write outside its target, which is why it names its target twice. | §3, §4.3 |
+| 3.14 | Open `under-limit.tar` — an archive made the commonest way there is, `tar -cf x.tar -C dir .`, so its first stored member is the archive root `./`. Compare against `bsdtar -tf under-limit.tar`, then extract **one** member, `part-a.bin`, anywhere convenient | It lists exactly three rows — `part-a.bin`, `part-b.bin`, `part-c.bin` — with **no empty first row**, and the one member extracts. `bsdtar` shows four entries because it shows the `./` root; INDIUM drops the root and keeps the names, which is the same archive read correctly. **This step exists because v2.1 could not do it.** The `./` root normalised to an empty path, a guard written for a locale defect could not tell that apart from a name that genuinely had not survived the read, and INDIUM refused the whole archive with *"this archive holds an entry whose name could not be read on this system"* — blaming the reader's machine for its own normalisation, on the commonest tar shape in existence. | §4, §5 |
 
 ## Round 4 — out of an archive
 
@@ -114,14 +125,14 @@ worth running again. **‡** marks a step P22 left unticked and this round inher
 | 4.10 † | In Open With, use `↑`/`↓` then `Enter` | The arrows move the selection; the filter bar does not swallow them. *(P11 round 5 step 2)* | §4.4 |
 | 4.11 † | With the file open in the other program, close INDIUM | The other program keeps running. | §4.4 |
 | 4.12 | Type in Open With's filter | The list narrows by name as you type. | §4.4 |
-| 4.13 | `Ctrl+C` while focus is in a text field, not the table | It copies text. It does **not** start an extraction. *(P11 found the progress bar flashing here.)* | §4 |
+| 4.13 † | Put the caret in a **named text field** and copy from there. The shortest route: press `Ctrl+F` for the filter bar, type a few letters, select them (`Ctrl+A` inside a focused field selects the field, not the table), then `Ctrl+C`. The Extract popover's path field, the `F2` rename box and `Ctrl+O`'s field all behave the same way. Then a second leg with no field at all: drag across the status line to select some of its words, and press `Ctrl+C` | The letters land on the clipboard, and **no extraction starts** — no progress bar, no status line about entries. *(P11 found the progress bar flashing here.)* **First read the other half of this, or the program will be denied for working:** with focus in the **table** `Ctrl+C` is *supposed* to start an extraction — that is step 4.1, and copying entries out as real files is what the chord means there. The thing under test is only that a focused text field, or a live selection in an ordinary label, takes the chord for itself instead. | §4 |
 
 ## Round 5 — into an archive
 
 | | Do | Must happen | Holds |
 | --- | --- | --- | --- |
 | 5.1 † | Copy `~/indium-test/to-add/pasted.txt` in Dolphin, press `Ctrl+V` in INDIUM | A strip appears above the status bar reading *1 change — add pasted.txt*, with *Discard* and *Apply*. *(P11: NOT WORKING then.)* | §4 |
-| 5.2 † | Drag `dropped.txt` from Dolphin onto the window **on X11** | The strip says *2 changes*. Drag three at once and get three, not one. Wayland delivers no drop — that is expected and not a failure. | §4 |
+| 5.2 † | Drag `dropped.txt` from Dolphin onto the window. **On this desktop, which is Wayland-only, that is the whole step** — try the drag, and watch what the window does | **On Wayland: nothing is added, and nothing else happens either — no error, no phantom row, no strip that says *1 change* and cannot name it. That is the pass, and it is ticked green like any other step.** INDIUM is a Wayland program (§1) and the drop protocol it would need is X11's; the honest outcome of a drag it never receives is silence. **On X11**, if there is ever a machine to try it on: the strip says *2 changes*, and dragging three at once gives three, not one. This step has no *not applicable* button on purpose — a verdict of two buttons that quietly grows a third is a verdict nobody can count. | §4 |
 | 5.3 | Press `I` with the File section showing | Adds into the directory the breadcrumb names. | §4 |
 | 5.4 | Select a file, press `Del` | A remove is staged, not performed. The strip counts it. | §4 |
 | 5.5 | Select a file, press `F2`, give a new name | A rename is staged. The name shown is the new one. | §4 |
@@ -143,7 +154,7 @@ worth running again. **‡** marks a step P22 left unticked and this round inher
 | 6.1 ‡ | Press `2` with nothing open | The Draft section, empty, saying so and offering *Add files…*. | §4 |
 | 6.2 ‡ | *Add files…*, choose several | They are listed, each row carrying its own ✕. | §4 |
 | 6.3 | Remove one with its ✕ | Only that one goes. | §4 |
-| 6.4 | Open an archive, select entries, *Bring from archive* | They are copied out and added to the draft **as files**. | §4 |
+| 6.4 | Open an archive, **select at least one entry** — the button has nothing to bring without one — then press `2` and click *Bring from archive* | They are copied out and added to the draft **as files**. **The button being dead before you select something is the design, not the defect:** it goes live only when there is both an open archive and a selection, and INDIUM writes a sentence beside it naming whichever of the two is missing. On v2.1 that sentence shares a row with the buttons and a narrow window can push it out of sight, which is worth knowing before reading the greyed-out button as broken. Approve on the copy landing in the draft once a selection exists. | §4 |
 | 6.5 | Close the archive they came from — delete it on disk | The draft entries stay. They are files from that moment on. | §4 |
 | 6.6 | With the draft empty, press `N` | The popup opens and **its own button is dead, with a sentence**. | §4.1 |
 | 6.7 | With the draft full, press `N` | The popup opens and **Measure is live from the first frame**. | §4.1 |
@@ -182,12 +193,13 @@ worth running again. **‡** marks a step P22 left unticked and this round inher
 | 8.3 † | Press `Enter` on a recent | It opens. | §4 |
 | 8.4 † | Delete one of them on disk, look again | That row is dimmed. `Del` takes it off the list. | §4 |
 | 8.5 † | With one dimmed, click the others | They still open on one click. *(P11: after a row dimmed, the rest stopped responding.)* | §4 |
-| 8.6 | Press `4`, add three bookmarks, click each in turn | **All three** light and stay lit — including the third. *(P11: the third never highlighted.)* † | §4 |
+| 8.6 | Bookmarks are **made** in `,` → *Bookmarks*: type a name, type a directory in the `/path/to/directory` field, press *Add*, three times. Section `4` shows them and has never been where they are added. Then press `4` and click each of the three in turn | **All three** light and stay lit — including the third. *(P11: the third never highlighted.)* † | §4 |
 | 8.7 | `,` → *Recent files* → *Clear list* | The history empties. It is the only destructive control in the panel, and the count is written beside it. | §4.5 |
-| 8.8 | `,` → set an *Extract* default destination, then press `E` | The popover offers it. | §4.5, §4.3 |
+| 8.8 | `,` → *Extract* → set *Preselect* to **into a subdirectory**. Open an archive and press `E`; then come back, set it to **here**, and press `E` again | The popover's path field opens on the archive's own folder plus the archive's name the first time, and on the folder alone the second. The setting chooses which of the two the field is **prefilled** with; both buttons are always there. | §4.5, §4.3 |
 | 8.9 | Restart INDIUM | Recents, bookmarks and the extract default are all still there. | §4.5 |
 | 8.10 † | Put deliberate garbage in `settings.toml` and launch | It starts on defaults, **says so**, and leaves a `.broken` copy of what it could not read. *(P11: it silently accepted a nonexistent path.)* | §4.5 |
-| 8.11 | Set the extract default to a path that does not exist | It says so rather than accepting it silently. | §4.5 |
+| 8.11 | Read the whole *Extract* group in `,` and work both of its controls | It is one **Preselect** row with two choices — *here* and *into a subdirectory* — and each takes and holds the click, changing what 8.8's field is prefilled with. **There is no path field in Settings, and there is not meant to be:** the setting stores a mode, never a destination, and where a thing goes is chosen in the popover at the moment it goes there. A step that asked you to type a path into this panel was describing a program that never existed — this is that step, corrected. | §4.5 |
+| 8.12 | Press `E`, and type a destination that does not exist — two levels of it, so nothing could have made it by accident: `~/indium-test/nowhere/deeper`. Extract | **The folders are created and the files land inside them.** That is the intended answer rather than an oversight: an extractor that refuses to make its own destination sends you away to make it by hand, and this is the same `mkdir -p` behaviour `indium extract --to` has always had on the terminal. What must not happen is silence or a lie — if it truly cannot create the directory it says *"Could not create …"* and names the one it could not make. | §4.3 |
 
 ## Round 9 — encryption
 
@@ -210,15 +222,16 @@ worth running again. **‡** marks a step P22 left unticked and this round inher
 | 10.2 | `indium list photos.zip --long` | Mode, size, packed, method, encryption, time, path, and a total. | §4 |
 | 10.3 | `indium list photos.zip -0` | NUL-separated. Pipe it to `xargs -0` and the names survive. | §4 |
 | 10.4 | `indium list photos.zip --long -0` | **Refused.** One is for a person, one for a script; a flag silently ignored is worse than one refused. | §4 |
-| 10.5 | `indium list x.zip \| indium extract x.zip` style round trip | `list`'s output feeds back into `extract` and `cat` without editing. | §4 |
+| 10.5 | The round trip, with the count written down so that a right answer cannot be read as a wrong one. First `indium list large.tar` — **three lines**, because `large.tar` holds exactly three members. Then feed them straight back: `indium extract large.tar --to /tmp/rt $(indium list large.tar)`. Then the NUL route, which is what `-0` is for: `indium list photos.zip -0 \| xargs -0 indium extract photos.zip --to /tmp/rt2 --` | The first answers **`Extracted 3 entries.`** — and three is the whole archive, not a truncation of it. The second answers **`Extracted 45 entries.`** and every awkward name survives the pipe: `beach day.jpg` with its space, `köpek.txt`, and `--weird-name`, which is why the `--` is there. `list`'s output feeds back into `extract` and `cat` unedited. | §4 |
 | 10.6 | `indium extract photos.zip --to /tmp/x` | Everything, under that directory. | §4 |
 | 10.7 | `indium extract photos.zip -- --weird-name` | `--` ends the flags; a member named like a flag is extracted. | §4 |
-| 10.8 | `indium cat photos.zip <member> \| wc -c` | The member's bytes, whole, byte-for-byte equal to the extracted file. | §4 |
-| 10.9 | `indium cat secret.7z <member>` | Asks for the password **on the terminal**, once, per use. | §4, §9 |
+| 10.8 | `indium cat photos.zip README.txt \| wc -c` — a **real member**, named here rather than left as a placeholder to be guessed at | **`153`.** The member's bytes, whole. Compare against the copy 10.5 already extracted — `indium cat photos.zip README.txt \| cmp - /tmp/rt2/README.txt` says nothing at all, which is `cmp` agreeing. | §4 |
+| 10.9 | `indium cat secret.7z f.txt` — `f.txt` is the archive's one member, and its password is **`indium`** | Asks for the password **on the terminal**, once, per use — the prompt reads `Password for secret.7z:` and does not echo. Then the member's bytes. | §4, §9 |
 | 10.10 | `indium --password=x …` and `INDIUM_PASSWORD=x indium …` | Neither exists. There is no flag and no environment variable. | §9 |
 | 10.11 | `indium ./list` where a file named `list` exists | Opened as an archive. The terminal half is entered only when the first argument is exactly `list`, `extract` or `cat`. | §4 |
 | 10.12 | `indium list notrar.rar` | *"RAR is not supported."* on the terminal too. | §5 |
 | 10.13 | `indium a.zip b.zip` | One window on each. | §1 |
+| 10.14 | `indium list secret.7z`, and give it a password that is **deliberately wrong** — anything that is not `indium` | **`indium: Wrong password.`** and nothing listed. One sentence, in words, naming the thing you can actually fix. **This step exists because 10.9's fix would otherwise ship unwalked:** with the password finally written down, 10.9 now passes on the first try and never reaches the failure path again. The first walk got `Broken or unsupported archive: no Header` wrapped in `Other("…")` — a crate's own enum printed at a person — because with encrypted headers a wrong key does not fail cleanly: AES has nothing to check it against, hands the parser noise, and the parser breaks in whatever way that noise happens to break it. | §4, §9 |
 
 ## Round 11 — the eight methods
 
@@ -234,7 +247,7 @@ worth running again. **‡** marks a step P22 left unticked and this round inher
 | 11.6 | **xz** | *"Among the smallest archives, built slowly; extraction is quick enough."* | §5 |
 | 11.7 | **7z / LZMA2** | *"Smallest for mixed content, slow to build — and the only road to AES-256."* | §5 |
 | 11.8 | **zip / Deflate** | *"Not the smallest or fastest, but opens absolutely anywhere."* | §5 |
-| 11.9 | Open all eight with `bsdtar -tf` outside INDIUM | Every one is a valid archive of its declared format. | §5 |
+| 11.9 | Open all eight with `bsdtar -tf` outside INDIUM | Every one is a valid archive of its declared format — checked, eight of eight. **If you also built an encrypted one, it is a ninth and it is expected to refuse:** `bsdtar` answers *"The archive header is encrypted"*, which is step 3.9's documented behaviour seen from the outside. The names are ciphertext; a reader without the password has nothing it could list. That refusal is a pass, not a failure. | §5 |
 | 11.10 | Compare each verdict against the popup | The sentence in the window is the sentence in §5, word for word. | §5 |
 
 ## Round 12 — scale, on a 3450U
@@ -248,11 +261,12 @@ worth running again. **‡** marks a step P22 left unticked and this round inher
 | 12.3 | Open `big-mixed.tar.zst` (~3 GB) and Measure | The eight candidates run over real bytes and finish. Figures above the budget are marked. | §4.10 |
 | 12.4 | Apply a rename on `big-mixed.tar.zst` | The rebuild completes; the original is untouched until the rename commits. | §4.2 |
 | 12.5 | Cancel that Apply partway | Original unchanged, no orphan left beside it. | §4.2 |
-| 12.6 | `Ctrl+C` a ~900 MB selection (`under-limit.tar`) | **The known suspect** — under the 1 GiB `RAM_LIMIT` it routes to `$XDG_RUNTIME_DIR`, a 712 MB tmpfs, so the copy is expected to run out of room. **Running out of room is not the failure; how it ends is.** Approve if INDIUM says in a sentence that it could not write, leaves nothing half-written behind, and the window stays usable. **Deny** if it hangs, dies without a word, reports success, or leaves a partial file it does not mention. Note that swap cannot save this one: a tmpfs is capped by its `size=` option, not by memory. | §3 |
-| 12.7 | `Ctrl+C` a ~1.5 GB selection (`over-limit.tar`) | Over the limit it routes to cache, and completes. | §3 |
+| 12.6 | Open `under-limit.tar`, press **`Ctrl+A`** to select all three members — the whole ~900 MB, not one of them — then `Ctrl+C` | **The known suspect** — under the 1 GiB `RAM_LIMIT` it routes to `$XDG_RUNTIME_DIR`, a 712 MB tmpfs, so the copy is expected to run out of room. **Running out of room is not the failure; how it ends is.** Approve if INDIUM says in a sentence that it could not write, leaves nothing half-written behind, and the window stays usable. **Deny** if it hangs, dies without a word, reports success, or leaves a partial file it does not mention. Note that swap cannot save this one: a tmpfs is capped by its `size=` option, not by memory. | §3 |
+| 12.7 | Open `over-limit.tar`, press **`Ctrl+A`** for both members — the whole ~1.5 GB — then `Ctrl+C` | Over the limit it routes to the cache directory instead of the runtime tmpfs, and completes. | §3 |
 | 12.8 | **Build `bigsecret.7z` here**, through `N` → *Encrypted*, from the generator's `bigsecret-input.bin` (**8 GiB** of low-entropy filler — deliberately larger than this machine's 7.0 GiB of RAM, so the member provably cannot be held in memory). There is no `7z` binary on this machine, so INDIUM writing it *is* the test. | It completes without the window going unresponsive, and the finished `.7z` is a tiny fraction of 8 GiB — LZMA2 over low-entropy filler. **That size gap is the point**, not an accident: it is what makes the next step a decompression bomb rather than a big file. | §5, §4.7 |
 | 12.9 | Open `bigsecret.7z` (it prompts at open — encrypted headers) and extract its large member, running `grep -E 'VmPeak\|VmHWM' /proc/$(pgrep -x indium)/status` in another terminal while it works | `arch.rs:1038` buffers a whole 7z member with an uncapped `usize::MAX` read, so this is a memory measurement, not a survival test. **Write both numbers down.** `VmPeak` is the one that means something: under 99 GiB of swap `VmHWM` caps near physical RAM and measures this box rather than the program. Approve if it completes and the figures are recorded; **Deny** if the session becomes unusable or the OOM killer takes it. | §3 |
 | 12.10 | Run the window through 12.1–12.9 watching the status line | It stays readable and says what is happening throughout. | §6 |
+| 12.11 | Start the 12.8 build over — `N` → *Encrypted*, `bigsecret-input.bin` — and this time press **Cancel** partway | The progress line **moves and keeps naming where it is** while it runs, Cancel actually stops it, and afterwards `ls -a ~/indium-test` shows **nothing left beside the target**: no `.<name>.7z.indium-new`, no half-written archive. **This is the step the first walk had no way to run.** The encrypted-create path reported nothing at all and its Cancel was never observed, so the only way out of it was to kill the window — which is exactly how 159 MB of `.archiveadfadsf.7z.indium-new` came to be sitting in the corpus, left behind by a process that had taken its own clean exit path mid-write. | §4.2, §3 |
 
 ## Round 13 — the window, at three scales
 
@@ -272,7 +286,8 @@ worth running again. **‡** marks a step P22 left unticked and this round inher
 | 14.3 † | Copy files out in one window, then open and close a second window | The copied files are still on disk and still complete. *(P11: this step was not understood — it is here reworded.)* | §3 |
 | 14.4 | Kill INDIUM mid-Apply with `kill -9` | The original archive is intact. Whatever is left over is identifiable and does not masquerade as the archive. | §3 |
 | 14.5 | Relaunch after that kill | It starts clean and says nothing false about the archive. | §3 |
-| 14.6 | `sudo pacman -R indium`, then look for leftovers | The package's files go. Nothing of the user's does. | §8 |
+| 14.6 | **Write down what the package owns first** — `pacman -Ql indium > /tmp/owned.txt` — then `sudo pacman -R indium`, then check that every path in that file is gone | All 42 of them are gone, and nothing of yours is. **What must not be counted against it:** `~/.local/share/applications/org.indium.desktop` and the ten icons under `~/.local/share/icons/hicolor` are still on the disk afterwards, and that is correct — **step 1.12 put them there**, the package never owned them, and a `pacman -R` that deleted files belonging to no package would be the defect. Step 14.7 is what takes those back. **Run this step last:** it uninstalls, and everything after it would have nothing left to run against. | §8 |
+| 14.7 | `~/INDIUM/build/install-desktop.sh --uninstall`, then look again in `~/.local/share/applications` and `~/.local/share/icons/hicolor` | The desktop entry and all ten user-scope icons go, and both caches are refreshed, so the menu stops offering an entry whose files are not there. **One thing it deliberately leaves alone:** if you ran 1.13's `--set-default`, that association stays. `xdg-mime` has no inverse, so taking it back would mean this script editing your `mimeapps.list` — your file, holding every other association you have ever made — and a default naming an entry that no longer exists is inert anyway; the desktop falls through to the next handler. | §8 |
 
 ---
 

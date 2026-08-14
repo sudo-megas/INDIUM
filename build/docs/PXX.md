@@ -36,8 +36,10 @@ checks and the §2 toolkit gate read the binary that actually ships instead of s
 | Formatting | `cargo fmt --check` | clean |
 | Lints | `cargo clippy --all-targets -- -D warnings` | clean |
 
-**344 of 344.** Every test the repository contains has now been run and passed at once, which had
-never happened before. The ten ignored tests divide three ways, and no single environment had
+**344 of 344.** Every test the repository contained has now been run and passed at once, which had
+never happened before. *(The table above is Phase 1's run and is left as it was taken. Phase 2e's
+fixes brought their own regression tests with them, so the same commands answer **350 passed, 0
+failed, 10 ignored — 360 in total** against the tree that becomes v2.2.)* The ten ignored tests divide three ways, and no single environment had
 ever satisfied all three: **eight** (`tests/package_path.rs`) want release artefacts that do not
 exist until a tag is pushed; **one** (`platform/clipboard.rs:174`) wants a live Wayland session
 and a `wl-paste` no CI runner has; **one** (`estimate.rs:977`) wants a `--release` build and quiet
@@ -92,7 +94,8 @@ Recorded here for the audit to rule on rather than closed now.
 
 ### The instrument
 
-`build/docs/TESTPLAN.md` — **153 steps across 14 rounds**. P11 and P12 ran eight rounds and
+`build/docs/TESTPLAN.md` — **153 steps across 14 rounds** as Phase 2 wrote it, and **158** after
+Phase 2e appended five without renumbering any of the first 153. P11 and P12 ran eight rounds and
 forty-one steps against `v1.0.0-2` and `v1.0.0-3` on the night of 9–10 August and every step
 passed, and that list was never checked in. It survives only as quoted fragments inside `P11.md`
 and in `~/indium-test/OBSERVATIONS.md`, which is how a program comes to be certified by an
@@ -142,6 +145,17 @@ are chosen against a boundary rather than for bulk:
 | `many-entries.tar` | 150,000 entries | The virtualized table, the filter, Select-all |
 | `deep.tar` | 20 KB | 60 levels, a 250-character component, names with spaces, tabs, a newline, Turkish and emoji — **and four traversal members** |
 | `bigsecret-input.bin` | 8 GiB, sparse | Larger than this machine's 7.0 GiB of RAM, so the member provably cannot be held in memory — the claim `arch.rs:1038` makes with its `usize::MAX` read. Costs no disk at all |
+
+Two small fixtures joined the table in Phase 2e, and the reason is a finding rather than an
+addition. `photos.zip` and `docs.tar.gz` came from the P11 round; this script recorded them as
+already present in the corpus and left them alone, and by the end of the walk they were gone —
+`photos.zip` extracted into `~/indium-test/photos/` and the archive deleted. Nine steps name it,
+seven of them inside the round R10 re-walks in full, so the corpus this document calls
+*regenerable* could not in fact be regenerated. Both are built by the script now. **`photos.zip`
+is a reconstruction, not the original**, and it is built with explicit member names rather than
+`-C dir .`: that idiom stores a `./` root, and v2.1 — the build round 10 is walked against —
+refuses any archive carrying one. A convenient rebuild could not have been opened by the very
+program it exists to certify.
 
 The filler is an **AES-CTR keystream under a fixed pass phrase**, not `/dev/urandom`, so two runs
 on two machines produce identical bytes and a figure measured here can be compared with one
