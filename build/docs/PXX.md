@@ -537,3 +537,325 @@ would buy a certification that Phase 4's install of the published v2.2 packages 
 
 **One order constraint survives, unchanged and for the same reason.** 14.6 and 14.7 are the
 uninstall pair, so they run **last**; every row above them needs an installed binary.
+
+---
+
+## Phase 3 — the hardening, and the fleet that runs it
+
+### This section exists because the fleet did not
+
+Four sentences above route work to Phase 3 by name. `:103` sends a step there if it is approved;
+`:112` files an observation with **agent 5**; `:254` sizes a corpus archive with **agent 2** and
+then withdraws the assignment because agent 2 does not exist yet; `:441` says the 2.06→2.91
+correction is *"exactly the class of defect Phase 3's agent 10 exists to hunt."* Every one of those
+is a promissory note drawn on a roster.
+
+**There was no roster.** It was designed once, in conversation, and written to no file — not here,
+not in `CORE.md`, not anywhere in `build/docs/`. Recovering it cost a line-by-line scan of a 116 MB
+session transcript, and a sweep of all twenty-six documents in this directory confirms the negative
+independently: **five passing mentions in this file, across those four routing decisions, naming
+three numbered agents — 5, 2 and 10 — and no document anywhere that defines any of them.** The only
+other occurrence of the word in the corpus is `P12.md:50`, describing the refute-the-finding
+practice rather than this fleet. *(The sweep reported eight; counting them gives five. Recorded
+because writing an inherited number into the section that names inherited numbers as the class this
+project has never beaten would have been the round's first and stupidest defect.)*
+
+So it is written down here, in full, **before the first agent launches** — the order P23 used when
+it opened its document before the first line of code. It is written **once**: this is the only place
+in the repository the fleet appears, and no later document restates it. A roster in two places is
+the same failure as a roster in none, one milestone later.
+
+The line counts below are current as of this section, not as of the design. That distinction is
+load-bearing and gets its own paragraph under the fleet.
+
+### The deviation, stated rather than absorbed
+
+`:320` above reads, in this document's own words: *"Phase 3 does not begin until the sheet is
+clean."* **The sheet has not been walked.** Not the 25-row roster against v2.2, and not the wider
+re-walk v2.3 requires — v2.3 moved the typeface, the corner radius and the type scale, so it places
+every glyph in the window somewhere new and round 13 comes back into scope a second time.
+
+The maker's instruction was *"move on"*, given twice. **His gate, and his to waive.** Recorded here
+rather than stepped over, because a precondition that is quietly skipped reads afterwards as a
+precondition that was met.
+
+What the waiver costs, stated precisely rather than waved at: the audit runs against a build whose
+manual verification is outstanding, so a walk finding can land on a file an agent has already
+reported on. That is handled the same way a late route is handled — **the finding enters through the
+same thirteen-field contract and the same tiers, and every file the walk touches is flagged for
+re-check by its owning agent** rather than being merged on the assumption that the audit already
+covered it. What the waiver does *not* cost is coverage: the walk checks what the window looks like
+and the fleet checks what the code does, and those two sets barely intersect.
+
+### What this round hunts — twelve classes, from this project's own history
+
+A sweep read all twenty-six documents in `build/docs/` and `CORE.md`, and re-checked every test name
+they cite against HEAD. What came back is not a generic audit checklist. It is **this repository's
+measured recurrence record**, and it is the difference between telling eleven agents to look for
+bugs and telling them where this project has actually failed.
+
+| Class | Shape | What guards it today |
+| --- | --- | --- |
+| 1. **Stale prose** (~20) | A sentence true when written, falsified by a later change that never touched it. `P6.md:302` names it *"the failure this project names as unforgivable."* | **Eleven** doc-as-tests read `CORE.md`: ten by `include_str!` in `src/` — compile-time, so a vanished CORE fails the *build* — plus `tests/package_path.rs:779` by `fs::read_to_string`, which fails only that test. But **all eleven anchor on structural lists**: tables, counts, sets. **None reads §6's prose.** Code moving under a stationary sentence has no gate at all |
+| 2. **A number nothing can check** (~13) | The one class this project has named and declared unbeaten. `P17.md:123`: *"Every number in this project a test can reach has been right for sixteen milestones. This is the class that has not."* | `the_date_about_prints_is_the_one_the_changelog_stamped`, `the_copyright_header_names_the_font_that_ships`, `every_drawn_size_comes_from_the_type_scale` — every one added *after* its escape |
+| 3. **A premise that did not survive contact** (~13) | Correct on paper, wrong the first time it ran: the RAR gate that never fires, `flock` living on the inode so the guard held once and failed silently after, `sh` without `pipefail` shipping a structurally-valid empty `.deb` | Found by measuring or by a test, never by review. `tests/read_path.rs`, `tests/write_path.rs` |
+| 4. **A test weaker than its name** (~11) | A gate that cannot fail. P16: a deliberately broken `>> 5` **passed all six** covering tests. `P6.md:811`: the synthetic package mirrored `package()` exactly, passed everything, and *could not have caught* the real fault | The sabotage practice itself — every new gate is deliberately broken before it is trusted. There is no meta-test |
+| 5. **CORE describes behaviour the code lacks** (~9) | About had no date and §4 said it did; the mark named from P1 and never drawn; §5's verdict table naming a method its own write list forbids | The eleven doc-as-tests. This is the class they were built for, and where they demonstrably work |
+| 6. **Silent failure** (~8) | `let _ = save_recents(…)` at three sites; `ARCHIVE_WARN` counted as success; `Ok(written)` meaning both *finished* and *cancelled*; non-ASCII names dropped because a Rust program never calls `setlocale` | `tests/cancel_path.rs` (three tests) and six locale tests including `a_filename_is_the_characters_it_holds` |
+| 7. **Modelled vs measured** (~8) | The seeded case: **2.06 modelled, 2.91 actual**, carried in `table.rs` *and* `CORE.md:370` for three rounds. P23 re-ran the class and found four more | `composite()` now models the renderer instead of the maths. The counter-rule is this document's: **ask the program, not the record of it** |
+| 8. **Attribution contradicting the shipped asset** (~6) | The `.deb` naming JetBrains for a Fira face across three releases; `OFL-1.1.txt` CRLF in all 93 lines so `sed 's/^$/./'` matched nothing — *"it parsed either way, which is why nobody saw it"* | `the_copyright_header_names_the_font_that_ships`. **Directly in v2.3's path, since the face moved again** |
+| 9. **The same defect one door over** (~7) | Not recurrence over time — a *sibling site* missed in the same sweep. `P15.md:75`: the sweep that fixed nineteen comments was followed one milestone later, **by the same hand**, by the twentieth. *"A sweep is not a habit."* | The design answer, not a test: `no_two_grounds_are_the_same_colour` is **pairwise over all six**, not a check of the two that happened to break |
+| 10. **A constant fitted, pinned by nothing** (~7) | `SB_ROW` fitted in P7, re-fitted in P13, still unpinned when P23 found it — three rounds | Now pinned in *both* directions (`line_box <= SB_ROW` and `SB_ROW - line_box <= 6.0`), so it cannot drift upward either |
+| 11. **One meaning painted two ways** (~6) | Orange and Aubergine both meaning *chosen*, in one popup, three rows apart. A `⇄` neither embedded face carries | `orange_has_not_spread_into_the_widget_states`, asserted in both directions, and six tofu tests |
+| 12. **The record correcting its own record** (~7) | P-documents found wrong about themselves, corrected **by addendum only** — P12 wrote addenda into both P6 and P7 | None, and there cannot be one. The instrument is the round: `P16.md`'s *"a milestone cannot audit itself from the inside"* |
+
+**Where the effort goes.** Six classes escaped detection in more than one round, and they are ranked
+by how many separate rounds failed to catch them: **2** (three separate three-release escapes, and
+DEP-5 separators for ten) → **1** (escaped continuously, and re-entered *inside* the round that was
+fixing it) → **4** (six rounds, six escapes) → **9** (a second escape by construction — that is what
+the class is) → **7** (three rounds carrying one wrong figure in two files) → **10** (`SB_ROW`,
+three rounds).
+
+Two observations shape the briefs more than the ranking does.
+
+- **Reach is the blind spot, not depth.** Every long-lived escape sat somewhere the suite
+  structurally could not go: a `.deb` control file, a README badge, a comment, a screenshot, an
+  unmeasured pixel. 385 named tests is a strong suite with a boundary, and **the boundary is where
+  to look**.
+- **Fixing a defect creates the opportunity for a quieter one.** `P6.md:763` records it as a shape
+  rather than an incident, and Deviation 14 in the same document describes guards that *"created two
+  new reachable hazards rather than closing one."* This is the empirical basis for tier 3 sending
+  the *fix* back through the pipeline. The practice was derived from this history, not invented for
+  this round.
+
+### What an auditor may not change — eight rules already recorded
+
+None of these is new policy. Each is quoted from the corpus, and six of the eight are things an
+audit agent breaches by default unless told not to.
+
+1. **CORE.md is the maker's** (`CORE.md:3-5`, `:630`): *"Items enter and leave only by his hand."*
+2. **When reality contradicts CORE, stop** (`P2.md:24-27`, inherited verbatim by P3 through P7). A
+   deviation goes in the ledger; *"the deviation log is part of the deliverable."*
+3. **An ordered CORE edit is written out in full** and committed alone, in the form
+   `CORE: §4 gains the password popup (ordered by P2)` — *"a rule being changed deserves its
+   successor written down rather than described."*
+4. **P-documents are append-only** (`P5.md:271`): *"A P-document is a record of what was believed at
+   the time."* Corrections go in addenda or inline `(ticked in P<n>: …)` annotations. **This is why
+   agent 10 excludes `build/docs/P*.md`** — and why a test name a P-document still carries after the
+   test was renamed is convention, not drift. `:404` above records that policy explicitly, and at
+   least four such names exist.
+5. **A box is closed by the thing it asks for** (`P3.md:189`) — never by something adjacent that
+   passed.
+6. **A raised gate is never softened to make it pass** (`P6.md:86-88`). The `verify.sh` glibc-floor
+   FAIL on this machine — 2.43 local against a 2.36 bookworm target — is **the proof the gate works,
+   not a broken step.** A finding proposing to relax it is auto-filed `no-action` on receipt, citing
+   that passage; it is not "rejected at tier 0", which is a mechanical quote check and by its own
+   definition renders no judgement on a claim.
+7. **Some decisions are the maker's by category** — mechanism questions under CORE §3, status-bar
+   layout under §4. Record them; do not settle them.
+8. **Verdicts a test cannot render belong to the maker's eye** (`P21.md:550`): *"a test cannot tell
+   anyone that text got sharper."* The 100% / 125% / 150% check is his, and no agent may claim it.
+
+### The fleet — eleven agents, thirty-four files, each owned exactly once
+
+Two ownership axes, deliberately separate. **Files owned**: exactly one agent each, no file
+unclaimed and none claimed twice. **Concern owned**: cross-cutting, and the concern owner may *read*
+another agent's files but files the finding under **that agent's** ID with its own number in
+`cross_ref`. The contract routes by file, and the concern co-signs — never the reverse.
+
+| # | Model | Scope and concern | Files owned — lines (production) | What it must return |
+| --- | --- | --- | --- | --- |
+| 1 | Fable 5 | **The threading contract.** Sole owner of the `CORE:114` *"UI thread and one worker"* question | `ui/mod.rs` 4638, `estimate.rs` 1298 — **5,936** (4,759) | A thread-lifecycle census of all eight spawn sites: what each spawns, what joins it, what happens if it panics. A verdict on `work_running()` naming which of the eight it fails to gate. A concrete interleaving proving or disproving the estimator-preemption overlap. One of three verdicts on `CORE:114` — code can match, doc must reword, or both. **Ranked fix options with blast radius, not a diff.** Also owns `sb_progress_geometry`, the other half of the `R_ZONE` change, co-signed `cross_ref 6` |
+| 2 | Opus 5 (A) | **Extraction safety and all FFI/crypto.** Sole build and stress lane | `arch.rs` 1906, `sevenz.rs` 582, `secret.rs` 144 — **2,632** (2,344); plus `tests/read_path.rs` | An exploitability verdict on each of: symlink and hardlink **target** strings, which nothing inspects anywhere; the absent `AE_IFCHR/IFBLK/IFIFO/IFSOCK` constants; the three `usize::MAX` sites; `EXTRACT_PERM` with setuid; missing `SECURE_NOABSOLUTEPATHS`; no size cap. Reachable in the shipped UI or CLI path, or blocked upstream by `path_escapes` and libarchive's own flags? A working proof archive per confirmed hole, extending the `evil.zip` pattern — **fixtures are not committed**. Audit all **32** `unsafe {}` blocks in his own files — 31 in `arch.rs`, 1 in `secret.rs` — for *correctness*, verifying **pairing**, not the presence of a comment. `Secret`'s un-wiped `CString` at the FFI boundary and its `Clone` copy-count: bound it, or state that it cannot be bounded |
+| 3 | Opus 5 (B) | **Filesystem state machine and crash consistency** | `tasks.rs` 2795, `platform/scratch.rs` 594 — **3,389** (2,100); plus `tests/write_path.rs`, `tests/cancel_path.rs` | The rename-commit in `apply`: the exact TOCTOU window, what survives a SIGKILL at each instant, whether the temp orphan is ever user-visible. The canonicalize-then-fallback lock name: construct the collision — two paths, one fallback name — or prove it impossible. `sweep_stale` reads `cache_root` only; **judge the documented rationale at `scratch.rs:78`** rather than rediscovering it as an oversight, since the code already argues `runtime_root` is tmpfs and the leak is bounded by reboot |
+| 4 | Sonnet 5 | **Platform layer and untrusted-input parsing** | `apps.rs` 813, `store.rs` 763, `clipboard.rs` 359, `window.rs` 246, `picker.rs` 139, `open.rs` 62, `platform/mod.rs` 60 — **2,442** (1,435) | `apps.rs` parses attacker-influenceable `.desktop` files: field-code (`%f %u %F`) and quoting handling against the two `Command::new` argv sites. `store.rs` TOML round-trip on hostile and truncated input, and the hard rule that **no password reaches either file**. `window.rs`'s unbounded reaper-thread-per-child-window — measure the bound. `clipboard.rs`'s serving thread is spawned **inside `wl-clipboard-rs`**, not by INDIUM, which bounds what may be proposed. Co-signs `cross_ref 1` on both thread items. Also flags its two no-test-module files, `platform/mod.rs` and `open.rs` |
+| 5 | Sonnet 5 | **CLI, pure helpers, and the ABI risk** | `cli.rs` 863, `util.rs` 768 — **1,631** (1,304); plus `tests/cli_path.rs` | Verify each hand-transcribed Termios `const_assert` against the real glibc x86_64 headers on disk, **quoting the header line per assert**. State what happens on musl, on aarch64, on non-glibc: compile error, which is safe, or silent wrong layout, which is not. `cli.rs` is **863 lines of production code with no in-file tests** and 5 `unsafe` blocks — propose the minimum test set, noting that its header claims external coverage by `tests/cli_path.rs`. `util.rs`: the CRC32 table and path normalisation against reference vectors |
+| 6 | Sonnet 5 | **UI mid-tier: rendering and interaction** | `table.rs` 1190, `inspector.rs` 850, `newarchive.rs` 723, `sidebar.rs` 559, `measure.rs` 525, `extract.rs` 367 — **4,214** (3,322) | A panic-reachability sweep over all indexing, slicing and arithmetic. No `unwrap` exists, but `v[i]`, `a - b` on unsigned and `usize` casts still panic. **Brief rewritten below.** Every user-facing string that makes a promise is routed to agent 10 |
+| 7 | Sonnet 5 | **Supply chain, CI and packaging.** All non-`src/` surfaces | `Cargo.toml`, `Cargo.lock`, `build.rs`, `ci.yml`, `release.yml`, `check-deps.sh`, `install-*.sh`, `make-deb.sh`, `PKGBUILD`, `verify.sh`; plus `tests/package_path.rs` | **Actually run** `cargo audit` and `cargo deny check` and paste the raw output; resolve `memoffset` to an advisory ID and a verdict. A focused risk note on `sevenz-rust2`, which owns AES-256 and encrypted-header reads: last release, maintainer count, open advisories. The exact placement and fallout of `#![forbid(unsafe_code)]` — it **cannot** go crate-wide against 37 blocks, so propose per-module `deny`. A CI diff costed in runner-minutes against `ci.yml`'s stated no-cache policy |
+| 8 | Haiku 4.5 | **Small-file sweep** | `model.rs` 352, `settings.rs` 303, `password.rs` 270, `about.rs` 268, `openwith.rs` 204, `keys.rs` 181, `main.rs` 170, `pending.rs` 140, `lib.rs` 115, `tray.rs` 95, `filter.rs` 74 — **2,172** (1,672) | A mechanical per-file pass: panic-reachable expressions, integer over- and underflow, dead code, unhandled `Result` and `let _ =`. Flag the **six no-test-module files** in this set — `password`, `openwith`, `main`, `pending`, `tray`, `filter`. `password.rs` carries one extra question: does the plain `String` in the text field get cleared on *every* exit path, window close included? |
+| 9 | Sonnet 5 | **`theme.rs` — the round's numbers audit** | `theme.rs` 3501 — **3,501** (1,374) | **Brief rewritten below.** |
+| 10 | Haiku 4.5 | **Doc-versus-code drift** | `CORE.md`, `README.md`, `LICENSES/`, `assets/org.indium.desktop`. **Excluded: `build/docs/P*.md`** — historical record, immutable by rule 4 | Extract **every mechanically checkable claim** from CORE §1–§9 and the README as a numbered list with its source line. Verify each one that is a grep-able fact — dependency lists, §9 toolkit bans, format tables — and **route each judgement-requiring claim to its owning agent by ID**, returning the routed table even where unresolved. `CORE:114` is assigned to agent 1 and recorded here as routed, not verified. Additionally: **every `///`-cited identifier in `src/` must resolve to a real `fn`.** One dangling reference is already seeded below |
+| 11 | Haiku 4.5 | **Verification clerk and merge integrity.** No files owned | — | Runs after 1–10. For every finding: re-open the cited file, confirm the verbatim `quote` exists at the cited range, confirm the line numbers have not drifted. Rejects any finding whose quote does not match — **no judgement on the claim**, only on whether the cited text is real. Then run the coverage checksum and produce the deduplicated merged register |
+
+**The checksum, taken with `wc` against the tree as it stands, not remembered.**
+5,936 + 2,632 + 3,389 + 2,442 + 1,631 + 4,214 + 2,172 + 3,501 = **25,917 lines across 34 files**.
+By production lines, which is the truer denominator because `theme.rs` is 61% test:
+4,759 + 2,344 + 2,100 + 1,435 + 1,304 + 3,322 + 1,672 + 1,374 = **18,310** — which is **2,289 per
+file-owning agent**, not the 1,665 it comes to spread across all eleven. Agents 7, 10 and 11 own no
+`src/` lines by design, so the two figures differ by a third, and only the first describes anyone's
+actual reading load. `tests/` — 4,299 lines across five files — is assigned rather than left loose:
+read to 2, write and cancel to 3, cli to 5, package to 7.
+
+**The thread census confirms the ownership boundary rather than merely respecting it.** There are
+**nine** `thread::spawn` sites in `src/`: **eight in `ui/mod.rs`**, which is agent 1's file and the
+whole of its `CORE:114` brief, and **one in `platform/window.rs`**, which is agent 4's and is exactly
+the unbounded reaper thread agent 4 is told to measure. The 8/1 split falls on the ownership line
+without being arranged to, which is why agent 4 co-signs `cross_ref 1` rather than owning the
+concern: one agent holds the contract, the other holds the outlier.
+
+**The untested set decomposes exactly, which is how it was checked.** Nine files carry no test
+module: agent 8's six (953 lines), agent 4's two (122), and agent 5's `cli.rs` (863). 953 + 122 +
+863 = **1,938**, with no remainder and no file counted twice. The design-era figure was eleven files
+and 3,503 lines, and an inventory pass during this reconstruction returned 1,868 — **wrong by 70,
+and wrong in exactly the way class 2 describes.** The number was computed three times and was right
+once.
+
+**Every line number in the original briefs is stale, and that is a standing instruction rather than
+a footnote.** The tree has moved **+3,436 lines** since the fleet was designed. Briefs keep their
+verbatim quotes; agents re-locate every anchor by grep before working. Filing a finding against a
+remembered line number is itself the class this round exists to hunt, and tier 0 rejects it.
+
+### The two briefs the drift rewrote
+
+**Agent 9 — `theme.rs` inverted.** The design called it *"the lowest-criticality file in the tree —
+no security surface, no I/O, no threads"* and gave it a mechanical sweep. That was true at 1,683
+lines. It is now **3,501**, the second-largest file in `src/`, and it carries **every measured figure
+of the v2.3 redesign**. Its 2,127-line test module is a repo-wide lint that reads `CORE.md` and scans
+`src/`, so whoever owns the file implicitly owns a cross-cutting invariant. The brief:
+
+- **Audit the numbers, not the lines.** Every number-bearing comment — contrast ratios, ΔE figures,
+  em advances, pt and px measurements, hue degrees — checked against the test that pins it, or
+  flagged as pinned by nothing. Roughly ninety such comments exist.
+- **The pt/px unit ambiguity.** `18.2pt` means egui logical units (`BODY * ICON_SCALE`); `9.75pt`
+  means typographic points derived from the same 13px; one test writes the same quantity as
+  `18.2px`. The arithmetic is internally consistent and the unit label is not. Verdict wanted:
+  correct the labels, or state the convention once and stop.
+- **Confirm what has already been checked and do not re-derive it**: `13 × 1.4 = 18.2`,
+  `1200/2048 = 0.586`, `R(1 − 1/√2) = 1.757` at R=6, `24 − 21.125 = 2.875`. All re-measured in round.
+- The model moves up a tier by the fleet's own rule — this is a *present* thing checked against a
+  spec, but the spec is a sampled measurement rather than a fixed checklist.
+- **The nine-agent degradation path recorded in the design is now invalid.** Folding agent 9 into
+  agent 8 cannot work: 3,501 lines do not fold into a 2,172-line mechanical sweep. If degradation is
+  ever needed, fold **8 into 6** and leave 9 standing.
+
+**Agent 6 — its central ask was already satisfied.** The design named `inspector.rs` (717 lines) and
+`table.rs` (862) as *"the two biggest untested files"* and asked for the minimum test set for each.
+**Both now have test modules.** The brief:
+
+- **Verify the new test modules cover the rounding work**, rather than proposing tests that exist.
+  `table.rs` has three tests, `inspector.rs` two. Are those the minimum set, or the easy set?
+- **The `R_ZONE` 0→6 change and its two leaning sites.** The clipping problem was solved by proving
+  it does not arise: a rounded rect of radius R admits a point `(c,c)` in from its corner once
+  `c ≥ R(1 − 1/√2)`, which is 1.76px at R=6, and the table's content inset of `4 + 2 = 6` clears
+  that threefold. So there are **no corner covers, no inset first row, and no rounded clipping** —
+  epaint 0.36 offers none. What actually had to change was the **cursor ring**, which
+  `expand2(0.5 * item_spacing)` pushes *outward* past the inset: solving
+  `(R − dx)² + (R − dy)² = R²` gives an upper root of **8.46**, so R=6 leaves one pixel. It had been
+  passing `theme::R_ZONE` as its own radius — harmless while that constant was `0`, wrong the
+  instant it became `6`. Audit the second leaning site, **the status-bar proportion bar in
+  `ui/mod.rs`**, and file it under **`owner_agent: 1` with `cross_ref: 6`**, since the contract
+  routes by file owner and that file is agent 1's.
+- **Route every promise-making user-facing string to agent 10**, unchanged from the original brief.
+
+### The output contract — thirteen fields, all mandatory
+
+A finding missing any field is rejected by agent 11 unread.
+
+`id` in the form `PXX-<agent#>-<nnn>` · `owner_agent` · `cross_ref`, the concern owner's number where
+the finding falls in another agent's concern and empty otherwise · `file` and `line_range` ·
+**`quote`**, verbatim source, copy-pasted and unedited — the anti-hallucination anchor, and the
+reason a clerking tier can be mechanical · `claim`, one sentence · `category`, one of `security`,
+`correctness`, `concurrency`, `doc-drift`, `supply-chain`, `test-gap`, `resource` · `severity`, one
+of `freeze-blocking`, `fix-in-v2.5`, `document-only`, `no-action` · `evidence_type`, one of
+`static-argument`, `test-run`, `tool-output`, `poc-artifact` · `repro`, an exact command with
+expected against actual, or the static argument in five steps or fewer — **not** *"seems likely"* ·
+`proposed_fix`, a minimal diff sketch **or the literal string `none — document only`**, never a
+speculative refactor · `blast_radius`, required even when the fix is `none` · `confidence`, one of
+`certain`, `probable`, `unverified-hypothesis` — the last is **allowed and encouraged**, because it
+routes to tier 2 instead of being dropped · `verified_by`, filled by agent 11 and **never
+self-filled**.
+
+### Verification — asymmetric, because the costs are
+
+A false positive causes a permanent unnecessary change. A false negative ships a permanent defect.
+Those are not the same cost, so the gate is tiered by what a finding costs **if acted on**.
+
+- **Tier 0 — the quote check, every finding, agent 11.** Re-open the file, confirm the `quote` exists
+  verbatim at `line_range`. Rejects fabricated findings and line-drifted ones. Mechanical, and by
+  design renders no judgement on the claim itself.
+- **Tier 1 — `document-only` and `no-action`.** Tier 0 suffices. These change no code, and the worst
+  case is a wrong sentence in a Deviations section: cheap, and honest.
+- **Tier 2 — `fix-in-v2.5`.** Requires independent confirmation by a **non-originating** agent of
+  equal or higher tier, by one of three routes: a test that fails before and passes after; a
+  reproduction on the maker's machine; or a concurring static argument written **without reading the
+  original finding's reasoning** — only its `file` and `line_range`. Blind re-derivation is the whole
+  point. **A confirmer who reads the argument confirms the argument, not the bug.**
+- **Tier 3 — `freeze-blocking`.** Everything in tier 2, **plus** the `proposed_fix` diff goes back
+  through the full pipeline as a new finding with its own `blast_radius`, reviewed by an agent that
+  did not write it. **The fix is the riskiest artifact in this round, not the finding** — a correct
+  diagnosis with a wrong patch is the failure a frozen repository cannot survive, and class 3's
+  history is the evidence.
+
+**The escape valve, stated explicitly because its absence has a predictable failure mode.** Any agent
+may file a real, confirmed defect with `severity: document-only` and `proposed_fix: none`. For a
+repository about to freeze, *"this is a known limitation, recorded in Deviations"* is frequently the
+**correct** engineering answer. Six of the twelve classes above were closed by adding a gate rather
+than by changing behaviour, and class 12 has no gate and can have none. Without this said out loud,
+every agent optimises for producing a patch — and patches are what break v2.5.
+
+### Standing instructions, in all eleven briefs
+
+1. **`assume clean, do not re-verify`**, verbatim. Without it several agents spend their budget
+   re-grepping for `unwrap`, which is the single most reflexive thing an audit agent does. The list:
+   no `unwrap` in `src/`; the 37 `unsafe` blocks all carry SAFETY comments, and agent 2 checks their
+   *pairing*, not their presence; attribution across the history is clean; the suite is green at 374.
+2. **Every line number in these briefs is stale.** Re-locate every anchor by grep. See above.
+3. **Known-deferred, recorded, do not file.** `README.md:243` still names Fira and moves at v2.5 with
+   the badge and the install filenames; `SECTION_ABOVE = 14.0` is deliberately untouched, being
+   spacing rather than type; the glibc-floor `verify.sh` FAIL is structural; the `.deb` says
+   `OFL-1.1` where the PKGBUILD says `OFL-1.1-RFN` and **the two are correct to differ** — do not
+   reconcile them. And a test name that a P-document still carries after a rename is convention, not
+   drift, by rule 4. A `///` citation *in `src/`* resolving to no `fn` is the opposite.
+4. **CORE.md is the maker's to edit.** Any CORE change is drafted for approval, never applied.
+5. **No AI attribution on commits, tag annotations or release bodies** — CORE §8 and §9.
+6. **The twelve classes and the eight rules are pasted into every brief**, not summarised. The classes
+   say where this repository has actually failed; the rules say what must not be touched on finding
+   it. Both are quotations, so an agent that disagrees with one is disagreeing with a recorded
+   decision and files a finding rather than acting on it.
+7. **Prefer `document-only` where the class says so.** See the escape valve.
+
+### The order they run in
+
+Three concurrent at most, so four waves, with two hard constraints and one that turned out to matter
+more than it looked.
+
+| Wave | Agents | Why |
+| --- | --- | --- |
+| 1 | **10**, 7, 4 | **Agent 10 runs first** — its routed-claims table feeds the file owners, and run late it routes work to agents that have already finished. Its two wave-mates are chosen as the ones that *cannot* receive routes: agent 7 owns no `src/` and runs tools, and agent 4's files are the least CORE-described in the tree |
+| 2 | **1**, 2, 3 | The three heaviest reasoning scopes. **Agent 2 is the sole build and stress lane** |
+| 3 | 6, 9, **8** | Agent 8 moved here out of wave 1, because it holds **two of the eleven CORE-mirroring test sites** — `keys.rs:133` and `settings.rs:248`, both verified at those exact lines — which makes it the file owner most likely to receive agent 10's routes, and it must not run beside it |
+| 4 | 5, then **11** | **Agent 11 is strictly last.** It clerks everyone |
+
+**The residue is handled rather than assumed away.** Agents 7 and 4 still finish alongside 10, so a
+route can land on an agent that has already reported. The rule: **a late route is not dropped and not
+re-launched — it becomes a re-check item appended to agent 11's queue**, which runs last and can
+re-open the file for a tier-0 quote check itself. Where the route needs judgement rather than a quote
+check, agent 11 files it as `confidence: unverified-hypothesis` naming the owner, and it goes to tier
+2 like anything else. Silently losing a route is the same defect as silently losing a finding.
+
+The design's thrash warning was written for nine to eleven concurrent agents and is largely moot at a
+cap of three — but **the one-build-lane rule survives it**, because `target/` locking does not care
+about the cap. Stress-reproduction requests from any agent queue to agent 2, which computes the OOM
+threshold before running anything: `arch.rs` buffers a whole member into the heap, so a single ~2 GiB
+7z member can take the machine down.
+
+### Seed findings, in hand before the first agent launched
+
+Found while reconstructing the fleet. They enter the register as ordinary findings and clear the same
+tiers — but they are evidence that the round has something to find, and two of them are defects in
+the plan that designed it.
+
+| Finding | Class | Status |
+| --- | --- | --- |
+| `theme.rs:153` cites `the_cast_lands_in_the_band_core_gives_it`; the real test is `…_core_six_gives_it` at `:1872`. The only dangling `///`-cited identifier in the file, in code written this round | doc-drift, class 1 — agent 10 with agent 9 | **Confirmed.** The cited name exists at exactly one site and resolves to no `fn` |
+| `table.rs:235-237` justifies naming the family with *"sat 18% larger than the three mono columns"* — a two-face-era measurement. `MONO` and `SANS` now resolve to the same face, and `FontDefinitions::empty()` leaves no default behind them, so the stated condition can no longer arise | class 1, stale rationale | **Hedged.** The *action* is still defended on other grounds; it is the measured justification that died |
+| The v2.5 plan's §2f called `luminance`, `contrast` and `composite` production helpers at `theme.rs:972-1021`. They are **inside `mod tests`**, at `:1382-1459`, and **nothing in the shipping binary does colour maths at all** | premise error, class 3 | **Confirmed.** Lines 1–1374 contain no call to any of them |
+| The same plan's §2b argued the no-ligature guarantee comes from egui rather than the face, on the premise that *"epaint resolves glyphs through a `HashMap` … no HarfBuzz or rustybuzz anywhere"*. **`harfrust` 0.12.0 is a direct dependency of epaint** and shapes with `calt` on by default. The guarantee comes from the **Mono cut**, which is why keeping it is load-bearing | premise error, class 3 | **Confirmed** at `Cargo.lock:1258`; retracted in round and pinned by `a_filename_is_the_characters_it_holds` |
+| The untested-file total is **9 files / 1,938 lines** — not the design-era 11 / 3,503, and not the 1,868 an inventory pass returned | class 2, arithmetic | **Confirmed** by direct sum, and it decomposes 6 + 2 + 1 with no remainder |
+| **385 uniquely-named `#[test]` fns exist; `cargo test` accounts for 384** — 374 passed and 10 ignored. One named test appears never to run, and no `#[cfg]` gate on a `#[test]` was found to explain it | class 4 — a gate that cannot fire | **Unverified hypothesis**, routed to agent 11 with the coverage checksum. **Rule out the measurement artifact first**: `package_path.rs` writes `#[ignore]` inside doc-comment prose, which already fooled one grep during this reconstruction, so the count may be counting a name that exists only in a comment |
+| `P7.md:719-727` specifies **four** tests for the cancellation fix; `tests/cancel_path.rs` holds **three**. The two absent *names* are convention under rule 4 — but *pre-cancellation* as a behaviour may have gone with them | class 4, test-gap — agent 3 | **Probable.** The count of three is confirmed; whether the fourth behaviour is covered elsewhere is agent 3's to settle. P7's own brief for it is still the right one: *"the test that is the bug"* |
+
+The fifth row is the point of the whole round. That figure was computed three times and was wrong
+twice, in a project whose entire discipline is built around exactly that failure. The two rows after
+it are the point of the *contract*: both are admitted at less than certainty, and both would have
+been dropped by a fleet that only files what it can already prove.
