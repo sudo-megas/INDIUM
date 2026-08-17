@@ -3749,3 +3749,195 @@ confirmer sent to the verifier looked at what fills its inputs and found that th
 being walked. **Neither was findable from the finding.** A confirmer handed the reasoning would have
 checked `verify_against`'s arithmetic, found it correct, and filed REFUTED — which would have closed
 a freeze-blocking corruption bug as a non-issue.
+
+## Phase 3 — the replacement fix, the root skip, and three decisions lifted out so a test could see them
+
+Two commits, `9175a28` and `05aa76a`, closing five findings between them and one of them a
+`REPLACE` of work recorded three sections above. They are written up together because they were
+built together and because the second one's gate is what settled the first section's open question.
+
+### `9175a28` — replacing `da6c821`, and the ordering constraint neither finding stated
+
+Tier 3 returned `REPLACE` on `da6c821`: the routing half was right, the verification half admitted
+wrong passwords and truncated a destination file to zero, and the symptom the commit was written for
+was still live at the window because the GUI gates extraction on `verify_passphrase`, which the
+commit never touched.
+
+**Both halves are in one commit deliberately, and the reason was derived here rather than taken
+from the report.** `verify_passphrase` has exactly two call sites — `arch.rs`'s own non-7z branch and
+`ui/password.rs:191` — and the CLI has neither: `cli.rs:478` calls `arch::extract` directly. So
+today:
+
+| entry point | before this commit |
+|---|---|
+| the window | `verify_passphrase` refuses **every** password on this archive class, right or wrong — which accidentally puts a defect in front of a worse one |
+| `indium extract` | no gate at all, so a wrong password truncates the destination file to zero and exits success |
+
+**Fixing the gate alone would therefore arm the data loss in the GUI.** Neither `PXX-T3-011` nor
+`PXX-T3-012` says so, because each is correct in isolation; the hazard lives in the order they are
+applied. `P6.md`'s Dev 13-14 recorded that shape once already — guards that *"created two new
+reachable hazards rather than closing one"* — and the plan cites it as tier 3's whole empirical
+basis. It has now produced an instance of itself **between two findings of a single review.** No
+tree state may exist in which the gate is open and the check is absent, so there is one commit.
+
+#### What actually changed
+
+**`sevenz::read_entry` refuses a decode shorter than the member's stated size.** The number that
+settles it was in scope one line above the read the whole time — `archive.files[wanted]` is already
+read for its `.name`. A wrong AES key produced zero bytes, `for_each_entries` returned `Ok`,
+`read_to_end` over a reader yielding `Ok(0)` is not an error, and `truncated = out.len() >= cap` is
+`false` for `0 >= 1`. Three chances to notice, and the value was zero.
+
+**The pre-flight reads a member in full wherever it fits, and picks the smallest one.** This is the
+part that goes beyond the report, and it comes from following the report's own measurements one step
+further. The length check closes the zero-byte case but does **not** rescue a one-byte cap: a wrong
+key that yields one plausible byte satisfies a one-byte target, so at that cap the comparison has
+almost nothing to compare against. What actually settles a key is the member's CRC — and the crate
+compares it **at end of stream and nowhere else**, which is exactly why tier 3's AES+COPY wrong
+password was caught late rather than never. So verification now asks for the whole member where that
+is affordable (bounded at a megabyte), and chooses the **smallest** encrypted member precisely to
+stay under that bound as often as possible.
+
+**`verify_passphrase` routes 7z to the reader that can answer**, which is what makes any of this
+reachable from the window.
+
+**The three sibling read paths key on `WrongPassword` as well as `EncryptedHeaders`.** libarchive
+parses this archive class's headers, reaches the data, cannot decrypt it, and reports a wrong
+password — so every fallback arm was dead on exactly the archives it existed for. The arm widens
+what is *tried*, not what is *accepted*: a genuinely wrong password costs one extra attempt and still
+ends `WrongPassword`.
+
+**"Nothing to verify against" is no longer "verified."** When the selection carries no member with
+bytes, the question goes to the whole archive through `verify_passphrase` — which can answer it now,
+for a 7z, because of the change above. One fix serving two findings, and the exact inverse of
+`da6c821`, which fixed a function nothing called.
+
+#### Three decisions lifted out of the flow, and why that is the lesson
+
+`verify_cap`, `decode_reached_target` and `verification_target` are new functions holding decisions
+that were previously inline expressions. That is not tidying. **Tier 3's third sabotage changed
+neither the routing nor the verification but only *which member gets tested*, and both of
+`da6c821`'s gates passed anyway.** A decision no test can see is a decision the next hand can undo
+for free, and an end-to-end gate can only see decisions that change an *outcome*. Choosing the
+smallest member rather than the first does not change an outcome; it changes how strong the check is.
+So it was moved somewhere it *is* the outcome.
+
+`decode_reached_target` is split out for a second reason, stated because it is a limit rather than a
+virtue: whether a *particular* wrong password produces a short decode or an outright decode error
+depends on that archive's random salt. An end-to-end assertion on it would pass or fail by luck.
+Tier 3 measured the rate — 14 of 1500 — and **a rate is not a gate.** The comparison is the part
+that must be right, so the comparison is what is pinned.
+
+#### The sabotage matrix
+
+Five sabotages, run against the committed tree, each reverting one half of the fix.
+
+| # | sabotage | gates that noticed |
+|---|---|---|
+| S1 | `verify_passphrase` stops routing 7z | `the_window_accepts_a_right_password_on_a_content_encrypted_7z` |
+| S2 | the three arms key on `EncryptedHeaders` alone | `preview_cat_and_crc32_all_read_a_content_encrypted_7z` |
+| S3 | pre-flight back to the first member at one byte, no fallback | `an_encrypted_selection_with_no_bytes_in_it_still_refuses_a_wrong_password` |
+| S4 | the short-decode comparison always returns true | `a_decode_shorter_than_the_member_is_not_a_success` |
+| S5 | the verification member chosen arbitrarily (**tier 3's sabotage C**) | `a_password_is_checked_against_the_smallest_member_that_has_bytes` |
+
+**Five of five, and exactly one gate per sabotage.** That orthogonality is the thing `da6c821`
+lacked: its pair gated two halves and was blind to the line between them, which is how S5 got
+through the first time. **S5 survived the first draft of this fix too** — the gate for it was added
+only after the matrix reported it surviving, which is the sabotage practice doing precisely the job
+it exists for rather than confirming its author.
+
+#### What is still not closed, said plainly
+
+`PXX-T3-014`'s residual stands. For a member AES-encrypted with **no compressor behind it**, a wrong
+key's noise passes through the COPY coder intact, and if that member is larger than the read bound
+the pre-flight cannot tell it from plaintext. The read is refused later, by the member's own CRC —
+after `create_dir_under` has made directories. No file contents are written and nothing existing is
+overwritten; empty directories are left behind. Closing it properly means extracting through a
+temporary directory and renaming on success, which is a larger change than a freeze round should
+carry. **So `extract`'s doc comment is qualified instead of the code being bent to fit a sentence it
+does not keep** — which is the escape valve working as specified, not a corner cut.
+
+### `05aa76a` — the root skip, and the experiment that settled the section above
+
+Three lines, and they are the rule both listing loops already applied:
+
+```rust
+if crate::arch::is_archive_root(&entry) {
+    reader.skip_data();
+    continue;
+}
+```
+
+`continue` without advancing `index` is the entire fix. It makes `Plan.source`'s own contract —
+*"Apply walks the source and this vector in step"* — true for **every** archive rather than only for
+the unrooted ones it had always been true for.
+
+#### The gate that could not be built out of sizes
+
+`rooted.tar` is committed and gives the loud half: before the fix, Apply over it returns the error
+the record captured rounds ago. It cannot give the quiet half, and the reason is the mechanism
+itself — **after the shift, sizes are the thing that coincides.** A gate written in size assertions
+passes over a corrupted archive by construction.
+
+So the second gate builds a `./`-rooted tar of **four nine-byte members** and asserts **bytes by
+name**, deliberately asserting no sizes at all. Run against the sabotaged build, it reports what had
+until now been reasoned rather than run:
+
+> `a.txt came back holding another member's bytes — the rebuild is walking a different list from
+> the one it was planned against`
+
+**And `result.expect(...)` did not fire.** Apply *succeeded*. It verified, renamed the rebuild over
+the original, and reported success, and the only thing that noticed was an assertion about bytes.
+The silent commit recorded as `probable` two sections above is now `certain`, and it was one fixture
+that did it.
+
+The fixture is built in-test with `tar -cf … -C dir .`, which is both the ordinary way to tar a
+directory's contents and the thing that writes the root member. `read_path.rs:134` already recorded
+what this shape cost once — *"unnoticed for twenty-two rounds because not one committed fixture was
+rooted that way"* — and the write path, where it was still broken, never got its gate. It has one
+now.
+
+#### One normalisation, recorded rather than discovered later
+
+A rebuilt `./`-rooted archive comes out **unrooted**. There is no disposition to re-emit the root
+from, extraction never needed it, and the listing never showed it. What is lost is that entry's own
+mode, ownership and timestamps. That is the right trade against writing a directory over the first
+member's name, and it is a behaviour change, so it is written down as one.
+
+### The findings
+
+| id | severity | now |
+|---|---|---|
+| `PXX-T3-011` | freeze-blocking | **fixed** — `9175a28`; short decodes refused, pre-flight reads in full where it fits |
+| `PXX-T3-012` | freeze-blocking | **fixed** — `9175a28`; `verify_passphrase` and all three sibling arms |
+| `PXX-T3-013` | fix-in-v2.5 | **fixed** — `9175a28`; an unanswerable selection asks the archive |
+| `PXX-T3-018` | fix-in-v2.5 | **fixed** — `9175a28`; the choice pinned where it is the outcome |
+| `PXX-T2-015` | freeze-blocking | **fixed** — `05aa76a`; and its silent commit measured rather than argued |
+| `PXX-T2-017` | test-gap | **fixed** — `05aa76a`; the `./`-rooted shape now has an Apply gate |
+| `PXX-T3-014` | fix-in-v2.5 | **residual stated** in `extract`'s doc comment; AES+COPY above the read bound |
+| `PXX-T3-015`, `-016` | document-only | **corrected** — `9175a28`; including `list_7z`'s false "deliberately does not route here" |
+| `PXX-T3-017` | document-only | **stated** at the call site: a codec error is not a password verdict |
+| `PXX-2-002` | freeze-blocking | **fixed at last**, by the commit that made the earlier one reachable |
+
+**No new IDs. Register stands at 159.** Suite **397 → 405**: six gates in `9175a28`, two in
+`05aa76a`.
+
+`cargo fmt --check` clean, `cargo clippy --all-targets -- -D warnings` clean, `cargo test` green,
+tree clean at each commit.
+
+**Both fixes owe tier 3 by this round's own rule**, three freeze-blocking findings between them, and
+neither review may be run by the hand that wrote the code. `da6c821` is why that sentence is not a
+formality: it passed 332 tests, carried two real defects, and fixed a function the window never
+calls.
+
+### What the suite figure survived
+
+A clerk was sent to build the definitive open-findings ledger and asked, among other things, to
+verify **397** against the tree itself rather than against these documents' word for it. It did,
+without invoking cargo: `407` test attributes across `src/` and `tests/`, less `10` genuine
+`#[ignore]` attributes — excluding the ones that appear only inside doc-comment prose, which had
+already fooled one grep this round — is `397`. Two methods, two tools, one number.
+
+It also explained a figure that had been left loose: the tier-3 report's *"302 lib + 30 integration
+tests pass"* is `src/`'s own 302 plus `write_path.rs`'s 30, which is a lib-plus-one-file run and not
+a competing total.
