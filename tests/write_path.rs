@@ -939,6 +939,42 @@ fn a_second_apply_on_a_locked_archive_refuses() {
     result.expect("once the lock is released, Apply must proceed");
 }
 
+/// **The same class as `PXX-T3-003`, on a target that matters more than a settings file.**
+///
+/// Apply commits by renaming a *fresh inode* over the user's archive (`tasks.rs:1545`), and
+/// nothing in `apply` or `build_and_verify` captures the mode the archive had. So an archive the
+/// user tightened to `0600` comes back at `0o666 & ~umask` — and for an AES-256 7z that means the
+/// ciphertext sits world-readable after any rebuild, with nothing said.
+///
+/// Found by a blind tier-2 confirmer as an adjacent site while it was measuring the identical
+/// mechanism in `store::atomic_write`, and filed `probable` because it had not been run against a
+/// real Apply. This test is that run.
+#[test]
+fn an_apply_does_not_widen_the_mode_of_the_archive_it_rebuilds() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new("apply-mode");
+    let path = dir.join("out.tar.gz");
+    write_payload(&path, &recipe(&path, Method::Gzip));
+
+    // The user's stated intent about who may read this archive.
+    fs::set_permissions(&path, PermissionsExt::from_mode(0o600))
+        .expect("could not tighten the archive");
+
+    let (result, _) = run_apply(&input_for(&path, Vec::new()), &no_cancel());
+    result.expect("an empty Apply must succeed");
+
+    let mode = fs::metadata(&path)
+        .expect("the archive must still be there")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(
+        mode, 0o600,
+        "rebuilding must not widen a mode the user tightened; got {mode:o}"
+    );
+}
+
 /// P4 §2: "a crashed Apply leaves exactly one leftover per archive rather than an
 /// accumulating pile, and the next Apply on that archive clears it."
 #[test]

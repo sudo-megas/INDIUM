@@ -1456,6 +1456,21 @@ pub fn apply(
         ));
     }
 
+    // The mode the archive already has, read before anything is built.
+    //
+    // The commit at step 7 renames a **fresh inode** over the archive, so without this the
+    // archive's permissions are not rebuilt with it — they are replaced by `0o666 & ~umask`. An
+    // archive the user had tightened to `0600` came back `0644`, and for an AES-256 7z that puts
+    // the ciphertext where anyone on the machine can read it, silently, on every Apply. Measured:
+    // `an_apply_does_not_widen_the_mode_of_the_archive_it_rebuilds`.
+    //
+    // `symlink_metadata`, so `is_file()` is false for a symlink and a mode is carried only from a
+    // real file. Creating an archive leaves this `None`, which is the umask default and correct.
+    let prior_mode = std::fs::symlink_metadata(&input.target)
+        .ok()
+        .filter(|md| md.is_file())
+        .map(|md| std::os::unix::fs::PermissionsExt::mode(&md.permissions()));
+
     // 2. Re-list the source inside the worker. The archive may have changed since the
     //    queue was staged against it, and a guard that assumes otherwise is not a guard.
     let source: Vec<Entry> = if creating {
@@ -1539,6 +1554,26 @@ pub fn apply(
             Ok(0)
         }
         Ok(Some(count)) => {
+            // The permissions go on the **temp**, before the rename, so the archive is never
+            // present at its own name carrying a mode the user did not choose. Doing it after the
+            // rename would leave a window — brief, but a window on a file whose whole point may
+            // be that only one account can read it.
+            //
+            // It fails the Apply rather than shrugging. A rebuild that cannot carry the archive's
+            // own permissions has not reproduced the archive, and `let _ =` here would be exactly
+            // the silent-failure class this round is auditing for. The original is untouched on
+            // this path, which is what makes failing safe.
+            if let Some(mode) = prior_mode {
+                let want =
+                    <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(mode);
+                if let Err(e) = std::fs::set_permissions(&temp, want) {
+                    let _ = std::fs::remove_file(&temp);
+                    return Err(format!(
+                        "the rebuild is good but its permissions could not be set to {mode:o}, so \
+                         it was not committed: {e}"
+                    ));
+                }
+            }
             // 7. Commit. The rename is atomic; the parent directory is synced because
             //    the durability of a rename needs it, exactly as `store::atomic_write`
             //    already does for the settings file.

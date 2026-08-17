@@ -271,7 +271,14 @@ fn load<T: Default + for<'de> Deserialize<'de>>(path: &Path, label: &str) -> Loa
             let broken = set_extension_suffix(path, "broken");
             // "copy the file aside **once**" — an existing .broken is the first
             // breakage and is worth more than the latest one, so it is not replaced.
-            let kept = if broken.exists() {
+            // `symlink_metadata`, not `exists()`. `exists()` follows a link, so it answered
+            // *false* for a **dangling** symlink planted at this name — and `fs::copy` follows the
+            // destination too, so the copy created the link's target, wrote the file's bytes into
+            // it, and put the source's mode on it. The occupied-name check was shielding only the
+            // cases that did not matter (a real file, or a live link, both of which read as
+            // present). Asking about the *name* rather than what it resolves to closes it, and
+            // keeps the "copy aside once" policy exactly as written.
+            let kept = if std::fs::symlink_metadata(&broken).is_ok() {
                 true
             } else {
                 std::fs::copy(path, &broken).is_ok()
@@ -325,11 +332,42 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     }
     let tmp = set_extension_suffix(path, &format!("tmp.{}", std::process::id()));
 
+    // The mode the file already has. The rename below commits a **fresh inode**, so without this
+    // the file's permissions are not preserved — they are replaced by `0o666 & ~umask`. A
+    // `settings.toml` or `recents.toml` the user had narrowed to `0600` came back world-readable
+    // `0644`, on every save, with no actor involved and nothing said. The same mechanism, and the
+    // same fix, as `arch.rs`'s extraction write and `tasks::apply`'s commit.
+    //
+    // `0o666` when there is no prior file keeps first-write behaviour exactly as it was. Making
+    // that `0o600` instead would be a defensible policy for a state file, but it is a *change*
+    // rather than a fix, and it is the maker's to make.
+    let prior_mode = std::fs::symlink_metadata(path)
+        .ok()
+        .filter(|md| md.is_file())
+        .map(|md| std::os::unix::fs::PermissionsExt::mode(&md.permissions()));
+
     {
+        // Unconditionally, before the create: `File::create` is `O_CREAT|O_TRUNC` with no
+        // `O_EXCL`, so a symlink planted at this predictable name is followed — the bytes land in
+        // its target and the rename then moves the *symlink* over the real file, redirecting it
+        // for good. The unlink severs that, and unlike `create_new` it stays tolerant of a
+        // leftover from a crashed save under a since-recycled pid, which `O_EXCL` would turn into
+        // a permanent refusal to save. This is the form `estimate.rs` already uses.
+        match std::fs::remove_file(&tmp) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(bytes)?;
         f.flush()?;
         f.sync_all()?;
+        if let Some(mode) = prior_mode {
+            // On the temp, before the rename, so the file is never at its own name carrying
+            // permissions the user did not choose.
+            let want = <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(mode);
+            std::fs::set_permissions(&tmp, want)?;
+        }
     }
 
     match std::fs::rename(&tmp, path) {
@@ -468,6 +506,65 @@ mod tests {
             std::fs::read_to_string(&path).unwrap(),
             garbage,
             "the original must be left untouched"
+        );
+    }
+
+    /// **The copy-aside must not be written *through* a link.** `broken.exists()` follows, so it
+    /// answered `false` for a dangling symlink planted at the `.broken` name — and `fs::copy`
+    /// follows the destination, so it created the link's target, filled it with the unparseable
+    /// file's bytes, and stamped that file's mode onto it. Confirmed blind at tier 2, and the
+    /// occupied-name check was shielding only the cases that could not hurt.
+    #[test]
+    fn a_dangling_link_at_the_broken_name_is_not_written_through() {
+        let tmp = Tmp::new("broken-link");
+        let store = tmp.store();
+        let path = store.settings_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "not toml at all [").unwrap();
+
+        let victim = tmp.0.join("victim");
+        let broken = set_extension_suffix(&path, "broken");
+        std::os::unix::fs::symlink(&victim, &broken).unwrap();
+
+        let loaded = store.load_settings();
+
+        assert!(
+            !victim.exists(),
+            "the broken-copy write followed a planted link and landed at {victim:?}"
+        );
+        assert!(
+            loaded.was_broken,
+            "the parse failure must still be reported"
+        );
+        assert!(
+            std::fs::symlink_metadata(&broken)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the planted link is not INDIUM's to remove; it must simply not be written through"
+        );
+    }
+
+    /// **Saving must not widen a mode the user narrowed.** `atomic_write` commits a fresh inode,
+    /// so before this the permissions were not preserved but replaced by `0o666 & ~umask`: a
+    /// `settings.toml` tightened to `0600` came back `0644` on every save, with no actor involved.
+    /// The same mechanism as the extraction write and Apply's commit, found third.
+    #[test]
+    fn saving_does_not_widen_a_mode_the_user_narrowed() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = Tmp::new("keep-mode");
+        let store = tmp.store();
+        store.save_settings(&Settings::default()).unwrap();
+        let path = store.settings_path();
+
+        std::fs::set_permissions(&path, PermissionsExt::from_mode(0o600)).unwrap();
+        store.save_settings(&Settings::default()).unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "saving must carry the file's own permissions over; got {mode:o}"
         );
     }
 
