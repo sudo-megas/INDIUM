@@ -1007,6 +1007,132 @@ fn an_orphaned_temp_from_a_crashed_apply_is_overwritten_not_multiplied() {
     );
 }
 
+/// **`PXX-C9-001`.** The orphan test above cannot fail for the reason its name gives.
+///
+/// It plants a *regular* file, and libarchive truncates whatever it opens — so deleting the
+/// removal block entirely leaves that test green. This one plants a **dangling symlink**, which
+/// is the input `Path::exists()` answers `false` for, and therefore the one input the guard was
+/// written to handle and the only one that skips it. With the guard skipped the archive is
+/// written *through* the link into a file nobody named, and then `rename` moves the link rather
+/// than the archive — so the user's `.tar.gz` becomes a symlink to somebody else's file.
+///
+/// This is also the discriminating run a blind confirmer asked for: it fails if the removal is
+/// removed, which is what an orphan test is supposed to be able to say.
+#[test]
+fn a_dangling_link_at_the_apply_temp_is_unlinked_not_written_through() {
+    let dir = TempDir::new("apply-temp-link");
+    let path = dir.join("out.tar.gz");
+    write_payload(&path, &recipe(&path, Method::Gzip));
+
+    // Nothing is created here. A dangling link is the whole point: `exists()` traverses, so it
+    // reports `false`, and the guard that was meant to clear this file steps over it.
+    let victim = dir.join("victim");
+    let temp = tasks::temp_path_for(&path);
+    std::os::unix::fs::symlink(&victim, &temp).expect("could not plant the link");
+
+    let (result, _) = run_apply(&input_for(&path, Vec::new()), &no_cancel());
+    result.expect("Apply must proceed over a planted link");
+
+    assert!(
+        !victim.exists(),
+        "the rebuild landed at {}, so the link was followed instead of unlinked",
+        victim.display()
+    );
+    assert!(
+        fs::symlink_metadata(&path)
+            .expect("the archive must still be there")
+            .file_type()
+            .is_file(),
+        "the archive must be a regular file, not the link the commit renamed into place"
+    );
+}
+
+/// **`PXX-C9-002`.** A name that is not UTF-8 is an ordinary Linux name, and skipped the guard.
+///
+/// The removal was gated on `to_str()`, which returns `None` for any name carrying a byte
+/// sequence Rust cannot decode — and the code then did nothing at all, quietly, for a file it
+/// had built the name of itself. Same body as the test above, so the two differ in exactly one
+/// variable: whether the target's name happens to decode.
+#[test]
+fn a_target_whose_name_is_not_utf8_still_has_its_temp_cleared() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let dir = TempDir::new("apply-temp-raw");
+    // 0xFF cannot begin any UTF-8 sequence, and is a perfectly ordinary byte in a filename.
+    let path = dir.join("").join(OsStr::from_bytes(b"out\xFF.tar.gz"));
+    write_payload(&path, &recipe(&path, Method::Gzip));
+
+    let victim = dir.join("victim-raw");
+    let temp = tasks::temp_path_for(&path);
+    std::os::unix::fs::symlink(&victim, &temp).expect("could not plant the link");
+
+    let (result, _) = run_apply(&input_for(&path, Vec::new()), &no_cancel());
+    result.expect("Apply must proceed over a planted link on an undecodable name");
+
+    assert!(
+        !victim.exists(),
+        "the rebuild landed at {}, so an undecodable name skipped the removal",
+        victim.display()
+    );
+}
+
+/// **`PXX-C9-001`, the other half.** A leftover that cannot be cleared refuses the Apply.
+///
+/// Proceeding past a failed removal is the write-through with an extra step, so the removal is
+/// fatal — and the message has to name the file, because a refusal the user cannot act on is
+/// the fault this round filed against the lock file at `PXX-C9-014`.
+///
+/// **This test skips loudly rather than passing quietly** when the process can write into a
+/// directory it has just closed — which means root, and `CORE.md:657` allows INDIUM to be run
+/// as root. A skip that announced nothing would be a gate that cannot fail, in the round whose
+/// whole subject is gates that cannot fail.
+#[test]
+fn a_leftover_that_cannot_be_removed_refuses_the_apply_and_says_which_file() {
+    let dir = TempDir::new("apply-temp-stuck");
+    let path = dir.join("out.tar.gz");
+    write_payload(&path, &recipe(&path, Method::Gzip));
+
+    let temp = tasks::temp_path_for(&path);
+    fs::write(
+        &temp,
+        b"a leftover this account will not be allowed to remove",
+    )
+    .expect("could not plant the orphan");
+    let original = fs::read(&path).expect("the original must be readable");
+
+    // Unlink permission is the directory's, so the directory is what has to be closed.
+    let parent = dir.join("");
+    fs::set_permissions(&parent, PermissionsExt::from_mode(0o500))
+        .expect("could not close the directory");
+
+    let probe = fs::File::create(parent.join("probe"));
+    if probe.is_ok() {
+        let _ = fs::remove_file(parent.join("probe"));
+        fs::set_permissions(&parent, PermissionsExt::from_mode(0o700)).ok();
+        eprintln!(
+            "SKIPPED a_leftover_that_cannot_be_removed_refuses_the_apply_and_says_which_file: \
+             this process writes into a directory with no write bit, so it is root (or the \
+             filesystem ignores modes) and the precondition cannot be built here."
+        );
+        return;
+    }
+
+    let (result, _) = run_apply(&input_for(&path, Vec::new()), &no_cancel());
+    fs::set_permissions(&parent, PermissionsExt::from_mode(0o700)).expect("could not reopen");
+
+    let message = result.expect_err("Apply must refuse rather than write past a stuck leftover");
+    assert!(
+        message.contains(&temp.display().to_string()),
+        "the refusal must name the file the user has to deal with; got: {message}"
+    );
+    assert_eq!(
+        fs::read(&path).expect("the original must still be readable"),
+        original,
+        "a refused Apply writes nothing"
+    );
+}
+
 /// A rename must move the member without touching its bytes.
 #[test]
 fn a_renamed_entry_keeps_its_bytes_and_its_metadata() {

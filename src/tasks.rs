@@ -14,7 +14,7 @@
 //! Copyright © sudo-megas. GPL-3.0-only.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -1204,8 +1204,23 @@ pub fn temp_path_for(target: &Path) -> PathBuf {
 ///
 /// Strict, in the manner of `platform::scratch::is_ours`: nothing is ever removed on a
 /// loose match. A file that merely resembles ours is not ours.
+///
+/// Reads **bytes, not characters**, and that is the whole reason this form exists. A Linux
+/// filename is a byte string that promises no encoding, and the callers used to reach the
+/// `&str` form through a `to_str()` that answers `None` for such a name — so an archive whose
+/// name does not decode had the orphan beside it silently left in place, by a guard checking a
+/// name INDIUM had constructed itself. The shape being matched is pure ASCII, so the two forms
+/// agree on every name that decodes and disagree only where the old one gave up.
+pub fn is_our_temp_os(name: &OsStr) -> bool {
+    use std::os::unix::ffi::OsStrExt as _;
+    const SUFFIX: &[u8] = b".indium-new";
+    let bytes = name.as_bytes();
+    bytes.starts_with(b".") && bytes.ends_with(SUFFIX) && bytes.len() > SUFFIX.len() + 1
+}
+
+/// The decoded form of the same question, for callers that already hold a `&str`.
 pub fn is_our_temp(name: &str) -> bool {
-    name.starts_with('.') && name.ends_with(".indium-new") && name.len() > ".indium-new".len() + 1
+    is_our_temp_os(OsStr::new(name))
 }
 
 // ---------------------------------------------------------------------------
@@ -1533,10 +1548,40 @@ pub fn apply(
     // 4. Build into a temp beside the target. A leftover from an interrupted Apply is
     //    removed first — that is the whole of the orphan policy, and it only ever
     //    touches a file whose name is provably ours.
+    //
+    //    The removal is **unconditional**, in the form the scratch candidate in `estimate`
+    //    has always used. `exists()` traverses, so it answers `false` for a dangling symlink
+    //    at the temp's name — which is precisely the input this removal exists to handle, and
+    //    the only one that reaches a write through a name INDIUM did not choose. Testing first
+    //    bought nothing (`remove_file` unlinks the name and does not care whether it resolves)
+    //    and cost exactly the case that mattered.
+    //
+    //    A failure refuses the Apply rather than writing anyway. That is right here and would
+    //    be wrong at the lock file, and the difference is not one of severity: **unlink
+    //    permission belongs to the directory; open-for-write permission belongs to the file.**
+    //    In the user's own directory the unlink succeeds even against a root-owned leftover, so
+    //    this cannot become the permanent unexplained refusal `PXX-C9-014` describes at the
+    //    lock. In a sticky shared directory it can fail — and there the leftover is a file this
+    //    account may not remove, which is the one circumstance in which proceeding *is* the
+    //    write-through. Nothing has been written yet, so refusing costs a sentence and no data.
+    //
+    //    What this does not close, stated because a comment claiming otherwise would be worse
+    //    than no comment: the temp is opened by libarchive or by the 7z writer, neither of
+    //    which will take an `O_EXCL`, so a name re-planted between this unlink and that open is
+    //    still followed. That needs a racing actor, it is `PXX-3-009`'s mechanism, and it keeps
+    //    its own `document-only` row. What is closed here is the one that needs no timing.
     let temp = temp_path_for(&input.target);
-    if let Some(name) = temp.file_name().and_then(|n| n.to_str()) {
-        if is_our_temp(name) && temp.exists() {
-            let _ = std::fs::remove_file(&temp);
+    if temp.file_name().is_some_and(is_our_temp_os) {
+        match std::fs::remove_file(&temp) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(format!(
+                    "A leftover from an interrupted rebuild is in the way at {}, and it could \
+                     not be removed ({e}), so nothing was written. Remove it and try again.",
+                    temp.display()
+                ))
+            }
         }
     }
 
@@ -2342,6 +2387,56 @@ mod tests {
             "beside the target, not in a scratch directory"
         );
         assert!(is_our_temp(".photos.tar.gz.indium-new"));
+    }
+
+    /// `PXX-C9-002`: the check must answer for a name that does not decode.
+    ///
+    /// The `&str` form was the only form, and every caller reached it through a `to_str()` that
+    /// hands back `None` for a byte sequence UTF-8 has no reading for. A Linux filename is not
+    /// promised to be UTF-8 — so for those names the orphan removal did not run at all, quietly,
+    /// on a file INDIUM had named itself. The two forms have to agree wherever both can speak,
+    /// and the byte form has to keep answering where the other one stops.
+    #[test]
+    fn a_temp_name_is_recognised_as_ours_whether_or_not_it_decodes() {
+        use std::os::unix::ffi::OsStrExt as _;
+
+        // Right shape, undecodable middle. 0xFE and 0xFF begin no UTF-8 sequence at all.
+        let raw = OsStr::from_bytes(b".out\xFF\xFE.tar.gz.indium-new");
+        assert!(
+            raw.to_str().is_none(),
+            "the case is only a case if it fails to decode"
+        );
+        assert!(
+            is_our_temp_os(raw),
+            "an undecodable name of our shape is still ours"
+        );
+
+        // Undecodable and *not* our shape: strictness does not relax with the encoding.
+        for bytes in [
+            &b"out\xFF.tar.gz.indium-new"[..], // no leading dot
+            &b".out\xFF.tar.gz"[..],           // no suffix
+            &b".indium-new"[..],               // the suffix alone, with nothing named
+        ] {
+            let name = OsStr::from_bytes(bytes);
+            assert!(
+                !is_our_temp_os(name),
+                "{name:?} is not ours and must not be removed"
+            );
+        }
+
+        // And the decoded form is the same question asked in a narrower vocabulary.
+        for name in [
+            ".a.indium-new",
+            "a.indium-new",
+            ".indium-new",
+            ".a.indium-old",
+        ] {
+            assert_eq!(
+                is_our_temp(name),
+                is_our_temp_os(OsStr::new(name)),
+                "the two forms disagree about {name}"
+            );
+        }
     }
 
     /// PXX finding 4. `Indium::on_exit` removes the in-flight temp on a deliberate close

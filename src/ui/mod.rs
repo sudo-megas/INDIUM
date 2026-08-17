@@ -2982,8 +2982,11 @@ impl eframe::App for Indium {
     /// builds beside it and renames at the end, so what is removed here is only ever the
     /// half-built temp.
     ///
-    /// `is_our_temp` guards the removal for the same reason `tasks::apply` guards its own:
-    /// nothing is deleted on a loose match, ever.
+    /// `is_our_temp_os` guards the removal for the same reason `tasks::apply` guards its own:
+    /// nothing is deleted on a loose match, ever. It reads the name as bytes, because the
+    /// `to_str()` this used to go through answers `None` for a perfectly ordinary Linux name
+    /// and left our own litter behind for it. Litter is all that is at stake on this path — the
+    /// Apply is already over — so a failed removal is not worth refusing an exit over.
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         // The worker may be between reads rather than mid-write; telling it to stop costs
         // nothing and occasionally saves it a few megabytes of pointless work.
@@ -2993,11 +2996,7 @@ impl eframe::App for Indium {
             return;
         };
         let temp = tasks::temp_path_for(&target);
-        if temp
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(tasks::is_our_temp)
-        {
+        if temp.file_name().is_some_and(tasks::is_our_temp_os) {
             let _ = std::fs::remove_file(&temp);
         }
     }
