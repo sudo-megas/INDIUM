@@ -734,11 +734,20 @@ fn an_apply_with_no_tasks_reproduces_the_archive() {
 /// included, and paired the two by position. Two lists differing by one element, walking one and
 /// indexing the other.
 ///
-/// `rooted.tar` stores beta (20 bytes) before alpha (21), so before the fix this failed with
-/// `"alpha.txt was written at 20 bytes instead of 21"` — the exact sentence the record captured
-/// from a real run rounds ago, and the reason that finding was misfiled as a `verify_against`
-/// defect. It was never a false alarm. The rebuild really was wrong and `verify_against` was the
-/// only thing that noticed.
+/// `rooted.tar` stores beta (20 bytes) before alpha (21). The record captured
+/// `"alpha.txt was written at 20 bytes instead of 21"` from a real run rounds ago, which is why that
+/// finding was misfiled as a `verify_against` defect. It was never a false alarm — the rebuild really
+/// was wrong and `verify_against` was the only thing that noticed.
+///
+/// **But that is not the sentence this gate produces, and an earlier version of this comment said it
+/// was.** Remove the skip today and it fails earlier and louder, inside `list_all`, with
+/// `"Damaged tar archive (bad header checksum)"`: the shifted member is written under the stored name
+/// `"./sub/"`, a trailing slash is a directory to libarchive as much as to `arch.rs:673`, so the
+/// payload is never consumed as data and the next header is read from inside it.
+///
+/// So this gate proves the rebuild is wrong, not that it is wrong *silently*.
+/// `a_rooted_archive_of_equal_length_members_is_not_silently_shuffled` is the only one of the three
+/// root gates that shows Apply returning success over a corrupted archive.
 #[test]
 fn an_apply_over_a_dot_slash_rooted_archive_keeps_every_member() {
     let dir = TempDir::new("rooted-apply");

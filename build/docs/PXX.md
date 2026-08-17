@@ -4979,3 +4979,237 @@ turning them into gates belongs with the fixes.
 a zip cleanly, and makes a 7z unmodifiable. The fixture recipes and the full captured output are
 preserved outside the repo at `$CLAUDE_JOB_DIR/tmp/zz_asym_survey/` for whoever runs the review that
 is still owed.
+
+## Phase 3 — the tier-3 verdict on `05aa76a`: **ACCEPT**, and three of this round's own claims refuted
+
+The second of the two reviews `PXX-C12-006` records as owed has been delivered. Its closing sentence,
+verbatim:
+
+> **Nothing is freeze-blocking. Nothing warrants a patch before the freeze. ACCEPT.**
+
+One of the two outstanding obligations is therefore discharged. The other — `9175a28` — is not, and
+`PXX-C12-006` stays open until it is. **This section does not close it and must not be read as
+closing it.**
+
+The verdict is worth more than its label, because the review did not merely fail to find a defect in
+the fix: it went after the fix's *placement*, measured the alternative this round never built, and
+came back with three refutations of things written into this record as settled. A review that agrees
+with everything is a review that read nothing.
+
+### What it settles that no sabotage matrix could
+
+Every measurement this round has taken of `05aa76a` asked *does the fix work*. None asked *is the fix
+in the right place* — that question has no sabotage, because you cannot break your way into an
+alternative design. The review built it.
+
+The alternative was Option B: leave the rebuild loop alone and stop `apply`'s re-list from filtering
+the root, so the two lists agree by both carrying it. **It breaks two things, and both are load-bearing.**
+
+- **The staged-against guard.** `ui/mod.rs:1433` is
+  `self.staged_against = self.entries.iter().map(|e| e.path.clone()).collect();` — populated from the
+  UI's listing, which is root-filtered. `tasks.rs:1561-1566` sorts that against the re-list's paths and
+  refuses on any difference. An unfiltered re-list puts `""` into `now` and never into `then`, so
+  **every staged Apply on a `./`-rooted archive would refuse** with a concurrent-modification sentence
+  and no concurrent modification. Both anchors re-read here and correct.
+- **Its own verification.** `expected()` would emit the root's empty `out_path` while `built` comes
+  from the root-filtering `list_all` at `tasks.rs:1865`, so `verify_against` would report the root
+  missing on every rooted Apply — the fix failing the check that exists to catch it failing.
+
+So the skip belongs in the rebuild loop, where it is. That is a verdict this round could not have
+reached alone, and it is the single most valuable thing the review returned.
+
+### Correction 1 — "promoted from a display filter to a rebuild filter" is false, and it is measured false
+
+`PXX-T3-020` above, at `:4567-4570`, ends its diagnosis with:
+
+> The predicate was promoted from a display filter to a rebuild filter without anyone asking whether
+> it was precise enough to carry that. It is the difference between a member being hidden and a member
+> being deleted, and `05aa76a` moved it across that line
+
+**The review measured the before-state and it is not a hiding.** With the skip absent, an archive
+carrying a member named `\` alongside `a.txt` and `z.txt` applied `Ok(2)` — success — with
+`z.txt` holding `"XXXXXXXX\n"`: **the hidden member's bytes, committed under a surviving member's
+name.** After the fix, one member is dropped and no neighbour is touched.
+
+So the fix converts *silent corruption of a neighbour plus a drop* into *a drop*. In the reviewer's
+words, **"a strict improvement, not the thing that created the problem."**
+
+The part that deserves the sharper note is where the refutation landed. **Three paragraphs above the
+refuted sentence, the same section already said the right thing** — *"`05aa76a` made this archive
+dramatically better, not worse"*, followed by the correct mechanism, including that *"the `\` member's
+three bytes would have landed under `a.txt`'s name."* That paragraph is exactly what the review then
+measured.
+
+**The section held both readings at once and the wrong one is the one that propagated.** It is the
+sentence the finding table inherited and the sentence subsequent work cited. Rule 4 keeps the original
+text where it is; this supersedes it. And the lesson is not "check your claims" — the claim *was*
+checked, one paragraph earlier, and the conclusion drawn three paragraphs later contradicted the
+check without noticing. **A section can refute itself and still ship the refuted half**, which is
+class 12 operating at the scale of a single page rather than a document.
+
+### Correction 2 — the proposed fix is retracted, and it was worse than not-yet-right
+
+`PXX-T3-020:4572-4577` sketches, unapplied:
+
+> `entry.raw_path.chars().all(|c| c == '.' || c == '/')`
+
+**It is wrong in three ways, and one of them fails a gate that already exists.** Run here rather than
+argued:
+
+| stored name | `normalize` → | root today? | the sketch says | consequence |
+|---|---|---|---|---|
+| `""` | `""` | **no** — `!raw_path.is_empty()` blocks it | **root** (vacuously true) | breaks `arch.rs:2412-2417` |
+| `..` | `".."` | no | **root** | a member that survives today is silently dropped |
+| `.` | `"."` | no | **root — and the sketch says so out loud** | same drop, declared and unjustified |
+| `\` | `""` | **yes** — the defect | not root | the only case it gets right |
+
+The first is the serious one. `"".chars().all(…)` is vacuously true, and `arch.rs:2412-2417` is an
+existing assertion with an existing reason:
+
+```rust
+assert!(
+    !is_archive_root(&entry_named("", "")),
+    "a name that could not be read must never pass as the archive root"
+);
+```
+
+That gate is P11's locale defect — `entry_name` returning nothing at all — and the sketch reclassifies
+it as the archive root, which is precisely the case `extract`'s pre-flight must refuse the whole
+archive for. **The proposed fix for a silent drop would have introduced a silent drop of the
+unreadable-name case, and the suite would have caught it — which is the argument for the rule that a
+fix in this position owes its own review, made by the rule working.**
+
+The review found the first two. The third is not a discovery and is recorded as the opposite of one:
+**the sketch enumerates `.` among its intended acceptances in its own sentence** — *"accepts `.`,
+`./`, `/`, `//` and `././`"* — so nothing was overlooked. It was declared, and it was still wrong,
+which is the more uncomfortable of the two ways to be wrong.
+
+That is the sharp point of the whole retraction. The sketch's stated purpose was to *narrow*: to test
+stored forms rather than emptiness, so that `\` stops counting as the root. In the same line it
+**widened** onto `.`, and by oversight onto `..` and `""`. A predicate that narrows in one direction
+and widens in three is not a narrowing, and the review's rule is the one that survives:
+**narrowing `is_archive_root` is the only safe direction**, with every candidate run against the
+existing gate before it is written down as a proposal rather than after.
+
+`PXX-T3-020`'s `proposed_fix` field is hereby **`none — the sketch is withdrawn`**; the finding itself
+stands.
+
+On `/` and `//`, which the sketch left as an open question: the review's answer is to leave them
+classified as roots, because both are `path_escapes`-true and therefore name members INDIUM will never
+write. That is a sound reason and it is recorded rather than re-derived.
+
+### Correction 3 — the gate's own doc comment describes a mechanism the tree does not perform
+
+`tests/write_path.rs:737-741` says of `an_apply_over_a_dot_slash_rooted_archive_keeps_every_member`:
+
+> `rooted.tar` stores beta (20 bytes) before alpha (21), so before the fix this failed with
+> `"alpha.txt was written at 20 bytes instead of 21"`
+
+and `05aa76a`'s commit message says *"rooted.tar failed only because two shifted sizes happened to
+differ."* **Neither describes what removing the skip actually does.**
+
+The review measured the failure as `"Damaged tar archive (bad header checksum)"`, arriving from
+`list_all` **before `verify_against` runs at all**. The mechanism was reproduced here from first
+principles, with no INDIUM code in the path — a tar built to carry a 21-byte payload under the stored
+name `./sub/`, read by libarchive directly:
+
+```
+drw-r--r--  0 0  0  21 Jan  1  1970 ./sub/
+bsdtar: Damaged tar archive (bad header checksum)
+```
+
+Note the leading `d`. A trailing-slash name **is a directory to libarchive itself**, not merely to
+`arch.rs:673`'s `raw_path.ends_with('/')`, so the 21 bytes are never consumed as data and the next
+header read lands inside the payload. The shifted member does not get compared at the wrong size; the
+archive stops being parseable.
+
+The doc comment is corrected in place — it is source prose, not the append-only record. **The commit
+message cannot be corrected, and is recorded here instead**, which is the only honest disposal for a
+wrong sentence in immutable history.
+
+**And the consequence is larger than the correction.** If gate 1 dies on a parse error, it is not
+demonstrating a *silent* commit — it is demonstrating a loud one. Of the three root gates,
+**`a_rooted_archive_of_equal_length_members_is_not_silently_shuffled` is the only one that shows
+Apply returning success over a corrupted archive**, and that is the property the whole finding is
+about. The three gates are not three demonstrations of one thing; they are one demonstration and two
+guards. Written down because the count was doing rhetorical work it had not earned.
+
+### The half-correction: the instrument was sound, the word for it was not
+
+The review's fourth finding charges `PXX-T3-020`'s multiple-root evidence with being inert: plain
+`cat one.tar two.tar` is not a two-root stream, because both tar and libarchive stop at the first
+end-of-archive marker. **Measured here, that is exactly right** — a 20 480-byte concatenation lists
+three entries under both readers.
+
+**But the probe did not use `cat`.** Its own comment, at line 119 of the preserved patch, reads
+*"Two roots: `tar -cf .` then `tar -rf .` appends a second `./`"*, and `tar -rf` rewrites past the
+marker in place. Measured:
+
+```
+tar -cf one.tar . ; tar -rf one.tar -C two .     ->  10240 bytes
+gnu tar -tf   ->  ./  ./a.txt  ./b.txt  ./  ./d.txt  ./c.txt
+bsdtar -tf    ->  ./  ./a.txt  ./b.txt  ./  ./d.txt  ./c.txt
+```
+
+Six entries, two roots, both readers agreeing. The instrument was sound and the recorded result stands.
+
+**What was wrong is the sentence describing it.** `PXX-T3-020:4593` calls it *"two roots from
+concatenated tars"* — and concatenation is the one construction that would not have worked. The
+reviewer read the description, correctly identified that it could not do what it claimed, and measured
+it. They then re-measured the property properly with `tar -Af` and **found it holds**, so the
+conclusion never moved.
+
+This is the cleanest example this round has produced of why the `quote` field exists. A reader with
+only the prose reaches a true objection about a false thing; a reader with the artifact reaches the
+artifact. **The label was checkable and wrong, in a section whose subject is a predicate that is
+checkable and wrong.** Filed as `PXX-C12-007` rather than folded into a paragraph, because the
+mislabelling of an instrument is how a sound result gets discarded by the next person to audit it.
+
+Recorded with equal weight: **this is a correction in my own favour**, the first this round has had
+occasion to make, and it got the same measurement the ones against me got before it was written down.
+
+### What the review measured that this round had only argued
+
+- **The equal-length gate does depend on equal lengths.** Under sabotage with four nine-byte members
+  it commits silently; with 2/3/4/5-byte members `verify_against` catches it —
+  `"b.txt was written at 2 bytes instead of 3"`. The gate's deliberate absence of size assertions was
+  argued in `19deba9` and is now measured as load-bearing.
+- **The gates survive a second, subtler sabotage.** Skip present but `index += 1` restored — the
+  near-miss a careless fix would produce — takes all three red, and fails safe.
+- **An `add` appending to a rooted archive** — a path no root gate covers — returns `Ok(4)` correct.
+- **A root-only archive** rebuilds to `Ok(0)` and a valid empty tar.
+- **The cancellation check precedes the skip**, so a cancel on a root entry behaves as on any other.
+- **Only the root *entry* is dropped.** Unrenamed members keep their `./` prefixes byte for byte
+  (`out_path_for` returns `raw_path`); renamed members lose theirs. The record's *"comes out
+  unrooted"* is true of the entry and over-readable as true of the archive.
+
+One corroboration worth keeping, because it raises the severity of what `05aa76a` repaired: under the
+pre-fix build a rooted tar carrying a hardlink and a symlink rebuilt to `drwxr-xr-x ./regular.txt/`
+and `hrw-r--r-- ./hardlink.txt link to regular.txt`, **Apply returned `Ok(3)` and committed it**, and
+external `tar -x` then failed with *"Cannot hard link."* The defect could commit an archive no other
+tool can extract.
+
+### On the review's own conduct
+
+It left `?? tests/zz_t3a.rs` in the tree untouched and said so — the other reviewer's live probe file,
+belonging to a run still in flight. Deleting it would have been tidy and wrong. Recorded because the
+per-commit path-staging rule exists for exactly this hazard and this is the first time a reviewer
+protected it unprompted.
+
+### The findings
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-T3-024` | `tests/write_path.rs:737-741`; `05aa76a`'s message | the gate's doc comment and the commit message both attribute the pre-fix failure to two shifted sizes differing; removing the skip actually fails in `list_all` with `"Damaged tar archive (bad header checksum)"` before `verify_against` runs, because a trailing-slash name is a directory to libarchive and its payload is parsed as the next header. Consequence: only the equal-length gate demonstrates a *silent* commit | document-only | **confirmed by independent reproduction; doc comment fixed in place, commit message recorded here** |
+| `PXX-C12-007` | `build/docs/PXX.md:4593` | `PXX-T3-020` calls its two-root fixture *"concatenated tars"*; the probe used `tar -rf` and plain concatenation is measurably inert under both readers. The instrument was sound and the result stands — the description of it was not | document-only | **confirmed both ways: `cat` inert, `tar -rf` sound. Superseded here** |
+| `PXX-T3-025` | `arch.rs` listing path | a plain-concatenated tar lists only the first archive's members, silently. GNU tar and libarchive do exactly the same, so INDIUM is matching its ecosystem rather than diverging from it | no-action | confirmed, deliberately unfixed |
+| `PXX-T3-020` | — | severity sharpened: reachable from an ordinary `tar -cf x.tar -C dir .` over a directory holding a file named `\`, with twenty bytes gone, exit success and no sentence. **`proposed_fix` withdrawn** — the sketch fails an existing gate and adds two new silent drops | fix-in-v2.5 | unchanged severity, **fix retracted, unfixed** |
+| `PXX-T2-015` | — | the fix's *placement* independently verified: both alternatives to the rebuild-loop skip break the staged-against guard and `verify_against` respectively | — | **claims upheld; `05aa76a` ACCEPT** |
+| `PXX-C12-006` | this round's process | one of the two owed tier-3 reviews is discharged | freeze-blocking (process) | **still open** — `9175a28` outstanding |
+
+**Three new IDs. Register 171 → 174.** Suite unchanged at **406** — the review's probes were reverted
+by their author, and turning any of them into gates belongs with the fixes they would guard.
+
+Three of this section's five substantive items are corrections to text this round wrote and believed.
+That is the intended yield of an independent reader, and it is the argument for not marking
+`PXX-C12-006` satisfied on the strength of the evidence that existed before one arrived.
