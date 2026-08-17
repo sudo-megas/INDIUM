@@ -2094,3 +2094,218 @@ gap.
 name of its own is the maker's — he named PXX himself, and the plan that commissioned this round
 reserved the naming for him in as many words when it declined to invent one for the redesign. The row
 is drafted with a placeholder that says what it carries, and the title is his to set.
+
+## Phase 3 — the class-9 sweep: the twentieth door, and the one this tree already got right
+
+`PXX-2-001` closed a write that escaped the destination. Closing it is not the same as closing the
+*class*, and this project has the receipt: `P15.md:75` records a sweep that fixed nineteen sites and
+was followed one milestone later, **by the same hand**, by the twentieth. **"A sweep is not a
+habit."** So the fix was followed by a sweep whose only question was: *where else does this tree write
+to a path it did not fully choose, through a handle that follows a link?*
+
+The sweep was read-only and barred from the build lane, which was held by the tier-3 review of the fix
+itself. Its enumeration is closed and stated as such: **26 mutating call sites in production, 17 in
+test code**, reached API-first (`create_dir_all`, `create_dir`, `write`, `File::create`,
+`OpenOptions`, `copy`, `rename`, `hard_link`, `symlink`, `remove_file`, `remove_dir_all`,
+`set_permissions`) and then swept a second time for `write_all`, `io::copy`, `set_len`,
+`create(true)` and `truncate(true)`, plus the libc, libarchive and `sevenz-rust2` layers underneath.
+
+### The answer is yes, and it is one door over
+
+**`tasks::apply`'s temp file is the sibling.** The fixed site is *unlink-then-`create_new`*. The Apply
+temp is *unlink-then-follow*, with the unlink conditionalised and the create left following. Same two
+steps, same file-writing purpose, one function over — the class-9 shape exactly, and not a
+generalisation of it.
+
+The gate, `src/tasks.rs:1518-1526`:
+
+```rust
+    // 4. Build into a temp beside the target. A leftover from an interrupted Apply is
+    //    removed first — that is the whole of the orphan policy, and it only ever
+    //    touches a file whose name is provably ours.
+    let temp = temp_path_for(&input.target);
+    if let Some(name) = temp.file_name().and_then(|n| n.to_str()) {
+        if is_our_temp(name) && temp.exists() {
+            let _ = std::fs::remove_file(&temp);
+        }
+    }
+```
+
+`Path::exists()` **traverses**. For a dangling symlink it answers `false`, the `&&` short-circuits the
+removal away, and the next thing to touch that name is a link-following `O_CREAT|O_TRUNC`. The one
+input the removal exists to handle is the one input that skips it.
+
+### The measurement, because the record of a library is not the library
+
+The 7z branch was certain on inspection: `sevenz.rs:311` calls `ArchiveWriter::create`, which is
+`File::create` in `sevenz-rust2-0.21.4/src/writer.rs:93`. The tar/zip branch rested on libarchive's
+flags, which is a *modelled* claim — class 7, and this round's counter-rule for it is **"ask the
+program, not the record of it."** So it was asked. A C probe forward-declaring the four symbols (no
+`archive.h` needed), against a dangling symlink, built with `cc` so the cargo lane stayed free:
+
+```
+rc=0 err=(none)
+-rw-r--r-- 1 megas megas 0 Aug 17 12:05 victim
+probe-dir/link -> .../cls9/victim
+```
+
+`archive_write_open_filename` **succeeded and created the file at the link's target.** So
+`arch.rs:1582` follows too, and the finding is `certain` on both branches rather than `certain` on one
+and `probable` on the other. One `cc` invocation moved a confidence label that a paragraph of
+reasoning could not have.
+
+### The guard's only reachable outcome is the fail-open one
+
+This is the second mechanism at the same lines, and it is worse than the first.
+
+`is_our_temp` takes `&str`:
+
+```rust
+pub fn is_our_temp(name: &str) -> bool {
+    name.starts_with('.') && name.ends_with(".indium-new") && name.len() > ".indium-new".len() + 1
+}
+```
+
+That signature is why the call site reaches for `.and_then(|n| n.to_str())`, and `to_str()` returns
+`None` the moment the archive's filename holds a non-UTF-8 byte — `temp_path_for` builds its name by
+`OsString::push`, so those bytes survive into it. `if let Some(name)` then skips **the entire block**,
+and the hole widens from dangling-links-only to *every* link: a symlink to an existing file is
+followed and truncated, and a hardlink is written straight into the victim inode — the precise case
+`arch.rs:1134-1137`'s comment exists to explain, and the case the unconditional unlink there is the
+whole answer to.
+
+And this input class is supported on purpose. `cli.rs:392-397` records the round that adopted
+`args_os` **specifically** so non-UTF-8 path bytes would stop being lost.
+
+Now the other half, which the sweep did not state and tier 0 surfaced: on a name that *does* decode,
+`is_our_temp` is a **tautology**. `temp_path_for` always yields `.<name>.indium-new` with a non-empty
+`<name>` (it falls back to `"archive"`), so all three conjuncts hold by construction, and `apply`
+derives the value two lines above the check. **The check cannot return `false` for any input the call
+site can produce.** Its only reachable effect is the `None` arm that skips it. A guard whose passing
+branch is unreachable-by-tautology and whose failing branch is fail-open is class 4 — a gate that
+cannot fail — wearing a security guard's clothes, and the comment above it claims a guarantee
+(*"provably ours"*) that the code delivers by accident rather than by check.
+
+### The one this tree already got right, twenty lines away
+
+`src/estimate.rs:561-562`:
+
+```rust
+    let path = dir.join("candidate");
+    let _ = std::fs::remove_file(&path);
+```
+
+**Unconditional.** No `exists()`, no decode, no name test — so it severs a dangling symlink and a
+hardlink alike, and only then does `build` reach `Writer::create`. That is the correct form of the
+code in `PXX-C9-001`, in the same crate, written by the same hand, and it is not a security guard at
+all: its doc-comment says *"The scratch file is removed before returning, whatever happened."* It gets
+the shape right for an unrelated reason.
+
+Which is the class-9 lesson at its sharpest. The sweep did not have to invent a fix, or read an
+advisory, or reason about `openat2`. **The pattern was already in the tree, correct, and it was not
+copied twenty lines away.** What made the difference at the `apply` site was adding two conditions
+that each looked like caution.
+
+### The findings — ten filed, all tier-0 clear
+
+Every quote below was re-opened and confirmed verbatim at its cited range before filing. IDs take the
+`PXX-C9-` prefix for the same reason the verification tier took `PXX-T2-`: the origin stays legible,
+and the tier a finding owes is set by its severity, never by where it came from.
+
+| id | file:lines | mechanism | cat | severity | owner | conf |
+|---|---|---|---|---|---|---|
+| `PXX-C9-001` | `tasks.rs:1518-1526`, `:1574-1580` | `exists()` traverses, so a dangling symlink skips the removal and both sink branches follow it | security | **freeze-blocking** | 3 | certain |
+| `PXX-C9-002` | `tasks.rs:1522` | `is_our_temp(&str)` forces `to_str()`; a non-UTF-8 archive name skips the whole block, widening 001 to hardlinks and live symlinks. The passing branch is a tautology | security | **freeze-blocking** | 3 | certain |
+| `PXX-C9-003` | `store.rs:271-278` | the `.broken` copy-aside is `exists()`-gated the same way; `fs::copy` follows a dangling link, writes fully attacker-chosen bytes, then stamps the source's mode on the victim | security | fix-in-v2.5 | 4 | certain |
+| `PXX-C9-004` | `store.rs:329` | `atomic_write`'s pid-named tmp is `File::create` — follows; the rename then leaves `settings.toml` as the link | security | fix-in-v2.5 | 4 | probable |
+| `PXX-C9-005` | `tasks.rs:1340-1346` | `Lock::take`'s `create(true)` follows a dangling link and creates a zero-byte file at an arbitrary path. **The obvious fix is wrong — see below** | security | fix-in-v2.5 | 3 | certain |
+| `PXX-C9-006` | `tests/write_path.rs:944-957` | the orphan test plants an **ordinary file**; no link variant exists for the Apply temp, though extraction has exactly that at `read_path.rs:889` | test-gap | fix-in-v2.5 | 3 | certain |
+| `PXX-C9-007` | `ui/mod.rs:4064-4066` | a **fixed** name written straight into the shared temp dir — `indium-6-2-not-a-folder.txt`, no pid, no pre-removal; `fs::write` follows and truncates | security | fix-in-v2.5 | 1 | certain |
+| `PXX-C9-008` | `tasks.rs:2323-2327` | same shape: `indium-pxx-orphan`, fixed, no pid; plant the directory as a link and `File::create` puts `b"half an archive"` at the victim | security | fix-in-v2.5 | 3 | certain |
+| `PXX-C9-009` | `estimate.rs:716`, `tasks.rs:2575`, `window.rs:222` | three pid-qualified test dirs with no pre-removal, where **nine** sibling helpers in this tree do it | security | fix-in-v2.5 | 1/3/4 | probable |
+| `PXX-C9-010` | `tasks.rs:1545` | the commit rename replaces a symlink the user deliberately keeps at the archive name, silently — not this class, and recorded so it is not lost | correctness | document-only | 3 | probable |
+
+**The register stands at 120.**
+
+### `PXX-C9-005` is the one where the mechanical fix reintroduces a fixed defect
+
+Nine of these ten want the same one-line answer: unlink first, unconditionally, the way
+`estimate.rs:562` does. **The lock file must not get it.**
+
+`Lock::take` opens with `truncate(false)` and never writes a byte; the file *is* the lock, and
+`flock` is held on the **inode**. Unlink-then-create hands two racing processes two different inodes,
+each holding a lock on its own, and both proceed. That is not a hypothetical — *"`flock` on an
+inode"* is on this round's own twelve-class list as class 3, a premise that did not survive contact,
+and it is already paid for once in this repository's history. A sweep that applied its own pattern
+uniformly would have re-opened it.
+
+So the fix here is the opposite one: **`O_NOFOLLOW`**, via
+`OpenOptionsExt::custom_flags(libc::O_NOFOLLOW)`, refusing the link without touching the name.
+
+And note *why* that is available here and was refused for `PXX-2-001`: `O_NOFOLLOW` does not refuse a
+hardlink, which is what disqualified it there — the payload would have landed in the victim inode. At
+the lock there is no payload. Zero bytes are ever written, so the hardlink case is harmless and the
+only thing needing refusal is the symlink. **The same flag is wrong at one site and right at the
+other, for a reason that is about the write and not about the flag** — which is exactly the
+distinction a uniform sweep flattens.
+
+### Two the sweep filed that tier 0 sent back
+
+Recorded, because a verification pass that only ever confirms is not a verification pass.
+
+**Refuted — `tests/write_path.rs:1154`.** The sweep reported that a panic between the `0o500`
+`set_permissions` and its restore *"leaves a directory `TempDir::drop`'s `remove_dir_all` cannot
+clear."* Re-reading the range shows the restore at `:1173` sits **before** the `read_dir` at `:1175`
+and the `assert_eq!` after it, with a second restore on the early-return path at `:1162` — and the
+comment above it states the reason in the sweep's own words: *"Put the mode back before asserting, or
+a failure here leaves a directory the harness cannot clear."* The hazard named is the hazard the code
+was written to avoid, and says so. **Not filed.**
+
+**Reframed — `store.rs:274`.** The sweep called `broken.exists()` *"the whole guard."* It is not a
+guard at all. The comment two lines above reads *"copy the file aside **once**"* — it is an
+idempotence policy, and there was never a link check at that site to be gated. The reachable outcome
+is unchanged, so `PXX-C9-003` stands as filed; the *characterisation* does not, and a fix framed as
+"repair the guard" would have looked for something that was never there.
+
+### Why 001 and 002 are freeze-blocking, with the asymmetry named rather than buried
+
+They are not as reachable as `PXX-2-001` was, and pretending otherwise would be its own defect.
+`PXX-2-001` took untrusted input from **the archive** — the thing INDIUM exists to open, untrusted by
+charter, with `CORE.md:102` naming the secure flags that were not in force. `PXX-C9-001` needs a local
+actor able to create a name in the directory the user is writing into. In `/tmp` at mode `1777` that
+is any account on the box; in the user's own `~/Archives` it is nobody. **That is a weaker precondition
+and it is stated here so the severity is not read as equivalent.**
+
+They are filed freeze-blocking anyway, on two grounds:
+
+1. **Freeze-blocking is a label about treatment, not about a score.** It is what routes a fix through
+   tier 3 — reviewed by an agent that did not write it, its diff carrying its own blast radius. That
+   is the treatment this fix needs, because it edits the commit path of the archive rebuild, and
+   `PXX-2-001`'s fix has just demonstrated that the two-way sabotage is where the real risk sits.
+2. **The record would otherwise be wrong.** `PXX-2-001` is written up in this document as closed. Ship
+   v2.5 with the identical write one function over still following links, and the round's own record
+   describes a class as handled when half of it is. That is class 5 — CORE and the record describing
+   behaviour the code lacks — committed knowingly, and it is the specific error that kept draft 3a
+   from being applied.
+
+`PXX-C9-003` through `010` are `fix-in-v2.5` and owe tier 2: independent confirmation by a
+non-originating agent, blind to the reasoning above and given only `file` + `line_range`.
+
+### What is not written yet, and why
+
+**No code changed in this section.** The build lane is held by the tier-3 review of `401c5d5`, and
+`src/tasks.rs` is not to be edited underneath a reviewer that may be running `cargo test` against the
+tree — a spurious failure attributed to the fix under review is worse than a delay. The fix for 001
+and 002 is designed and recorded here so the design is on the record before the diff exists:
+
+- Remove the temp **unconditionally**, matching `estimate.rs:562`, and report a hard error on anything
+  other than `NotFound` — which also turns a directory at that name into a sentence instead of a
+  confusing failure two calls later.
+- Keep the *"provably ours"* guarantee the comment claims, but at `OsStr` level: an
+  `is_our_temp_os(&OsStr)` that `is_our_temp(&str)` delegates to. Dropping the check instead would
+  falsify the comment above it, which is class 1 — and correcting the code by breaking the prose is
+  not a trade this round is allowed to make.
+- The same `to_str()` skip exists at `ui/mod.rs:2995-3003` in `on_exit`, where it only leaves litter.
+  One root, two call sites; the second is noted here so it is not found third.
+
+Tier 3 applies to that diff when it exists, exactly as it did to `401c5d5`.
