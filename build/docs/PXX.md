@@ -4071,3 +4071,90 @@ These four exist because something outside the milestone was sent to read it.
 register twice while being wrong twice — and the `159 → 163` line above was produced by adding four
 to a number that inherits both errors. It is stated rather than silently corrected, because
 correcting the total would hide the finding, and the total is not what is wrong.
+
+## Phase 3 — addendum: the hash index, and the census stated
+
+Closing `PXX-C12-001` and `PXX-C12-004`. Both are `document-only`, and both are fixed **here rather
+than in the rows they concern**, because rule 4 governs: *"A P-document is a record of what was
+believed at the time"* — corrections go in addenda, and the earlier text stays exactly as written.
+Editing `:2611` to say "fixed" would make the register appear never to have been wrong, which is the
+one repair this project does not permit.
+
+### The hash index
+
+Seven findings are closed in the tree by three commits this document never names. Each row below was
+verified by `git log --oneline -1 <hash>` and by reading the commit's own subject line, and the
+absence was verified by `grep -c` returning `0` for all three hashes across the whole document.
+
+| finding | filed at | superseded by the section at | closed by | the commit's own subject |
+|---|---|---|---|---|
+| `PXX-C9-007` | `:2223`, confirmed `:2487` | `:2963` | `cd90057` | *"PXX-C9-007/008/009: the predictable names in the shared temp directory, closed by a lint rather than by four edits"* |
+| `PXX-C9-008` | `:2224`, confirmed `:2488` | `:2963` | `cd90057` | as above |
+| `PXX-C9-009` | `:2225`, confirmed `:2489` | `:2963` | `cd90057` | as above |
+| `PXX-C9-017` | `:3016` | — filed already closed | `cd90057` | as above — the lint's own first draft was wrong and was corrected before landing |
+| `PXX-C9-014` | `:2611`, **"not fixed — the fix is not a one-liner"** | `:2934` | `318d9e6` | *"PXX-C9-014: a lock file this account cannot write is still a lock file"* |
+| `PXX-10-001` | `:987`, confirmed `:1232` | `:2617` | `429b97f` | *"PXX-10-001: the dangling doc citation is fixed, and a test now reads every citation like it"* |
+| `PXX-T2-001` | `:1294`, confirmed `:1728` | `:2617`, discussed at `:2622` | `429b97f` | as above |
+
+**Every line number in that table was re-grepped here, and the ledger's were wrong** — not in
+substance but in kind: its line column pointed at superseding section headers for some rows and at
+filing rows for others, so `PXX-C9-007` arrived as `:2963` and `PXX-10-001` as `:2619`. Both numbers
+name something real; neither names the row the column claimed. Splitting the column in two is the
+repair, and it is more useful than either version, because the pair of numbers *is* the finding:
+a filing that says one thing and a section that supersedes it.
+
+That is the fourth citation correction this round has made to a report it commissioned — three in the
+tier-3 review of `da6c821`, one here — and **not one of the four touched a claim.** Tier 0 is doing
+exactly what it was specified to do: *"mechanical, no judgement"*, rejecting drift without ruling on
+truth. It is also, by now, the most reliably productive step in the pipeline.
+
+`PXX-C9-014`'s is the row worth reading twice. The findings table says *"not fixed"*; the section six
+hundred lines later describes the fix in full; and under rule 4 the later section governs, so **the
+document was never wrong — its index simply disagrees with its body.** A reader who consults the
+table, which is the thing built to be consulted, gets the wrong answer and has no hash to check it
+against. That is what this index is for.
+
+**The commit messages themselves are not the problem and should not be read as one.** All three name
+their findings precisely; `cd90057` even explains its own strategy. The traceability existed the whole
+time, in `git log`. What was missing was any thread from the document to it.
+
+### The census, stated
+
+`PXX-C12-004`: the register agrees with itself at 146 and again at 159, over two different sets of
+findings, because two counting errors cancel exactly. Stating the census is the fix — the total is
+already right, and correcting a total that is not wrong would only hide the finding.
+
+**A census over this document counts an ID string of the form `PXX-<segment>-<nnn>`, and must then
+apply two corrections:**
+
+| correction | why |
+|---|---|
+| **subtract `PXX-9-008`** | It is a numbering gap and not a finding. `:1151`: *"A numbering gap at `PXX-9-008`, unexplained. No finding is lost."* A pattern census picks the string up anyway. |
+| **add `PXX-385`** | It is a real finding — *"closed seed, never severity-tagged"* at `:900`, `:1709` and `:2004` — whose two-segment ID matches no three-segment pattern. |
+
+Net zero, which is precisely why the error survived being checked. The document's own accounting
+route — 95 fleet findings, plus `PXX-385`, plus the T2, T3, T3B and C9 blocks — reaches the same
+number over the correct set, and is the one to prefer.
+
+**Why this is worth an addendum rather than a footnote.** The hunt list names class 2 as *"a number
+nothing can check"* and declares it the one class this project has never beaten: *"Every number a
+test can reach has been right for sixteen milestones. This is the class that has not."* This number
+**was** checked — mechanically, twice, at two document lengths — and it agreed both times while being
+wrong both times. A check that passes for the wrong reason is worse than no check, because it retires
+the question. The census above is the smallest thing that makes the next recomputation reproducible
+rather than coincidental.
+
+### The findings
+
+| id | severity | now |
+|---|---|---|
+| `PXX-C12-001` | document-only | **fixed** — the hash index above; the rows themselves are untouched, per rule 4 |
+| `PXX-C12-004` | document-only | **fixed** — the census stated above, with both corrections named |
+
+**No new IDs. Register stands at 163.** Suite unchanged at **405** — neither of these is reachable by
+a test, and `PXX-C12-004` is a finding about the limits of exactly that.
+
+Two of the four remain open and both are the maker's business more than a clerk's: `PXX-C12-002`, the
+`freeze-blocking` fix at `25be01d` whose owed tier-3 review has still never been run, where **the fix
+is a review**; and `PXX-C12-003`, tier 2 having silently repaired a citation in a round whose own
+tier 0 exists to distinguish a repaired citation from an unnoticed one.
