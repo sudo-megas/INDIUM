@@ -6285,3 +6285,195 @@ Four reviews, four non-ACCEPT verdicts, and between them one wrong patch caught 
 out to understate it. **The more common failure was a correct diagnosis with a patch that closed the
 door it was pointed at and left the one beside it open**, three times out of four, each time invisible
 to a suite the author had just extended on purpose.
+
+### Addendum — the ledger was not empty when this document said it was
+
+The section above is headed *"The process ledger is now empty"* and its second sentence reads:
+
+> **Every `freeze-blocking` fix in this round has been read by an agent that did not write it.**
+
+**That was false the moment it was committed, and it was falsified by the commit immediately before
+it.** `5ccdfcb` closes `PXX-T3-049` — the rebuilt archive sitting world-readable at a predictable
+scratch name for the whole rebuild, filed `freeze-blocking` and measured at 647 ms. By the round's own
+tier-3 rule that fix owes a review by an agent that did not write it, exactly as the four before it
+did. It had none. The sentence counted the three obligations it could see and did not count the one it
+had just created.
+
+### Why it was not visible, which is the part worth recording
+
+The obvious reading is that a fourth row was forgotten. The register says something worse. **The three
+prior obligations were opened three different ways, and no two of them the same:**
+
+| | how it was opened | severity as filed | when |
+|---|---|---|---|
+| `PXX-C12-006` | a register row, `:4794` | `freeze-blocking (process)` | as the fixes landed |
+| `PXX-C12-009` | **prose only**, `:5435-5437` — *"filed as `PXX-C12-009`"* | none stated | as the fix landed |
+| `PXX-C12-002` | a register row, `:4057` | **`fix-in-v2.5`** | **retrospectively, by the clerk pass** |
+
+`-009` never had a register row at all until the row that discharged it, at `:6098`. `-002` was not
+noticed by the round that incurred it; it was found later, by an audit of the register, and filed at a
+severity one step below the rule that generates it.
+
+So there was never a ledger to read. **There was a habit of remembering, and it happened to hold three
+times.** The sentence *"the process ledger is now empty"* describes an instrument that does not exist:
+the only way to know whether a freeze-blocking fix owed a review was for the person writing the
+sentence to recall having written the fix. On the fourth occasion the fix and the sentence were written
+in the same sitting, which is precisely the case where recall is least likely to fire — the obligation
+and its denial were one breath apart.
+
+**This is class 2 — a number nothing can check — in the paragraph announcing that the round's process
+debt was clear.** And it is class 9 alongside it: the round's four reviews found, three times in four,
+a correct diagnosis whose patch closed the door it was pointed at and left the one beside it open. The
+closing sentence did the same thing to the process. It closed the three rows it was pointed at and left
+the fourth — created by the very commit it was reporting on — unopened. *A sweep is not a habit*, and
+this round has now demonstrated that on itself.
+
+### What actually closes it
+
+Not a better memory. `PXX-C12-012` is filed for the review `5ccdfcb` owes, **and filed as a row, at
+`freeze-blocking (process)`, which is the shape `-006` had and the other two did not.** The verdict is
+below.
+
+The general repair is one line and it is stated here rather than built, because a freeze is not the
+round to add machinery to: **a commit that closes a `freeze-blocking` finding opens its own
+`PXX-C12-nnn` row in the same commit, before the fix is described as done.** Written into the
+Deviations section so the next round inherits the rule rather than the habit.
+
+## Phase 3 — the tier-3 verdict on `5ccdfcb`: **AMEND**, and the fix broke what it was protecting
+
+`PXX-C12-012` is discharged. **Five tier-3 reviews have now reported on five commits: REPLACE,
+AMEND, AMEND, AMEND, AMEND.** Not one has returned ACCEPT at first reading, and this one found the
+worst defect of the round: **a functional regression shipped inside the fix for a freeze-blocking
+finding, against exactly the archives that finding existed to protect.**
+
+### F1 — Apply refused every archive its owner could not write
+
+`5ccdfcb` staged the rebuild's temp at the archive's exact mode before a byte existed. Correct in
+aim. But **neither writer writes through the handle that created the file** — libarchive reopens the
+name in `archive_write_open_filename`, `sevenz` in `ArchiveWriter::create`, both
+`O_WRONLY|O_CREAT|O_TRUNC`. Staged at a mode with no owner-write bit, that reopen answers `EACCES`.
+
+Measured through the real `tasks::apply`, at HEAD and with the block disabled:
+
+| archive mode | HEAD (`5ccdfcb`) | parent commit |
+|---|---|---|
+| `0444` | **apply ERR** | apply OK, final mode `0444` |
+| `0400` | **apply ERR** | apply OK, final mode `0400` |
+| `0460` | **apply ERR** | apply OK, final mode `0460` |
+
+A rename needs permission on the **directory**, not on the file, so a read-only archive was always
+rebuildable. The mode-carrying work of this entire round exists to preserve modes like those. **The
+fix for the exposure took the feature away from the files it was protecting.**
+
+Two things make it worse than a slip. The comment claimed parity with `arch.rs`'s extraction write —
+**and that parity was false again, for the opposite reason it was false last time.** `arch.rs` writes
+through the handle it opened, so no mode can lock it out; `tasks.rs` throws the handle away and hands
+a library the name. Last round the claim was false because `arch.rs` opened at the target mode and
+`tasks.rs` did not; this round it is false because `arch.rs` keeps its descriptor and `tasks.rs` does
+not. **The same sentence, wrong twice, for opposite reasons, in consecutive commits.**
+
+And the class was already litigated **one screen down in the same file**. `tasks.rs:3131-3132` at the
+commit that fixes this — `:3097-3098` at the commit being reviewed, because the fix inserted 34 lines
+above it, and a citation written before a fix and read after it is the drift tier 0 exists to catch.
+On the lock file:
+
+> it costs the case where the file exists and this account may not write it: `Lock::take` then
+> refuses, and it refuses *every* Apply on that archive, for good.
+
+That reasoning was written in this round, by this hand, and rejected asking for write access on those
+grounds. The pre-create then did the same thing eighty lines up. The user-facing sentence was
+libarchive's raw `Failed to open '….indium-new'` — naming the internal temp, which is the precise
+fault `PXX 9.5` records at `tests/write_path.rs:207-209`.
+
+**Fixed.** Owner read-write goes back on the **descriptor** after `create_new`, group and other
+untouched, so never-wider is intact and only the account doing the rebuild gains anything. The
+reviewer's measured candidate was `.mode((mode & 0o7777) | 0o200)`; **the descriptor form was taken
+instead and the difference was measured, not argued** — `open`'s mode is masked by the umask and
+`fchmod` is not:
+
+```
+--- umask 0222 ---   open(.mode 0644) -> 444      + fchmod(0644|0600) -> 644
+--- umask 0227 ---   open(.mode 0644) -> 440      + fchmod(0644|0600) -> 644
+```
+
+Under `umask 0222` the `| 0o200` form stages a plain `0644` archive unwritable and fails identically;
+the umask masks the very bit it adds. Verified against the reviewer's own preserved probe: `0444`,
+`0400`, `0460` all `apply OK` with the mode exact and the bytes intact. `0200` and `0000` still fail,
+before and after, because `list_all` cannot read the source — the message names the source archive,
+not the temp, which is how that was told apart from the regression.
+
+### F2 — the new gate asked the wrong question, in its own name
+
+`the_rebuilds_scratch_file_is_never_wider_than_the_archive` filtered on `*m & 0o007 != 0` — *is the
+world triad occupied* — while its name promises *wider than the archive*. Mutating the pre-create to
+`| 0o040` passed all 415 with the scratch file holding the complete rebuilt archive at `0640`. On a
+`0600` archive that is `PXX-T3-049`'s own class, **at the site it was filed against, invisible to the
+gate written to close it.**
+
+Now a subset test against the archive's own bits, so a legitimate umask-narrowed staging still passes
+and a widened one cannot.
+
+**And the predicate was only half the fix, which sabotage found and reasoning had not.** With the
+fixture at `0640`, a staging widened by `| 0o040` adds a bit the archive already carries — so the
+corrected predicate reports nothing and the mutation passed **36 of 36**. The fixture moved to `0600`
+and it reds. *A bound is only a bound where the fixture leaves room beneath it*, which is the same
+observation as tier 3's about the gate it replaced, one level further in.
+
+### F3 — the pre-create disarmed the gate that was already there
+
+`an_apply_does_not_widen_the_mode_of_the_archive_it_rebuilds` used a `0640` fixture. Once the temp is
+staged at the archive's mode, `umask 022` lands it at `0640` anyway — so **the entire exact-restore
+block can be deleted and all 415 still pass.** That is not a gate that was always weak: at the parent
+commit the same deletion **reds** it. The commit disarmed a working gate by changing the code beneath
+it, which no mutation of the test itself would have revealed.
+
+`0666` was added on the reasoning that bits `umask 022`, `002` and `077` all clear would need the
+restore to put them back. **Measured, that reasoning is false — and it is false because of F1's fix,
+in the same commit.** The staging now chmods the descriptor to `mode | 0o600`, which for any mode
+already carrying owner read-write *is* the archive's mode, so the restore has nothing left to do.
+Sabotaging the restore reds the **new** read-only gate — `asked for 400, got 600` — and leaves the
+widen gate green at both fixtures.
+
+So the restore is load-bearing only where owner bits are missing, and that is what now pins it. `0666`
+stays for the third triad it exercises, with its rationale corrected in place rather than deleted.
+
+**This is the round's own finding turned on the round one more time.** A fix aimed at one gate changed
+what a second gate could see, and no amount of reading would have said which one held the property
+afterwards — only sabotaging both did. Two of the three gates in this commit were wrong on the first
+attempt, and both were caught by breaking them rather than by inspecting them.
+
+### What it refuted, which is worth as much
+
+- **The sharpest question in the brief came back negative.** `fchmod` before `write_all` in
+  `atomic_write` cannot fail to write its own file: at prior modes `0400`, `0000`, `0200` the second
+  write is `Ok` with the mode and content exact, **and so is the third** — the unlink plus a fresh
+  `File::create` means the next save never opens the narrowed inode.
+- **The watcher gate is neither flaky nor vacuous** — 60/60 unloaded, 25/25 under 8-way load on 8
+  cores, with **113 728 – 200 188** observations of the temp per run.
+- **Neither writer is broken by the pre-create**: tar.gz, zip and plain 7z round-trip; a `0600` plain
+  7z rebuilt into an encrypted 7z succeeds, lists with the password, refuses without it, final mode
+  `0600`.
+- **Every failure path is honest and safe** — a directory at the temp, a dangling link, a live link,
+  a read-only parent: the archive is untouched and the temp is never left behind on any of them.
+- **`fs::copy` to `.broken` has no umask window.** The reviewer expected the same class and measured
+  itself wrong: `["0600"]` across 24 564 observations on a 100 MB source. Rust's `std` opens the
+  destination at the source mode.
+- **setuid/setgid/sticky end state is unchanged** from `25be01d`, and `estimate`'s scratch cannot
+  collide with the `create_new`.
+- **Two named mutations survive and are already on the register** — `create_new`→`create` is
+  `PXX-3-009`, path-`set_permissions`-after-`sync_all` is `PXX-T3-054`. Not re-filed.
+
+### The findings
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-T3-055` | `tasks.rs` pre-create | Apply refused every archive with no owner-write bit — a regression shipped inside the fix for `PXX-T3-049`, against the archives it protects | **freeze-blocking** | **fixed, gated, sabotage-checked** |
+| `PXX-T3-056` | `write_path.rs` watcher gate | the wideness predicate was world-only, so group widening at the staging site passed at 415 | fix-in-v2.5 (test-only) | **fixed** |
+| `PXX-T3-057` | `write_path.rs` widen gate | the pre-create disarmed it: the exact-restore block deletes green at HEAD and reds at the parent | fix-in-v2.5 (test-only) | **fixed with a `0666` case** |
+| `PXX-T3-058` | `tasks.rs` staging message | named `.indium-new` and omitted *"so nothing was written"*, which every sibling refusal carries | document-only | **fixed** |
+| `PXX-T3-059` | `store.rs` `.broken` notice | a live symlink to a non-copy still reads *"A copy is at …"* — consistent with the stated "there to read" intent | no-action | recorded |
+| `PXX-T3-060` | `tasks.rs` pre-create | `& 0o7777` inside `.mode()` is not load-bearing; `open` masks with `S_IALLUGO` | no-action | recorded |
+| `PXX-C12-012` | this round's process | `5ccdfcb`'s owed review, and the false claim that the ledger was empty | freeze-blocking (process) | **discharged — AMEND, amendments applied** |
+| `PXX-C12-013` | this round's process | **`PXX-T3-055` is freeze-blocking, so its fix owes a review by an agent that did not write it.** Opened here, in the commit that fixes it, at the severity the rule generates — which is the repair the addendum above prescribed | **freeze-blocking (process)** | **open** |
+
+**Eight new IDs. Register 207 → 215.**
