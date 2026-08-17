@@ -1315,8 +1315,15 @@ fn an_apply_on_an_archive_its_owner_cannot_write_is_still_rebuilt() {
     use std::os::unix::fs::PermissionsExt;
 
     let dir = TempDir::new("apply-readonly");
-    // `0o400` owner-read only, `0o444` the classic read-only file, `0o460` no owner-read but
+    // `0o400` owner-read only, `0o444` the classic read-only file, `0o460` owner-read plus
     // group-write — three shapes with no owner-write bit and nothing else in common.
+    //
+    // **All three carry owner-read, and that is not incidental.** A mode that lacks it never
+    // reaches the staging block at all: `arch::list_all(&input.target, …)` opens the source first
+    // and dies, with a message naming the archive rather than the temp. Tier 3 measured the split
+    // — `0o060 0o006 0o200 0o002 0o040 0o004 0o000` all fail at the read, `0o400 0o444 0o460
+    // 0o440 0o404 0o406` all rebuild. So the reachable half of the regression is exactly the
+    // owner-readable, owner-unwritable half, and these are three of it.
     for want in [0o400u32, 0o444u32, 0o460u32] {
         let path = dir.join(&format!("ro-{want:o}.tar.gz"));
         write_payload(&path, &recipe(&path, Method::Gzip));
@@ -1967,6 +1974,17 @@ fn the_rebuilds_scratch_file_is_never_wider_than_the_archive() {
     // invisible and the corrected predicate reports nothing. Measured — the sabotage passed
     // 36/36 until this line moved. A bound is only a bound where the fixture leaves room
     // beneath it.
+    //
+    // **That measurement no longer reproduces, and the reason is the fix in its own commit.**
+    // At `5ccdfcb` the pre-create's `.mode()` was the only thing setting the temp's mode, so
+    // `| 0o040` persisted for the whole rebuild and a spin-loop observer could not miss it. The
+    // staging chmod now overwrites it one statement later, leaving a window of two syscalls —
+    // tier 3 re-ran that sabotage fifteen times at HEAD and got nine reds. The gate is not flaky
+    // in the direction that matters: every widening that *persists* is killed deterministically
+    // (`| 0o700`, `| 0o640`, and deleting the block outright), and ten clean runs gave zero reds.
+    // What became transient is the pre-create argument, which is now belt to the chmod's braces.
+    // Recorded rather than re-fitted: pinning a two-syscall window wants a hook, not a poller,
+    // and this round has spent four findings on gates that polled and measured nothing.
     const ARCHIVE_MODE: u32 = 0o600;
     fs::set_permissions(&path, PermissionsExt::from_mode(ARCHIVE_MODE)).expect("could not tighten");
 
@@ -2005,18 +2023,27 @@ fn the_rebuilds_scratch_file_is_never_wider_than_the_archive() {
     // filed against, invisible to the gate written to close it.
     //
     // A subset rather than an equality: the umask may legitimately land the staged file narrower
-    // than the archive before the exact restore, so `0640` seen on a `0660` archive is a pass and
-    // `0644` is not. Owner bits are in the comparison too — the staging adds owner-write on the
-    // descriptor, which `0640` already carries, so nothing here is excused by construction.
+    // than the archive before the exact restore, so `0o640` seen on a `0o660` archive is a pass
+    // and `0o644` is not.
+    //
+    // Owner bits are in the comparison too, and against this fixture that is sharper than it
+    // sounds. The mask is `!0o600 & 0o777` = `0o177`, so the only owner widening that exists
+    // here is `+x` — and it is inside the mask, which tier 3 confirmed by mutating the staging
+    // to `| 0o700` and watching this gate red alone. Nothing in the owner triad is excused by
+    // construction.
     let wide: Vec<String> = seen
         .iter()
         .filter(|m| *m & !ARCHIVE_MODE & 0o777 != 0)
         .map(|m| format!("{m:o}"))
         .collect();
+    // Octal, because the sentence around it is octal. `{seen:?}` on a `Vec<u32>` prints decimal,
+    // so the one list a reader needs in order to diagnose a widening read `[448, 384]` beside an
+    // `(offending: ["700"])` and a `set to 600` — the failure message defeating its own purpose.
+    let saw: Vec<String> = seen.iter().map(|m| format!("{m:o}")).collect();
     assert!(
         wide.is_empty(),
         "the rebuild's scratch file was wider than the archive while it held the archive's \
-         bytes: saw modes {seen:?} (offending: {wide:?}) for an archive the user set to \
+         bytes: saw modes {saw:?} (offending: {wide:?}) for an archive the user set to \
          {ARCHIVE_MODE:o}"
     );
 }

@@ -1683,6 +1683,21 @@ pub fn apply(
     // the rebuild, which already holds the bytes in memory. `fchmod` rather than widening the
     // `.mode()` argument, because `open`'s mode is masked by the umask and `fchmod` is not: under
     // `umask 0222` a plain `0644` archive would otherwise stage unwritable and fail the same way.
+    //
+    // The umask is only half the reason, and on its own it would not have picked `fchmod` over a
+    // chmod by path — that is unmasked too. The other half is `store::atomic_write`'s, written at
+    // the identical hazard: *"`File::set_permissions` is `fchmod` on the descriptor already open,
+    // so neither the umask default nor a name re-planted after the unlink can intervene."* Here
+    // the descriptor is the one `create_new` has just returned, so no name is looked up at all.
+    //
+    // **The exact restore before the rename cannot have that property, and does not.** By then
+    // both writers have closed the file and only the path remains, so it is
+    // `std::fs::set_permissions(&temp, …)` — a path chmod, which follows symlinks. A racer who
+    // re-plants that name in the window `PXX-3-009` describes gets a file of their own choosing
+    // chmodded to the archive's mode. That is a further consequence of an already-recorded race
+    // rather than a new one, and it is written here because the asymmetry inside this single
+    // function is otherwise invisible: descriptor at the top, path at the bottom, and only the
+    // top one is safe by construction.
     if let Some(mode) = prior_mode {
         use std::os::unix::fs::OpenOptionsExt as _;
         let staged = std::fs::OpenOptions::new()
