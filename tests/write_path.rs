@@ -1248,29 +1248,105 @@ fn an_apply_does_not_widen_the_mode_of_the_archive_it_rebuilds() {
     use std::os::unix::fs::PermissionsExt;
 
     let dir = TempDir::new("apply-mode");
-    let path = dir.join("out.tar.gz");
-    write_payload(&path, &recipe(&path, Method::Gzip));
 
-    // The user's stated intent about who may read this archive.
+    // Two modes, and the second is not decoration.
     //
     // `0o640` and not `0o600`: tier 3 mutated the shipping code to `from_mode(0o600)` and the
     // whole suite passed, because the fixture asked for exactly the constant a hardcoding
     // implementation would choose. `0o640` is neither that nor the umask default `0o644`.
-    fs::set_permissions(&path, PermissionsExt::from_mode(0o640))
-        .expect("could not tighten the archive");
+    //
+    // `0o666` adds a third triad — world-write — to what this gate proves about mode fidelity,
+    // and that is all it does. It does **not** re-arm the exact restore, and the attempt to make
+    // it do so is recorded here rather than dropped.
+    //
+    // Tier 3 found this gate disarmed: with the temp staged at the archive's mode, `umask 022`
+    // lands a `0o640` fixture at `0o640` anyway, so the whole restore block deleted green at
+    // `5ccdfcb` while reddening at its parent. `0o666` was added on the reasoning that bits
+    // `umask 022`, `002` and `077` all clear would need the restore to come back. **Measured,
+    // that is false**, and it is false because of the fix in the same commit: the staging now
+    // chmods the descriptor to `mode | 0o600`, which for any mode already carrying owner
+    // read-write *is* the archive's mode, so the restore has nothing left to do. The restore is
+    // load-bearing only where owner bits are missing — and that is pinned, by
+    // `an_apply_on_an_archive_its_owner_cannot_write_is_still_rebuilt`, which reds with
+    // `asked for 400, got 600` when the restore is disabled.
+    //
+    // The lesson is the round's own: a fix aimed at one gate changed what a second gate could
+    // see, and only sabotaging both revealed which one now holds the property.
+    for want in [0o640u32, 0o666u32] {
+        let path = dir.join(&format!("out-{want:o}.tar.gz"));
+        write_payload(&path, &recipe(&path, Method::Gzip));
+        fs::set_permissions(&path, PermissionsExt::from_mode(want))
+            .expect("could not set the archive's mode");
 
-    let (result, _) = run_apply(&input_for(&path, Vec::new()), &no_cancel());
-    result.expect("an empty Apply must succeed");
+        let (result, _) = run_apply(&input_for(&path, Vec::new()), &no_cancel());
+        result.expect("an empty Apply must succeed");
 
-    let mode = fs::metadata(&path)
-        .expect("the archive must still be there")
-        .permissions()
-        .mode()
-        & 0o777;
-    assert_eq!(
-        mode, 0o640,
-        "rebuilding must not widen a mode the user tightened; got {mode:o}"
-    );
+        let mode = fs::metadata(&path)
+            .expect("the archive must still be there")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode, want,
+            "rebuilding must carry the archive's mode exactly; asked for {want:o}, got {mode:o}"
+        );
+    }
+}
+
+/// `PXX-T3-055`: an archive its owner may not write is still an archive INDIUM can rebuild.
+///
+/// The rebuild is staged beside the archive and renamed over it, and a rename needs permission on
+/// the **directory**, not on the file — so a `0o444` archive was always rebuildable, and the
+/// mode-carrying work exists precisely to preserve modes like that one. `5ccdfcb` then began
+/// staging the temp at the archive's exact mode, and neither writer writes through the handle that
+/// created it: libarchive reopens the name in `archive_write_open_filename` and `sevenz` in
+/// `ArchiveWriter::create`, both `O_WRONLY|O_CREAT|O_TRUNC`. With no owner-write bit that reopen
+/// answers `EACCES`, and every Apply on such an archive died — the fix for one freeze-blocking
+/// finding creating another, on the very archives it was protecting.
+///
+/// A removal rather than an empty Apply, deliberately: an empty Apply can pass while proving only
+/// that nothing crashed, and this gate has to show the rebuild reached the disk through a file the
+/// account cannot write.
+///
+/// Sabotage-checked by dropping `| 0o600` from the staging chmod — this test reds and no other
+/// does, at every one of the three modes below.
+#[test]
+fn an_apply_on_an_archive_its_owner_cannot_write_is_still_rebuilt() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new("apply-readonly");
+    // `0o400` owner-read only, `0o444` the classic read-only file, `0o460` no owner-read but
+    // group-write — three shapes with no owner-write bit and nothing else in common.
+    for want in [0o400u32, 0o444u32, 0o460u32] {
+        let path = dir.join(&format!("ro-{want:o}.tar.gz"));
+        write_payload(&path, &recipe(&path, Method::Gzip));
+        fs::set_permissions(&path, PermissionsExt::from_mode(want))
+            .expect("could not set the archive's mode");
+
+        let tasks_list = vec![Task::Remove {
+            path: "sub/beta.txt".to_string(),
+        }];
+        let (result, _) = run_apply(&input_for(&path, tasks_list), &no_cancel());
+        result.unwrap_or_else(|e| {
+            panic!("an Apply on a {want:o} archive must succeed, and it said: {e}")
+        });
+
+        let after = arch::list_all(&path, None).expect("the rebuilt archive must list");
+        assert!(
+            after.iter().all(|e| e.path != "sub/beta.txt"),
+            "the removal must have reached the disk on a {want:o} archive"
+        );
+        let mode = fs::metadata(&path)
+            .expect("the archive must still be there")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode, want,
+            "the archive's own mode must survive a rebuild it could not write; \
+             asked for {want:o}, got {mode:o}"
+        );
+    }
 }
 
 /// P4 §2: "a crashed Apply leaves exactly one leftover per archive rather than an
@@ -1882,7 +1958,17 @@ fn the_rebuilds_scratch_file_is_never_wider_than_the_archive() {
         writer.finish().expect("could not finish");
     }
 
-    fs::set_permissions(&path, PermissionsExt::from_mode(0o640)).expect("could not tighten");
+    // The bound this gate measures against. Named, because the assertion below compares every
+    // observed mode to *this* rather than to a hardcoded triad.
+    //
+    // `0o600` and not `0o640`, and the difference is the whole gate. Fixing the predicate to
+    // compare against the archive's own bits was not enough: with a `0o640` fixture, a staging
+    // widened by `| 0o040` adds a bit the archive already carries, so the mutation stays
+    // invisible and the corrected predicate reports nothing. Measured — the sabotage passed
+    // 36/36 until this line moved. A bound is only a bound where the fixture leaves room
+    // beneath it.
+    const ARCHIVE_MODE: u32 = 0o600;
+    fs::set_permissions(&path, PermissionsExt::from_mode(ARCHIVE_MODE)).expect("could not tighten");
 
     let temp = tasks::temp_path_for(&path);
     let stop = Arc::new(AtomicBool::new(false));
@@ -1912,14 +1998,25 @@ fn the_rebuilds_scratch_file_is_never_wider_than_the_archive() {
         "the watcher never saw the scratch file at all, so this gate measured nothing — \
          raise the payload size rather than trusting the pass"
     );
+    // Wider **than the archive**, which is what this test is named for — not "does the world
+    // triad have anything in it", which is what it used to ask. Tier 3 mutated the pre-create to
+    // `| 0o040` and this gate passed at 415 while the scratch file held the complete rebuilt
+    // archive at `0640`. On a `0600` archive that is `PXX-T3-049`'s own class, at the site it was
+    // filed against, invisible to the gate written to close it.
+    //
+    // A subset rather than an equality: the umask may legitimately land the staged file narrower
+    // than the archive before the exact restore, so `0640` seen on a `0660` archive is a pass and
+    // `0644` is not. Owner bits are in the comparison too — the staging adds owner-write on the
+    // descriptor, which `0640` already carries, so nothing here is excused by construction.
     let wide: Vec<String> = seen
         .iter()
-        .filter(|m| *m & 0o007 != 0)
+        .filter(|m| *m & !ARCHIVE_MODE & 0o777 != 0)
         .map(|m| format!("{m:o}"))
         .collect();
     assert!(
         wide.is_empty(),
-        "the rebuild's scratch file was readable by everyone while it held the archive's bytes: \
-         saw modes {seen:?} (offending: {wide:?}) for an archive the user set to 0640"
+        "the rebuild's scratch file was wider than the archive while it held the archive's \
+         bytes: saw modes {seen:?} (offending: {wide:?}) for an archive the user set to \
+         {ARCHIVE_MODE:o}"
     );
 }

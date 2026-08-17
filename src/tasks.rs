@@ -1666,14 +1666,46 @@ pub fn apply(
     // `open`'s mode is masked by the umask, so this can land narrower than `prior_mode` but never
     // wider; the exact restore still happens on the temp before the rename. Both writers open the
     // pre-created file with `O_TRUNC`, so staging it empty costs them nothing.
+    //
+    // **Owner read-write is put back on the descriptor, and it is not optional.** The parity with
+    // `arch.rs` claimed above holds for the group and other bits alone. `arch.rs` writes through
+    // the handle it opened, so no mode can lock it out; both writers here are handed the *name*
+    // and reopen it `O_WRONLY|O_CREAT|O_TRUNC` — `archive_write_open_filename` in one,
+    // `ArchiveWriter::create` in the other. Staged at the archive's exact mode, an archive with no
+    // owner-write bit (`0400`, `0440`, `0444`, `0460`) reopens `EACCES` and the Apply dies on an
+    // archive that rebuilt perfectly well before this block existed. That is the fault class
+    // `PXX-C9-014` refused for the lock file one screen down — *"it costs the case where the file
+    // exists and this account may not write it"* — reintroduced here by the fix for a different
+    // one, and it lands hardest on exactly the archives the mode-carrying work exists to protect.
+    //
+    // Group and other keep the archive's own bits untouched, so the never-wider guarantee this
+    // block was written for is intact; the only account that gains anything is the one performing
+    // the rebuild, which already holds the bytes in memory. `fchmod` rather than widening the
+    // `.mode()` argument, because `open`'s mode is masked by the umask and `fchmod` is not: under
+    // `umask 0222` a plain `0644` archive would otherwise stage unwritable and fail the same way.
     if let Some(mode) = prior_mode {
         use std::os::unix::fs::OpenOptionsExt as _;
-        std::fs::OpenOptions::new()
+        let staged = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(mode & 0o7777)
             .open(&temp)
-            .map_err(|e| format!("could not stage the rebuild at {}: {e}", temp.display()))?;
+            .map_err(|e| {
+                format!(
+                    "the rebuild could not be staged beside {} ({e}), so nothing was written.",
+                    input.target.display()
+                )
+            })?;
+        let want = <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(
+            (mode & 0o7777) | 0o600,
+        );
+        if let Err(e) = staged.set_permissions(want) {
+            let _ = std::fs::remove_file(&temp);
+            return Err(format!(
+                "the rebuild could not be staged beside {} ({e}), so nothing was written.",
+                input.target.display()
+            ));
+        }
     }
 
     let outcome = build_and_verify(input, &plan, &source, &temp, tx, cancel);
