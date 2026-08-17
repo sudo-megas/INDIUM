@@ -3022,3 +3022,400 @@ Two of the round's own instruments have now produced findings against the hand t
 the doc-citation lint flagged its own doc comment, and the temp-name lint flagged its own
 justification and then its own source. **That is the instrument working.** A gate that only ever
 agrees with its author is the class-4 defect wearing a lab coat.
+
+## Phase 3 — `PXX-2-002`'s third look: a correct password refused on the commonest encrypted 7z there is
+
+The record said this one owed a third look before any patch, and said why: *"the fact that two
+independent reads of the same six lines produced two different defects is itself the finding"*
+(§ *The divergence*, above). The third look has run. Both faces are real and both are now measured.
+The patch built from them, `da6c821`, was then sent through tier 3 as a `freeze-blocking` fix must be
+— **and came back `REPLACE`.** What follows is written in the order it happened: the reasoning as it
+stood, then the two claims of it that did not survive being run, then the review that found them. The
+earlier text is not rewritten to look correct in hindsight; rule 4 is the whole reason this document
+is worth reading, and a section that quietly edits its own premises is class 12 with better
+manners.
+
+### The original's face: the flag asked one question and answered another
+
+```rust
+let headers_need_sevenz =
+    looks_like_7z(path) && Reader::open(path, passphrase)?.next_entry().is_err();
+```
+
+That asks whether libarchive can read the archive's **headers**, and it was used to decide who owns
+the **data**. For a 7z those are two different questions, and the gap between them is the ordinary
+case rather than an exotic one:
+
+- `7z a -p` is the 7-Zip command line's **default** — `-mhe=on` is what adds header encryption — so
+  it writes AES-256 content behind headers **in the clear**.
+- libarchive parses those headers happily. `next_entry()` returns `Ok`, the flag came back `false`,
+  and extraction stayed with libarchive.
+- **libarchive cannot decrypt 7z AES content at all.**
+
+So INDIUM listed the archive, showed its members, flagged them encrypted — and then refused every
+read with `Wrong password.`, with the right password in the user's hand. `list_all` calls `list_7z`
+first for any 7z and only falls through to libarchive when that returns `None`, which is why the
+listing looked healthy: the listing never went near the decoder that could not do the job.
+
+### The confirmer's face: routing alone is half a fix
+
+The blind confirmer, given only the line range, said the same flag was **load-bearing twice** —
+`if !headers_need_sevenz && !verify_passphrase(path, secret)?` — so the flag that routes the data
+also decides whether the password is checked at all. Reading it forward from the corrected routing
+makes the second half unavoidable:
+
+With the headers in the clear, **the listing succeeds whatever the password is**, so it verifies
+nothing. Route the data correctly and leave the verification where it was, and the first thing to
+notice a wrong key is the per-entry decode — by which time `create_dir_under` has already put
+directories into the destination. `arch.rs:1057`, `extract`'s own doc, promises the opposite:
+
+> so a wrong password costs nothing and leaves no
+> partial output behind.
+
+A fix that routes correctly and breaks that sentence is not a fix. **The verification therefore
+moves to the reader that can actually perform it, and runs while the filesystem is still
+untouched.**
+
+### What was measured, and what was only modelled
+
+Every claim the fix rests on was measured rather than reasoned, because the round's own record says
+the class that survives review is the premise that was never run. **One of them was run once, and
+once was not enough** — the struck row below is the whole lesson of this section, and it is the row
+the fix was built on.
+
+| claim | how it was established |
+|---|---|
+| libarchive 3.8.9 reads plaintext 7z headers and refuses the content | a `cc`-built probe against libarchive's own C API |
+| its refusal is **identical** for the right and the wrong password | the same probe, run twice; byte-identical output |
+| `verify_passphrase` answers "wrong" for a correct password here | run against the fixture through INDIUM's own function |
+| ~~`sevenz::read_entry` returns the plaintext for the right key and `WrongPassword` for a wrong one, **at `cap = 1`**~~ | ~~run at two caps against the same fixture~~ — **struck. One wrong password, generalised. False at 14/1500 on LZMA2 and false always on COPY** |
+| `Writer::create` cannot produce this archive shape | `sevenz.rs:331` — `inner.set_encrypt_header(recipe.encrypt);` |
+
+The probe's own words, which are what close the regression surface:
+
+```
+=== libarchive, RIGHT password ===
+open           : 0 (-)
+next_header    : 0 (-)  name=alpha.txt size=21 enc=1
+has_encrypted  : 1
+read_data      : -25 (The file content is encrypted, but currently not supported)
+libarchive     : libarchive 3.8.9
+=== libarchive, WRONG password ===   [byte-identical]
+```
+
+**"But currently not supported"** is libarchive telling the truth about itself. Its answer carried
+no information about the key, so the old code was not verifying a password — it was reporting a
+missing feature as a user error. And because it refuses this content outright, **routing every
+encrypted 7z member to the 7z reader takes nothing away from libarchive that it ever had.** An
+encrypted 7z using a codec `sevenz-rust2` lacks — `arch.rs:878` names bzip2, ppmd, deflate and
+zstd as absent — now gets *"this 7z uses X, which INDIUM's 7z reader does not decode"* instead of a
+false `Wrong password.`, which is a better sentence about the same failure.
+
+**Scope stated rather than assumed:** the refusal is measured on libarchive **3.8.9**, against a
+fixture written by `sevenz-rust2`. Whether it is fixture-independent — whether a genuine 7-Zip file
+would fare differently — is a separate question and was handed to tier 3 rather than assumed away.
+
+**"One byte is enough" was the reasoning, and tier 3 falsified it.** The argument ran: a wrong key
+survives AES decryption — there is nothing inside a CBC block to check a key against — but the LZMA2
+stream behind it does not survive being handed noise, so one byte discriminates and the cap stops a
+verification from decoding a gigabyte to learn what the first block already said.
+
+The middle step is not true. It is **probabilistic where it was written as categorical**, and it is
+**codec-specific where the code applies it unconditionally**. The reviewer measured **14 of 1500**
+random wrong passwords surviving the one-byte check on an LZMA2 member, and on an AES+COPY member —
+AES with no compressor behind it at all — the check returns `Ok((1, true))` for the right and the
+wrong password alike, discriminating nothing.
+
+**The measurement that produced the false claim was mine, and it was a single sample.** One wrong
+password was tried, it was rejected, and the result was written down as *measured* — which it was,
+and which is not the same as true. The round's own class 3 is *"a premise that did not survive
+contact"*, and its counter-rule is *"ask the program, not the record of it."* Asking the program once
+and generalising is the same error one step in: **a sample of one is a measurement of one.** The
+figure that belongs in this section is a rate, and a rate needs a run.
+
+### Two gates, sabotaged as a pair
+
+The fixture is written **in-test**, through `sevenz-rust2` directly with
+`set_encrypt_header(false)` (`sevenz.rs:602`), because `Writer::create` cannot make one: it ties
+header encryption to the same flag that turns AES on, so every 7z INDIUM itself encrypts has
+ciphertext headers. **That coupling is exactly why this case had no coverage** — the tree could not
+build its own counterexample.
+
+| gate | what it pins |
+|---|---|
+| `a_content_encrypted_7z_extracts_with_the_right_password` | two members, both files' bytes, `n == 2` |
+| `a_wrong_password_on_a_content_encrypted_7z_leaves_the_destination_untouched` | `Err(WrongPassword)` **and** `!dest.join("sub").exists()` |
+
+Sabotaged as a **discriminating pair**, which is the strongest structure this round has managed:
+
+- Revert the routing and leave the verification: **gate 1 alone fails.**
+- Route correctly and leave the verification where it was: **gate 2 alone fails**, on the directory
+  it leaves behind.
+
+Neither test can stand in for the other, and neither half of the fix can be removed without a gate
+noticing.
+
+**And tier 3 ran a third sabotage that neither gate survives noticing.** Replace the predicate
+`find(|e| e.encrypted && !e.is_dir && e.size > 0)` with `selected.iter().next()` — keep the routing,
+keep the verification, change only *which entry gets verified* — and **both gates still pass.** So
+the pair discriminates the two things it was designed around and is blind to the line between them.
+The claim *"neither half of the fix can be removed without a gate noticing"* is true and was read as
+though it said something stronger: **that the fix as a whole was pinned.** Two halves gated is not
+the same as a fix gated, and the gap between those two sentences is class 4 exactly — *a test
+weaker than its name* — inside the paragraph claiming to have answered it.
+
+### What this fix does not cover, said out loud
+
+Two residuals, recorded at their true confidence rather than at the confidence that would make the
+section read better.
+
+**The verification can be skipped when there is nothing to verify with.** The check runs on the
+first entry matching `e.encrypted && !e.is_dir && e.size > 0`. If every encrypted selected entry is
+a directory or zero-length, the `find` yields `None` and no verification happens at all. The
+argument that this is harmless — an empty stream has nothing to decrypt, so the output is the same
+under any key — is **modelled, not measured**, and it rests on how the listing flags empty and
+directory entries in the first place, which was not checked here. Filed
+`unverified-hypothesis` and handed to tier 3 as a named attack rather than patched by the hand that
+wrote the code it would patch.
+
+**The three sibling read paths are enumerated, not judged.** The divergence record listed them at
+`arch.rs:1204`, `:1273` and `:1345`; they now sit at **`:1364`, `:1433` and `:1505`** — the record
+is append-only and stays as written, and re-locating by grep rather than by memory is the standing
+rule. All three still read `Err(ArchiveError::EncryptedHeaders) if looks_like_7z(path)`, so all
+three still ask the header question. **Whether that is the same defect one door over is the class-9
+question this round is named for, and it belongs to a reader who did not write the fix.** It went
+to tier 3 as its highest-value attack. Nothing here pre-judges it.
+
+### Tier 3: **REPLACE**
+
+The fix went back through the pipeline as the rule requires, read by an Opus that did not write it,
+against `da6c821` with the tree clean. The verdict is **REPLACE**, and it is the sharpest result this
+round has produced, because the two things it establishes are the two things the section above
+claimed to have settled:
+
+> the verification half admits wrong passwords on the very archive class it was written for
+> (measured: `extract` returns `Ok(1)` and truncates a correct 100 000-byte destination file to
+> zero), and the identical defect is still live in the three sibling read paths plus
+> `verify_passphrase`, which is what the GUI actually gates extraction on — so the user-visible
+> symptom the commit claims to fix is still present in the window.
+
+Nine findings, five sabotage runs, one preserved proof-of-concept archive, and six hypotheses of the
+reviewer's own that it refuted rather than filed. The tree came back byte-identical to `da6c821`
+(`src/arch.rs` and `src/sevenz.rs` md5s both matched `git show`), its probe harness deleted, `CORE.md`
+untouched, `git status` empty.
+
+**Tier 0 was then run on the report itself, and it caught three citations.** `set_encrypt_header`
+cited at `sevenz.rs:301` is at `:331`; `mod content_only_encryption` cited at `:592` opens at `:585`;
+and F1's root cause cited as `sevenz.rs:475-485` names two types that do not appear in INDIUM's source
+at all. **Not one of the three touches a finding's substance** — every claim survived re-derivation,
+and the range in the third case is correct even though its attribution was not. That is precisely
+what tier 0 is specified to be: *"mechanical, no judgement"*, rejecting drift without ruling on
+truth. The clerking tier caught the reasoning tier, on the round's own terms, in the round that ranks
+remembered line numbers as its own defect class.
+
+#### F1 — the verification passes wrong passwords, and the data path then destroys files
+
+`freeze-blocking`, `certain`, `poc-artifact`. The one-byte pre-flight (`arch.rs:1142-1146`) and the
+uncapped read (`:1184`) both accept a wrong key whose LZMA2 decode yields a **short** stream.
+
+**The report's citation was corrected here before filing, and the correction is the clearer
+statement.** It gave the root cause as `sevenz.rs:475-485` while describing `BoundedReader` and
+`Crc32VerifyingReader` — types that do not appear anywhere in INDIUM's source. The mechanism
+straddles two codebases, and separating them is what locates the fix:
+
+- **In `sevenz_rust2`:** each member is wrapped in a bounded reader and then a CRC-verifying reader
+  whose check fires **only at end of stream**. A decode that stops early never reaches it, so the
+  member's CRC — the one value that would settle this — is never compared.
+- **In INDIUM, at `sevenz.rs:475-485`** — the range is right, and it is INDIUM's own code that
+  accepts the result. `found = true` is set at `:474` *before* the read, so a zero-byte read still
+  counts as found; `read_to_end` over a reader returning `Ok(0)` is not an error; and `truncated =
+  out.len() >= cap` is `false` for `0 >= 1`. Three chances to notice, and the value is zero bytes.
+
+**And the number that would have caught it is already in scope.** `archive.files[wanted]` is read one
+line earlier, at `:460`, for its `.name`. Its `.size` — the member's stated length — is sitting right
+there and is never compared against what came out. The fix is not new machinery; it is one comparison
+against a field the function already holds.
+
+(A second path into the same hole, uncited by the report and coupled to `PXX-T3-013`: `:449-458`
+returns `Ok((Vec::new(), false))` for a member with no data stream, **before any decryption is
+attempted**. So the `e.size > 0` in the pre-flight predicate is load-bearing precisely because of that
+early return — and neither line mentions the other.)
+
+Measured on the preserved artifact — a single 100 000-byte AES-256/LZMA2 member behind plaintext
+headers:
+
+| with password | `read_entry(cap=1)` | `read_entry(cap=MAX)` | `extract` | the destination file |
+|---|---|---|---|---|
+| `indium` (right) | `Ok` | `Ok`, 100 000 bytes | `Ok(1)` | correct |
+| `wrong-202` | **`Ok((0,false))`** | **`Ok((0,false))`** | **`Ok(1)`** | **pre-seeded with a correct 100 000-byte copy, 0 bytes afterwards** |
+
+**14 of 1500** random wrong passwords clear the pre-flight; **9 of 1500** clear the uncapped read as
+well. The AES salt and IV are per-archive random, so those passwords do not transfer to a regenerated
+fixture — which is why the artifact is kept rather than the recipe.
+
+**This is a regression the fix introduced.** Before `da6c821` the same call refused a wrong password
+safely: `verify_passphrase` returned `Ok(false)`, `extract` returned `Err(WrongPassword)`, and
+nothing was written. The commit converted a **false negative** — a right password refused, annoying
+and safe — into a **false positive with data loss**. That is the exact trade a frozen repo cannot
+survive, and it is the reason this round's rule sends fixes back through the pipeline: *"a correct
+diagnosis with a wrong patch is the failure mode."* The diagnosis was correct. The patch was worse
+than the bug.
+
+The fix belongs in `sevenz::read_entry`, after `for_each_entries`, where the stated size is in scope —
+comparing what came out against `min(cap, file.size)` and refusing a short stream. Not in `extract`:
+three of the four callers would stay broken.
+
+#### F2 — the class-9 answer, and the bug is still live at the window
+
+`freeze-blocking`, `certain`, `test-run`. This is the question the section above sent to tier 3 as its
+highest-value attack, and the answer is worse than the question assumed.
+
+All three sibling read paths still read `Err(ArchiveError::EncryptedHeaders) if looks_like_7z(path)`
+— and **libarchive does not report this archive class as `EncryptedHeaders`. It reports
+`WrongPassword`.** So all three fallback arms are dead on exactly the archives `da6c821` was written
+for. Measured on a content-encrypted plaintext-header 7z with the **correct** password:
+
+| entry point | result |
+|---|---|
+| `verify_passphrase` | `Ok(false)` |
+| `head_of` (Preview) | `Err(WrongPassword)` |
+| `stream_entry` (`indium cat`) | `Err(WrongPassword)` |
+| `crc32_of` | `Err(WrongPassword)` |
+| `extract` | **`Ok(2)`** — the only one fixed |
+
+And `ui/password.rs:191` is `_ => arch::verify_passphrase(&archive, &secret).unwrap_or(false)`. **The
+GUI gates extraction on the one function the fix did not touch.** So a user with the correct password
+is refused three times and reads *"Wrong password three times. Cancelled — nothing was written."* —
+`extract` never executes. `PXX-2-002`'s symptom, the whole reason this finding exists, is unchanged
+in the shipped window.
+
+So the class-9 verdict is not *"the same defect one door over."* It is: **the fix went through the
+one door the user never walks through.**
+
+#### The interaction neither finding states, checked here
+
+`verify_passphrase` has exactly two call sites (`arch.rs:1148`, `ui/password.rs:191`), and the CLI has
+neither: `cli.rs:478` calls `arch::extract` directly. So today —
+
+- **At the window**, F2's broken gate refuses every password on this archive class, right or wrong.
+  That accidentally makes F1 unreachable there. A defect is standing in front of a worse one.
+- **From `indium extract`**, there is no gate at all, so F1 is fully reachable now: a wrong password
+  truncates the destination file to zero and exits success.
+
+Therefore **fixing F2 alone would arm F1 in the GUI.** The ordering is not a preference; it is a
+constraint, and neither finding names it because each is correct in isolation. P6 Dev 13-14 recorded
+this shape as guards that *"created two new reachable hazards rather than closing one"*, and the plan
+cites it as tier 3's empirical basis. It has now produced an instance of itself **between two findings
+of the same review**.
+
+#### F3 — the residual was real
+
+`fix-in-v2.5`, `certain`. Filed above as `unverified-hypothesis` and handed over rather than patched:
+an empty file inside an AES block lists as `encrypted = true, size = 0`, so a selection of only
+directories and empty files makes the `find` yield `None`, the pre-flight is skipped entirely, and a
+wrong password is reported as a successful extraction with `dest/emptydir` created. Reproduced. **The
+one thing this section did right was refusing to model it.**
+
+#### F4, F6 — the promise and the premise
+
+`fix-in-v2.5` and `document-only`, both `certain`. On AES+**COPY** — AES with no compressor behind it
+— `read_entry(cap=1)` returns `Ok((1, true))` for the right and the wrong password alike. The
+verification passes, the late CRC catches it, `extract` returns `Err(WrongPassword)` — and `dest/sub`
+exists. So `arch.rs:1057`'s promise that *"a wrong password costs nothing and leaves no partial output
+behind"* is **still false**, and the comment at `:1136-1141` restating the one-byte argument is now
+prose contradicted by the code beneath it. F6 is the paragraph struck above, filed by the reviewer
+independently of the strike.
+
+#### F7, F8 — two sentences the commit did not follow
+
+`document-only`. `arch.rs:877-880` still reads *"Data — extraction, CRC32, passphrase checks —
+deliberately does **not** route here"*, which `:1118` and `:1161` made false. The reviewer's own
+wording is better than a strike: *"data routes here only where libarchive cannot read it: encrypted
+headers, and AES content behind plaintext headers."* And the bare `?` at `:1146` hands the user
+whatever `read_entry` produced, so an encrypted member in a codec `sevenz-rust2` lacks surfaces as an
+unsupported-method error out of a pre-flight the user typed a password into (`probable` — the codec
+fixture could not be built offline; `flate2`'s `zlib-rs` feature is absent from the local registry).
+
+#### F9 — attack 1 refuted, and the section's own claim strengthened
+
+`no-action`, `certain`. The regression surface was the first thing tier 3 was asked to break, and it
+held. `bsdtar` 3.8.9 refuses both `--passphrase indium` and `--passphrase nope` with the *identical*
+`"The file content is encrypted, but currently not supported"` — and it does so on **AES+COPY** too,
+where there is no compressor at all. So the refusal keys on the AES coder rather than on the codec
+behind it, and `strings libarchive.so.13.8.9` carries exactly one such template. Unencrypted 7z
+extraction still routes through libarchive.
+
+That is a **stronger** basis than the section above had. The claim that routing takes nothing away
+from libarchive was measured here on LZMA2 only; isolating the AES coder is what makes it general.
+
+#### What the reviewer refuted of its own, and what it could not reach
+
+Recorded because a review that files only what it found is indistinguishable from one that looked
+less hard.
+
+- **The `path`/`raw_path` mismatch in `read_entry`'s lookup — refuted.** It expected the data path's
+  `&entry.path` to miss against a `./`-rooted or backslash-separated stored name. Both sides normalise
+  through the same `util::normalize_archive_path`, so they agree; measured `Ok` on the right password
+  and `Err(WrongPassword)` on a wrong one. **No defect** — and worth noting beside `PXX-T2-015`, where
+  the same shape *is* a defect because nothing normalises the stream side.
+- **Solid-block verification cost — unresolved, not refuted.** `sevenz-rust2` writes one block per
+  member, so a crate-written fixture cannot express a large encrypted solid block. `basic.7z` is solid
+  but unencrypted. The case stays untested and is named as untested.
+- **Fixture-independence — not fully excludable.** No `7z`/`7za`/`7zz` binary exists on this machine
+  and every encrypted `.7z` present was written by INDIUM, which cannot produce plaintext headers at
+  all — `sevenz.rs:331`, cited in the report as `:301` and corrected here by grep, which is the
+  standing rule and the reason tier 0 exists. The AES+COPY result makes a fixture artifact improbable; a genuine 7-Zip
+  archive was still never tested, and that is the honest boundary of every measurement in this
+  section.
+- **Error-path drift from the moved `?` — checked across six selection shapes, nothing found.**
+- **The encrypted-header double-parse — behaviour unchanged**, one extra full header decrypt.
+
+Hygiene as committed: 302 lib + 30 integration tests pass, `fmt` clean, `clippy` clean. **Green, with
+two freeze-blocking defects inside it** — which the charter predicted in the sentence about reach
+rather than depth being the blind spot.
+
+### The findings
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-2-002` | `arch.rs:1118`, `:1126`, `:1161` | a correct password refused on a plaintext-header, AES-content 7z; and the same flag switching off the only verification there was | **freeze-blocking** (was `fix-in-v2.5`) | **DIVERGENT not resolved. Tier 3: REPLACE.** The routing half stands; the verification half is replaced; the symptom is still live at the window |
+| `PXX-T3-011` | `arch.rs:1142-1146`, `:1184`; `sevenz.rs:475-485` | a wrong key whose decode is short returns `Ok` at every cap, so `extract` reports success after truncating the destination to zero — 14/1500 wrong passwords clear the pre-flight, 9/1500 clear the full read | **freeze-blocking** | confirmed by PoC, unfixed |
+| `PXX-T3-012` | `arch.rs:1364`, `:1433`, `:1505`, `:1562`; `ui/password.rs:191` | libarchive reports this class as `WrongPassword`, not `EncryptedHeaders`, so all three fallbacks are dead and `verify_passphrase` — the GUI's gate — still refuses the right password | **freeze-blocking** | confirmed, unfixed |
+| `PXX-T3-013` | `arch.rs:1142-1144` | an all-directory / all-empty encrypted selection makes the `find` yield `None`, so a wrong password extracts as a success | fix-in-v2.5 | confirmed, unfixed — **was this section's own `unverified-hypothesis`** |
+| `PXX-T3-014` | `arch.rs:1131-1133` vs `:1178`, `:1182` | on AES+COPY the one-byte check discriminates nothing, so `extract`'s "leaves no partial output behind" is still false | fix-in-v2.5 | confirmed, unfixed |
+| `PXX-T3-015` | `arch.rs:1136-1141` | the "one byte is enough" comment is probabilistic where it reads categorical and codec-specific where the code is unconditional | document-only | confirmed, unfixed |
+| `PXX-T3-016` | `arch.rs:877-880` | `list_7z`'s "data deliberately does **not** route here" was made false by `:1118` and `:1161` | document-only | confirmed, unfixed |
+| `PXX-T3-017` | `arch.rs:1146` | the bare `?` delivers a missing-codec error as a password verdict | document-only | `probable` — codec fixture unbuildable offline |
+| `PXX-T3-018` | `sevenz.rs:585` (`mod content_only_encryption`) | the two new gates pass with the verification target chosen arbitrarily; sabotage C changes only the predicate and both still pass | fix-in-v2.5 | confirmed, unfixed |
+| `PXX-T3-019` | `arch.rs:1118-1120` | **attack 1 refuted** — libarchive cannot decrypt any 7z AES content whatever the codec, proven on AES+COPY, so the routing costs no reads | no-action | closed |
+
+**Nine new IDs. Register 146 → 155.** Suite **395 → 397** as committed — and `PXX-T3-018` says those
+two are not the gates this fix needs.
+
+**`da6c821` must not ship as it stands.** It is local and unpushed, so the exposure is bounded to this
+tree, but the statement belongs in the record without hedging: the commit as written loses user data
+from `indium extract` on a wrong password, and it does not fix the symptom it was written for.
+
+### What this one is actually worth, now that tier 3 has run
+
+`DIVERGENT` was defined as *the outcome that must never be flattened into a pass*, on the assumption
+that two readers disagreeing meant one of them was wrong. Neither was. The two faces were the two
+halves of one change, they bounded the fix from both sides, and **the fix was still wrong twice
+over** — once in how the verification was implemented, and once in a way neither reader could have
+seen from those six lines, because it was not in them.
+
+**Both blind reads studied the function. Neither asked what calls it.** The routing was corrected
+inside `extract`; the GUI reaches extraction through `verify_passphrase`, which no one touched, so
+the corrected code is unreachable from the window and the user's symptom never moved. Two
+independent readers, two correct partial diagnoses, one patch that passes 332 tests, and the bug is
+exactly where it was.
+
+That is the plan's own sentence arriving as a defect instead of a warning: **"Reach, not depth, is
+the blind spot. Every long-lived escape sat where the suite structurally could not reach."** It was
+written about `.deb` control files and README badges. It turns out to describe a function two agents
+read four times.
+
+So the transferable rule is not about `DIVERGENT` at all, and it is the one thing to carry out of this
+section: **a fix is not verified until something the user can actually press has been shown to
+change.** Every measurement here was real, every gate passes, the routing is right, the diagnosis was
+right — and the only claim never tested was the one the whole finding existed to make.
