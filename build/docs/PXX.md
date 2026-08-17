@@ -6477,3 +6477,93 @@ attempt, and both were caught by breaking them rather than by inspecting them.
 | `PXX-C12-013` | this round's process | **`PXX-T3-055` is freeze-blocking, so its fix owes a review by an agent that did not write it.** Opened here, in the commit that fixes it, at the severity the rule generates — which is the repair the addendum above prescribed | **freeze-blocking (process)** | **open** |
 
 **Eight new IDs. Register 207 → 215.**
+
+## Phase 3 — the tier-3 verdict on `635067e`: **AMEND**, and the chain terminates
+
+`PXX-C12-013` is discharged. **Six tier-3 reviews on six commits: REPLACE, AMEND, AMEND, AMEND,
+AMEND, AMEND.** Still no ACCEPT at first reading — but this one is the first whose amendment is
+**sentences and not behaviour**, and that is the difference that ends the round.
+
+### What it measured, before what it found
+
+The fix needed no change, and the negative was expensive to establish:
+
+- **21 modes** through the real `tasks::apply`; **6 containers** at `0400`/`0444`/`0460` — tar,
+  tar.gz, tar.zst, tar.xz, zip and **7z**, 18 for 18, mode exact and the removal on disk.
+- **72 umask-by-mode combinations** — `0000 0007 0022 0027 0077 0222 0227 0277 0777` against
+  `0644 0640 0600 0400 0444 0460 0666 0604`. No failed Apply, no wrong final mode, no group or
+  other widening, at any of them.
+- **Three observed 64 MiB rebuilds per mode**, ~400 000 `stat()` samples each: `0400` shows
+  `["0400","0600","0400"]`, `0460` shows `["0440","0660","0460"]`, and **no observed mode carries
+  a bit outside the archive's own group or other triad in any run.** `PXX-T3-049` is confirmed not
+  reintroduced.
+- **Both sabotage claims reproduced independently**, plus three more the round had not run:
+  `| 0o400` reds the new gate alone, `| 0o700` and `| 0o640` red the never-wider gate alone.
+- setuid/setgid/sticky survive exactly; the `set_permissions` failure arm is safe when forced; the
+  new gate cannot pass vacuously and the `[0o640, 0o666]` loop shares no state.
+
+### The one that is worth the whole review
+
+**The sabotage a comment cited as its evidence had stopped reproducing, and the cause was the fix
+in its own commit.** At `5ccdfcb` the pre-create's `.mode()` was the only thing setting the temp's
+mode, so `| 0o040` persisted for the entire rebuild and a spin-loop could not miss it. `635067e`'s
+staging chmod overwrites it one statement later, leaving a window of two syscalls. Re-run fifteen
+times at HEAD: **nine reds.**
+
+The gate is not flaky where it matters — every widening that *persists* dies deterministically, and
+ten clean runs gave zero reds. What became transient is the pre-create argument. But *"Measured —
+the sabotage passed 36/36"* had become a coin flip, in a comment written one commit earlier, by the
+change immediately beneath it. **A measurement is a claim about a version of the code**, and this
+round has now watched one expire inside the commit that invalidated it. Not re-fitted: pinning a
+two-syscall window wants a hook rather than a poller, and four of this round's findings were pollers
+that measured nothing.
+
+### The other four
+
+- **`PXX-T3-061`** — `0o460` was described as *"no owner-read"*; it is `r--rw----`. The correction is
+  worth more than the typo: those three rows are reachable **because** they have owner-read. A mode
+  without it never reaches the staging block — `list_all` opens the source first and dies naming the
+  archive. Measured both ways, seven modes each side. So the reachable half of the regression was
+  exactly the owner-readable, owner-unwritable half, which the gate now says.
+- **`PXX-T3-062`** — the never-wider comment defended the owner triad by naming `0640`, the fixture
+  the same commit had moved to `0o600`. Conclusion sound, number stale. Restated with the sharper
+  fact: the mask is `0o177`, so the only owner widening that exists against this bound is `+x`, and
+  it is inside the mask.
+- **`PXX-T3-063`** — the gate's failure message printed `seen` in decimal inside an octal sentence:
+  `saw modes [448, 384] (offending: ["700"]) … set to 600`. The one list needed to diagnose a
+  widening was the unreadable one.
+- **`PXX-T3-064`** — the `fchmod` justification gave the umask and stopped, and the umask does not
+  distinguish `fchmod` from a path chmod, which is unmasked too. The reason that does is the one
+  `store.rs` already wrote at the identical hazard. Adding it exposed an asymmetry inside this one
+  function: **the exact restore before the rename is a path chmod and follows symlinks**, because
+  both writers have closed the file by then. A racer in `PXX-3-009`'s window gets a file of their
+  own choosing chmodded to the archive's mode — a further consequence of a recorded race, now
+  written beside the half that is safe by construction.
+- **`PXX-T3-065`** — `635067e`'s message claimed the new clause was one *"every sibling refusal in
+  this function already carried"*. Four sites carry it, two of them added by that commit. A commit
+  message cannot be amended after the fact, so it is recorded here.
+- **`PXX-T3-066`**, `no-action` — `| 0o200` and a flat `0o600` both survive the suite. `| 0o600` is
+  nonetheless the right constant: verify reads the temp back through `list_all` *before* the exact
+  restore, so owner-read is load-bearing for an archive readable only through its group bits. No
+  gate can see the difference because every archive the running account owns already carries
+  `0o400`, or the source read would have failed first.
+
+### Why this is the last one
+
+The rule fires on `freeze-blocking` severity and on nothing else. Six commits in this round have
+triggered it; `dc8eb89` and `edd8b0c` did not, because they closed `document-only` and test-only
+findings, and stretching it further would make it a ritual rather than a gate. **This review returned
+no `freeze-blocking` finding, so it opens no `PXX-C12` row, and the chain that has run since the
+first fix landed is closed.**
+
+Recorded plainly, because it was nearly not a rule at all: reviews one through five each found a
+`freeze-blocking` defect and each therefore generated the next, and a reader looking at that sequence
+would be right to ask whether anything terminates it. The answer is that the severity does, and it
+just did. **A cap was set before this verdict arrived** — six, whatever it returned, with anything
+freeze-blocking to be fixed, measured, sabotage-checked and recorded as an unreviewed Deviation
+rather than sent round again. The cap was not needed. It stands in the record anyway, because a
+stopping rule invented after the stop would be worth nothing.
+
+**Six new IDs. Register 215 → 221.** Suite unchanged at **416**.
+
+**The hardening is complete.**
