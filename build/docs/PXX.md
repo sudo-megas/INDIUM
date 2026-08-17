@@ -4314,3 +4314,82 @@ because an ID that quietly means something other than its prefix is the beginnin
 drift `PXX-C12-004` is about.
 
 No CORE file was edited to produce this section. `CORE.md`'s newest commit is still `62e5ec5`.
+
+## Phase 3 — `PXX-10-007`: four screenshots, not two, and where "two" came from
+
+A read-only pass over stage 3's remaining work, made while the build lane was held, found that the
+plan's bump list understates one of its own items by half. The item reads *"the two stale
+screenshots."* **Four are stale**, and the difference is not a miscount — it is class 1 caught in the
+act, in the plan for the round that ranks class 1 second.
+
+### The measurement
+
+Four exist: `build/screenshot.png`, `-new.png`, `-extract.png`, `-about.png`. All four were last
+retaken in a single commit —
+
+> `0d5c002` — *"The four screenshots, retaken against the binary they now describe"*
+> `build/screenshot-about.png | Bin`, `-extract.png | Bin`, `-new.png | Bin`, `screenshot.png | Bin`
+> — 4 files changed
+
+— dated **2026-08-12**. The redesign landed after it, and `git merge-base --is-ancestor` confirms
+every one of these postdates it:
+
+| commit | what moved | reaches |
+|---|---|---|
+| `1997ded` | the face becomes Cascadia Mono | every glyph in all four |
+| `0fd7a02` | the zones round; `R_ZONE` 0 → 6 | every pane corner in all four |
+| `2ae4abc` | zones cast into the gutter, alpha sampled | every gutter in all four |
+| `fbe01b1` | the three primary buttons fill instead of tinting | every popup that has one |
+
+`git log 0d5c002..HEAD -- src/theme.rs src/ui/` counts **40 commits**. Every one of the four images
+shows square corners set in the wrong face.
+
+### Where "two" came from, and why it is the class rather than a slip
+
+`P22.md:315`, verbatim:
+
+> 9. **Two screenshots are stale and cannot be fixed from here.** `build/screenshot.png` shows the
+>    old sidebar — two groups, *Archive* `1`, *Bookmarks* `2` — and `build/screenshot-new.png`
+>    shows the popup under its old title.
+
+**That was true when it was written.** It named the right two images and the right reasons. Then
+`0d5c002` closed it by retaking all four, and the redesign falsified it again for all four — and the
+sentence, having been true, was carried forward into the plan as though it still were.
+
+That is the shape exactly: *a sentence true when written, falsified by a later change that did not
+touch it.* `P6.md:302` calls class 1 *"the failure this project names as unforgivable."* The hunt
+list's own note on it is that eleven doc-as-tests read `CORE.md` and **all eleven anchor on
+structural lists** — tables, counts, sets — so **code moving under a stationary sentence has no gate
+at all.** A count of image files is precisely such a sentence, and precisely ungated.
+
+The plan is not a repo document and rule 4 does not bind it, so this is recorded rather than
+corrected in place — but the figure it feeds is a work item, and a work item that says two when it
+means four gets half done.
+
+### The ordering constraint the count was hiding
+
+More consequential than the number. `screenshot-about.png` shows **the version and the date**. It
+cannot be retaken until `Cargo.toml` and `about.rs`'s `RELEASE_DATE` carry v2.5's values, and those
+move in the bump itself.
+
+So the four are not a batch. Three can be retaken as soon as the window is final; **the fourth is
+strictly after the version bump**, and if all four are treated as one step it will either be taken
+early and be wrong, or block the bump that has to precede it. That constraint appears nowhere in the
+plan, because the plan was counting two images neither of which was `-about.png`.
+
+### Whose they are
+
+`P22.md:318` records the images as *"the maker's to re-take"*, and rule 8 puts any verdict about how
+the window looks with his eye. The mechanical capture is available on this machine — `spectacle -a`
+is client-area, and `ydotool --absolute` is a no-op here — so the taking is doable; the judging is
+not. Listed in the previous section's rule-8 row for that reason.
+
+### The findings
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-10-007` | `build/screenshot.png`, `-new.png`, `-extract.png`, `-about.png`; `P22.md:315` | all four screenshots predate the redesign by 40 commits to `theme.rs` and `ui/`; the bump list says two, inheriting a P22 sentence that was true when written and closed by `0d5c002` | fix-in-v2.5 | confirmed — **the maker's to retake (rule 8)**, and `-about.png` strictly after the version bump |
+
+**One new ID. Register 164 → 165.** Suite unchanged at **405** — and a count of image files against
+a redesign is not a thing a test can reach, which is the whole reason it survived four commits and a
+plan.
