@@ -5928,3 +5928,183 @@ twenty-two documents deep.
     would make CORE describe a program that does not exist.
 
 **One new ID. Register 190 → 191.** Suite unchanged at **410**.
+
+## Phase 3 — the tier-3 verdict on `fa73bf8`: **AMEND**, and it un-decides one of this round's own decisions
+
+`PXX-C12-009` is discharged. The verdict, verbatim:
+
+> The routing repair itself is correct and I verified it independently … Nothing I found is
+> `freeze-blocking` — no data loss, and no wrong-password acceptance on any archive a normal tool
+> writes.
+
+Three tier-3 reviews have now reported on three commits: **REPLACE, AMEND, AMEND.** Not one returned
+ACCEPT on a fix at first reading, and every one found something the author's own sabotage matrix was
+not pointed at. That is the rule's whole case, made three times.
+
+### The finding that is mine: the fix bought correctness with latency it never measured
+
+`fa73bf8` closed `PXX-T3-027` by making `verify_passphrase` choose through `verification_target` —
+the **smallest** encrypted member — instead of the first one with bytes. On a **solid** archive the
+smallest member is the one most likely to sit at the end of the block, and reaching it means decoding
+everything ahead of it.
+
+| 64 MiB solid block, AES + LZMA2 | first member, 1 MiB cap (**pre-fix**) | smallest member (**post-fix**) |
+|---|---|---|
+| `read_entry` | **25.1 ms** | **1 656.0 ms** |
+
+**Sixty-six times slower, and the commit measured neither end.** Worse, `verify_passphrase` is called
+*inline on the UI thread* — `ui/password.rs` inside egui's `update` — where `arch::extract` is not,
+because P6 moved `extract` to a worker after precisely this defect and nothing moved this call with
+it. Extrapolated from the measured slope, **a 1 GiB solid 7z is about 26 seconds of frozen window.**
+
+This is the class the plan names from P6's own history: *"fixing a defect creates the opportunity for
+a quieter one."* The fix was correct and the cost was never looked at.
+
+**And it falsified a number this round wrote down.** `verify_cap`'s doc carried *"a true solid block
+of 24 MiB + 5 bytes, the right password costs ~66 ms"* — a real measurement, taken once, on
+compressible data, and read as the rate. The rate is **25.9 ms per MiB**, not 2.75. *A sample of one
+is a measurement of one*, which this round recorded as a lesson after the one-byte password sweep and
+then made again, in a doc comment, about the same function.
+
+Recorded and **not repaired**, filed `PXX-T3-041`. The repair is either a worker — a UI change a
+freeze round should not make — or preferring an early member on solid archives, which trades the
+CRC-reaching read back for a prefix and re-opens what `PXX-T3-027` closed. INDIUM's own writer is
+non-solid (measured `(false, 3)`), so this is foreign solid archives only; that is 7-Zip's default
+and therefore common, but never one of ours. The doc now says all of this.
+
+### The gates I wrote were the easy set, and it proved it in one token
+
+Changing `read_entry(path, &entry.path, …)` to `&entry.raw_path` — a mutation that breaks
+verification on every 7z whose member names need normalising — **passed all 410 tests.** Re-run here
+before acting on it: `410 passed, 0 failed`.
+
+It passed because every fixture in the module names its members `alpha.txt` and `a-big.bin`, where
+`raw_path` and `path` are the same string. **The coupling between `verification_target`'s choice and
+`read_entry`'s resolution — the whole of the new glue — was untested**, while the helpers either side
+of it were thoroughly pinned. The review put it plainly: *"the four gates are the easy set."*
+
+Fixed. `a_member_whose_stored_name_normalises_is_still_verified` uses a `./` prefix, asserts the two
+paths actually differ so it cannot go vacuous, and reds under the mutation as the only failure in the
+suite. `PXX-T3-040`.
+
+### The finding that un-decides this round's scope call
+
+`1cb19f3` scheduled `PXX-T3-037`'s fix as *"prefer a stream-carrying match in the resolution, falling
+back to the first."* **That fix does not close the case below, and the case below is a wrong-password
+acceptance.** Measured here on the review's own fixture:
+
+```
+raw="./a.bin" path="a.bin" size=1052672 enc=true dir=false
+raw="a.bin"   path="a.bin" size=4096    enc=true dir=false
+verify_passphrase RIGHT -> Ok(true)
+verify_passphrase WRONG -> Ok(true)      <-- expected Ok(false)
+```
+
+Two encrypted files, **both carrying data streams**, colliding on one normalised name. Preferring a
+stream-carrying match cannot help: they both carry one. The mechanism is different from `-037`'s too
+— not *"the wrong member was read"* but **"the cap and the target were derived from different
+members."** `verification_target` sizes the read from the 4 KiB member; `read_entry`'s `.position()`
+resolves to the 1 MiB one; `verify_cap(4096)` is then applied to a member 257 times larger, silently
+converting the CRC-reaching full read into an unchecked prefix. **The entire argument for pairing
+`verification_target` with `verify_cap` has no guarantee behind it.**
+
+**So `PXX-T3-037`'s fix is withdrawn from the v2.5 scope.** Shipping a half-measure that leaves a
+wrong-password acceptance open is worse than shipping neither: it would let the register read as
+closed while the hole stands. `-037` and `-042` both go to the root — resolve by identity, not by
+name — which `1cb19f3` already recorded as the largest piece of work this round hands forward. The
+scope call goes from **fix three** to **fix two**, and the two that survive are committed.
+
+One more symptom from the same fixture, which the review did not call out: `extract RIGHT -> Ok(2)`
+with **one** file on disk. Two members reported extracted, one written, the second over the first.
+Filed `PXX-T3-046`.
+
+### The `None` arm rests on a gauntlet, not a checksum
+
+The best piece of source reading this round has had. The comment said a successful listing *"has
+already proved the password on its own"*, which implies a verified digest. There is none:
+
+- `sevenz-rust2`'s `reader.rs` installs the encoded-header CRC verifier only `if block.has_crc` —
+  the **folder** section's flag.
+- Its own `writer/unpack_info.rs` never emits `kCRC` there, and says why in its own comment: 7-Zip
+  writes CRCs in the substreams info instead, even for non-solid archives.
+- The encoded-header path has no substream fallback, unlike `build_decode_stack`.
+
+**So that verifier is never installed, for any archive 7-Zip or this crate writes.** What actually
+refuses a wrong key is structural: the AES noise must decode as a raw LZMA stream at all — the range
+coder demands a zero first byte, so 255/256 of keys die immediately — then yield *exactly* the
+declared unpacked length, then parse as a 7z header. Strong in practice; **not a cryptographic
+bound.** The 1200-sample zero from the previous salvage bounds the rate at about `2.5e-3` by the rule
+of three and no tighter — which is the correct reading of that number and not the one this round gave
+it.
+
+Member reads are the opposite case and INDIUM's claim about them stands: the verifier is installed on
+`file.has_crc`, which the writer always sets. The comment is corrected; the arm's behaviour is not
+changed. `PXX-T3-043`.
+
+### Two more sentences, and one asymmetry
+
+- **`PXX-T3-044`** — `list_7z` falls back to libarchive when `sevenz` cannot parse; the hoisted branch
+  does not, so a 7z libarchive reads and `sevenz-rust2` refuses is listed in the window and then fails
+  at the password gate. The review built the witness — a 32-byte empty 7z from `bsdtar` — but reaching
+  the gate needs an *encrypted* member and no archive was found that is both. **The class may be
+  empty; the asymmetry is real.** Stated in the code rather than closed, because a fallback here would
+  have to guess which reader's silence to trust about a password.
+- **`PXX-T3-045`** — collapsing both `Err(e) => Err(e)` arms to `Ok(false)` deletes a property two
+  comments assert and `list_7z`'s doc labours over for a paragraph, and **passes all 410 tests.** Only
+  observable through `indium extract`, since the window flattens `Err` regardless. Recorded; the
+  fixture needed to gate it is a 7z with an encrypted member in a codec this build lacks, which is not
+  constructible on this machine.
+
+### What it refuted, which is worth as much
+
+- **The hoist is not slower — it is faster.** At 10 000 members, `sevenz::list_all` is 7.3 ms
+  (encrypted headers) / 15.2 ms (plain) against **42 ms** for the libarchive walk the old path used.
+  The pre-hoist code walked every entry with `skip_data`; the new one parses headers once.
+- **Wrong passwords did not get slower** — 0.1–0.2 ms everywhere except solid AES+COPY.
+- **A damaged archive cannot send the listing into a long backward scan on the UI thread.** Zeroing
+  bytes 8..32 of a 67 MB archive is the exact trigger, and `verify_passphrase` returned in **0.1 ms**.
+- **`min_by_key` returns the first minimum** by std guarantee, and both call sites iterate listing
+  order, so the two verification sites tie-break identically. The `Vec<&Entry>` borrow is
+  compiler-proven; its only cost is one pointer vector.
+- **A crafted member with `size > 0` and no data stream cannot exist** — the crate forces `size = 0`
+  for every empty-stream entry, so `verification_target`'s filter cannot select one.
+- **SFX 7z is not a lost class**: libarchive refuses a prefixed 7z too, so the offset-0 magic sniff
+  costs nothing.
+
+### A process note against this round
+
+**Two commits landed on `build/docs/PXX.md` while the review was running**, and the reviewer opened
+its report by proving they were harmless — `git diff --name-only` showing nothing under `src/`,
+`tests/` or `Cargo.toml`. It was right to check and right to say so.
+
+It should not have had to. A reviewer's first job is the code, not establishing that the tree moved
+under it for innocent reasons. Committing to the round document mid-review was judged safe here and
+was safe, and it still spent a reader's attention on bookkeeping. **Filed `PXX-C12-011`: while a
+tier-3 review is in flight, the tree is the reviewer's — including the documents.**
+
+### The findings
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-T3-040` | `arch.rs`'s hoisted `read_entry` call | `entry.path` → `entry.raw_path` passes all 410 tests; the coupling the fix rests on was untested | fix-in-v2.5 (test-only) | **fixed in `dc8eb89`, sabotage-checked** |
+| `PXX-T3-041` | `arch.rs` `verify_cap`; `ui/password.rs` | smallest-member choice costs a full solid-block decode — 1 656 ms at 64 MiB, ~26 s per GiB — paid inline on the UI thread, where `extract` is not | fix-in-v2.5 | **confirmed, deliberately unfixed; doc corrected in `dc8eb89`** |
+| `PXX-T3-042` | `arch.rs:1759-1768`; `sevenz.rs` `.position(…)` | two **stream-carrying** members colliding on one normalised name: the cap is sized from one and applied to another, and a **wrong password is accepted** | fix-in-v2.5 | **confirmed by measurement, unfixed — and `PXX-T3-037`'s scheduled fix does not close it** |
+| `PXX-T3-043` | `arch.rs`'s `None` arm | the listing's proof is a structural gauntlet, not a checksum; the crate's encoded-header CRC gate is dead for every archive 7-Zip or `sevenz-rust2` writes | document-only | **corrected in `dc8eb89`** |
+| `PXX-T3-044` | `arch.rs` `list_7z` vs the hoisted branch | listing falls back to libarchive; verification does not | document-only | **corrected in `dc8eb89`**; class may be empty |
+| `PXX-T3-045` | `arch.rs`'s two `Err(e) => Err(e)` arms | collapsing both to `Ok(false)` passes all 410 tests | document-only | confirmed, unfixed — fixture not constructible here |
+| `PXX-T3-046` | `arch.rs` `extract` | two colliding members report `Ok(2)` with one file on disk, the second written over the first | fix-in-v2.5 | confirmed, unfixed — same root |
+| `PXX-C12-011` | this round's process | two commits landed on the round document while a tier-3 review was in flight, and the reviewer spent its opening proving they were harmless | document-only | **the rule is now written down** |
+| `PXX-T3-037` | — | **scheduled fix withdrawn.** Preferring a stream-carrying match leaves `-042` open, and a half-measure that closes a register row without closing the hole is worse than neither | fix-in-v2.5 | **unfixed, re-pointed at the root** |
+| `PXX-C12-009` | this round's process | `fa73bf8`'s owed review | freeze-blocking (process) | **discharged — AMEND, amendments applied** |
+
+**Eight new IDs. Register 191 → 199.** Suite **410 → 412**.
+
+### Where the obligation stands now
+
+`dc8eb89` and `edd8b0c` close `document-only` and test-only findings and add gates. **Neither closes
+a `freeze-blocking` finding, so neither owes a tier-3 review** — the rule is specific about which
+severity triggers it, and stretching it to every commit would make it a ritual rather than a gate.
+
+The outstanding process debt is therefore **`PXX-C12-002` alone**: `25be01d`, a `freeze-blocking` fix
+marked fixed while *"the fix owes tier 3"* was still true. Given three reviews and three
+non-ACCEPT verdicts, it is the last one worth commissioning before the freeze.
