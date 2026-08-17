@@ -1742,6 +1742,42 @@ fn build_and_verify(
                     return Ok(None);
                 }
 
+                // The archive's own root member — a `./` entry, which normalises to the empty
+                // path — is not in `plan.source` and must not consume one of its slots.
+                //
+                // **This is the whole of `PXX-T2-015`, and it silently replaced archives.**
+                // `apply` re-lists through `crate::arch::list_all`, which drops the root, so
+                // `plan.source` and `expected()` are both root-filtered — while this loop walks
+                // `next_entry()` raw, root included. Two lists differing by one element, and the
+                // code walked one while indexing the other. On an archive written by
+                // `tar -cf x.tar -C dir .`, the first member came out as a **directory** wearing
+                // its name (`Meta::from_entry` takes `is_dir` and every timestamp from the entry),
+                // every payload landed under its neighbour's name, and the last member fell off
+                // the end of the plan and was dropped.
+                //
+                // Verification could not see it. The path multiset matched exactly, so both of
+                // `verify_against`'s multiset loops passed; its size comparison is gated on
+                // `is_regular_file`, so the one member destroyed outright was the one member the
+                // check skipped. `rooted.tar` failed only because two shifted sizes happened to
+                // differ — give the shifted members equal lengths and every check passes and the
+                // temp is renamed over the original.
+                //
+                // `continue` **without advancing `index`** is the entire fix. It is the rule both
+                // listing loops already apply, and the rule `estimate.rs` arrives at from the
+                // other side by filtering on a predicate rather than trusting an ordinal. It makes
+                // this vector's own contract — *"Apply walks the source and this vector in step"* —
+                // true for every archive instead of only for the unrooted ones.
+                //
+                // One consequence, recorded because it is a change and not only a repair: the
+                // rebuilt archive comes out **unrooted**. There is no disposition to re-emit the
+                // root from, extraction never needed it, and the listing never showed it. What is
+                // lost is that entry's own mode, ownership and timestamps — the right trade
+                // against writing a directory over the first member's name.
+                if crate::arch::is_archive_root(&entry) {
+                    reader.skip_data();
+                    continue;
+                }
+
                 let disposition = plan.source.get(index);
                 index += 1;
 

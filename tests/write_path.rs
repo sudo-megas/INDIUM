@@ -727,6 +727,147 @@ fn an_apply_with_no_tasks_reproduces_the_archive() {
     );
 }
 
+/// **`PXX-T2-015`, the loud half.** Apply over a `./`-rooted archive.
+///
+/// `apply` re-lists through `list_all`, which drops the archive root, so `plan.source` and
+/// `expected()` are root-filtered — while the rebuild loop walked `next_entry()` raw, root
+/// included, and paired the two by position. Two lists differing by one element, walking one and
+/// indexing the other.
+///
+/// `rooted.tar` stores beta (20 bytes) before alpha (21), so before the fix this failed with
+/// `"alpha.txt was written at 20 bytes instead of 21"` — the exact sentence the record captured
+/// from a real run rounds ago, and the reason that finding was misfiled as a `verify_against`
+/// defect. It was never a false alarm. The rebuild really was wrong and `verify_against` was the
+/// only thing that noticed.
+#[test]
+fn an_apply_over_a_dot_slash_rooted_archive_keeps_every_member() {
+    let dir = TempDir::new("rooted-apply");
+    let path = dir.join("rooted.tar");
+    std::fs::copy(fixture("rooted.tar"), &path).expect("could not stage rooted.tar");
+
+    let before = arch::list_all(&path, None).expect("could not list before");
+    let input = ApplyInput {
+        target: path.clone(),
+        recipe: recipe(&path, Method::Store),
+        tasks: Vec::new(),
+        adds: Vec::new(),
+        staged_against: Vec::new(),
+        source_password: None,
+        target_password: None,
+    };
+    let (result, _) = run_apply(&input, &no_cancel());
+    result.expect("an empty Apply over a ./-rooted archive must succeed");
+
+    let after = arch::list_all(&path, None).expect("could not list after");
+    assert_eq!(
+        after.len(),
+        before.len(),
+        "no member may be gained or lost: {before:?} became {after:?}"
+    );
+    for old in &before {
+        let new = find(&after, &old.path);
+        assert_eq!(new.size, old.size, "{}: size", old.path);
+        assert_eq!(
+            new.is_dir, old.is_dir,
+            "{}: a file must not come back as a directory",
+            old.path
+        );
+    }
+}
+
+/// **`PXX-T2-015`, the half that matters.** The same shift, with the sizes made to agree.
+///
+/// `rooted.tar` fails loudly by luck rather than by guard: it errors only because two shifted
+/// members happen to differ in length. Give every member the *same* length and the shift becomes
+/// invisible to every check `verify_against` makes — the path multiset still matches exactly, and
+/// the size comparison is gated on `is_regular_file`, so the one member destroyed outright (turned
+/// into a directory) is the one member the check skips. Apply then reports success and renames the
+/// corrupted rebuild over the user's original.
+///
+/// So this gate asserts **bytes by name**, which is the only thing that can see it, and it
+/// deliberately does not assert sizes: after the shift, sizes are the thing that coincides. It is
+/// the experiment that takes the silent-commit claim from `probable` to measured, and it is built
+/// rather than committed because a fixture is not something this repo puts in its history.
+#[test]
+fn a_rooted_archive_of_equal_length_members_is_not_silently_shuffled() {
+    let dir = TempDir::new("rooted-equal");
+    let payload = dir.join("payload");
+    std::fs::create_dir_all(&payload).expect("payload dir");
+
+    // Four members, all exactly nine bytes, distinct contents. Equal lengths are the point.
+    let members: [(&str, &[u8]); 4] = [
+        ("a.txt", b"aaaaaaaa\n"),
+        ("b.txt", b"bbbbbbbb\n"),
+        ("c.txt", b"cccccccc\n"),
+        ("d.txt", b"dddddddd\n"),
+    ];
+    for (name, body) in members {
+        std::fs::write(payload.join(name), body).expect("could not write a member");
+    }
+
+    // `tar -C dir .` is what writes a `./` root, and it is the ordinary way to make a tarball of
+    // a directory's contents — which is why this shape is not exotic.
+    let path = dir.join("equal.tar");
+    let ok = std::process::Command::new("tar")
+        .arg("-cf")
+        .arg(&path)
+        .arg("-C")
+        .arg(&payload)
+        .arg(".")
+        .status()
+        .expect("tar must be runnable")
+        .success();
+    assert!(ok, "tar could not build the fixture");
+
+    // Independently of INDIUM's own filtering: the source really does carry a root member.
+    let raw = std::process::Command::new("tar")
+        .arg("-tf")
+        .arg(&path)
+        .output()
+        .expect("tar -tf must run");
+    let listed = String::from_utf8_lossy(&raw.stdout);
+    assert!(
+        listed.lines().any(|l| l == "./"),
+        "the fixture is only the case if it carries a ./ root: {listed:?}"
+    );
+
+    let input = ApplyInput {
+        target: path.clone(),
+        recipe: recipe(&path, Method::Store),
+        tasks: Vec::new(),
+        adds: Vec::new(),
+        staged_against: Vec::new(),
+        source_password: None,
+        target_password: None,
+    };
+    let (result, _) = run_apply(&input, &no_cancel());
+    result.expect("an empty Apply must succeed");
+
+    // The assertion that can see a shift. Before the fix every one of these four held its
+    // neighbour's bytes, `a.txt` was a directory, and `d.txt` had been dropped — and Apply
+    // returned success, because nothing it checked could tell.
+    for (name, want) in members {
+        let (got, _) = arch::head_of(&path, name, 64, None)
+            .unwrap_or_else(|e| panic!("{name} could not be read back: {e:?}"));
+        assert_eq!(
+            got, want,
+            "{name} came back holding another member's bytes — the rebuild is walking a \
+             different list from the one it was planned against"
+        );
+    }
+
+    let after = arch::list_all(&path, None).expect("could not list after");
+    assert_eq!(
+        after.len(),
+        4,
+        "four members in, four members out: {after:?}"
+    );
+    assert!(
+        after.iter().all(|e| !e.is_dir),
+        "not one of these is a directory, and a rebuild must not invent one: {after:?}"
+    );
+}
+
 /// A removed entry goes, and every survivor keeps its exact bytes.
 #[test]
 fn a_removed_entry_is_gone_and_every_survivor_is_byte_identical() {
