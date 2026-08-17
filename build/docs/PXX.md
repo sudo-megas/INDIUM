@@ -4799,3 +4799,183 @@ Filed as `freeze-blocking` deliberately, and it is the only finding in this regi
 describes a missing *process* step rather than a defect in the tree. That is the honest label: the
 freeze cannot honestly close over it, and no test can ever close it either, because what is missing is
 a reader.
+
+## Phase 3 — the 7z asymmetry, finally probed: INDIUM cannot edit the encrypted archive INDIUM wrote
+
+Run 4 of the tier-3 reviews died mid-sentence — *"Rich results. Let me now probe the 7z asymmetry —
+the remaining structural question."* That probe has now been run.
+
+**It was commissioned as measurement only and it is recorded as measurement only.** The brief said so
+in its first line, the agent restated it, and it renders no verdict: the tier-3 obligation on
+`9175a28` and `05aa76a` recorded at `PXX-C12-006` is untouched by anything below. What it produced is
+three findings, one clean negative, and one correction to its own mechanism made here.
+
+### The structural question, and its answer
+
+`arch::list_all` calls `list_7z` **first** for any 7z and only falls through to libarchive on `None`
+— so the 7z listing path never passes through `is_archive_root` at all, while the rebuild loop's skip
+applies to every container. Measured, that asymmetry is real:
+
+```
+sevenz-listing raw_path="\\"   path=""  is_archive_root=true
+```
+
+`sevenz.rs:180-181` builds `Entry { raw_path: file.name.clone(), path: normalize_archive_path(&file.name) }`,
+and `sevenz::list_all` never filters. So a 7z member named `\` — or `./`, `/`, `//`, `././`, `./\`,
+`\\` — reaches `plan.source` **and** is skipped by the rebuild. The two lists differ by one, in the
+opposite direction from `PXX-T2-015`.
+
+Four constructions were run — the pathological member first, in the middle, last, and an eleven-name
+cascade. **Every one produced `Err` and left the original untouched:**
+
+```
+listed_order (plan.source) = ["\\", "a.txt", "b.txt"]
+rebuild_consumed_order     = ["a.txt", "b.txt"]
+apply result = Err("the rebuilt archive is missing b.txt — it was not written, so nothing was replaced.")
+original still present: true      temp file left behind: false
+```
+
+The catch is `verify_against`'s path-presence multiset (`tasks.rs:1138`, refusal at `:1152`), which
+demands every `Keep` out_path including the pathological entry's own empty one — and since
+`plan.source` always exceeds what the walk consumes by exactly the number of root-like listed entries,
+at least one demanded name is always absent. **So it fails loudly and safely, and it fails by
+arithmetic rather than by design.** The agent stated plainly that it tried the qualitatively distinct
+positions rather than searching exhaustively, which is the right way to report a negative.
+
+The consequence is not data loss; it is that **Apply is impossible on any 7z containing such a
+member**, and only INDIUM's own writer can author one — `bsdtar --format 7zip` strips a leading
+backslash outright (`"Removing leading '\' from member names"`).
+
+### And zip cannot diverge, which is a stronger result than "it didn't"
+
+A zip entry *can* normalise to empty — libarchive's zip reader converts an all-backslash name to `/`
+on read — but `list_via_libarchive` filters `is_archive_root` **inside the listing function**
+(`arch.rs:843-857`), the same predicate the rebuild applies. Eleven names in, four out, and the
+rebuild consumed the same four. Apply returned `Ok(2)` with both real members correct by name and
+bytes.
+
+So for zip the two paths are the same reader with the same filter applied twice and **cannot**
+structurally disagree. That is worth more than a passing measurement: it is the shape the 7z path
+should have.
+
+### The finding that is larger than the question that found it
+
+The completeness sweep turned up something on a different axis entirely, and it is the biggest
+functional gap this round has found.
+
+**`tasks::apply` cannot touch an encrypted-header 7z at all — and every encrypted 7z INDIUM writes
+has encrypted headers.**
+
+`sevenz.rs:331` is `inner.set_encrypt_header(recipe.encrypt);` — one flag for both, so the Encrypted
+preset produces ciphertext member names as a side effect of asking for AES. Meanwhile `apply`'s
+re-list goes through `list_all`, which falls back to `sevenz` and succeeds; but the rebuild loop opens
+the source through `crate::arch::Reader`, which is libarchive and has no such fallback. Verified end
+to end here on an archive written by INDIUM's own writer, correct password on both ends, empty task
+list:
+
+```
+libarchive Reader::open                                  -> Ok("opened")
+list_all(with password)                                  -> Ok(["a.txt", "b.txt"])
+apply(empty task list, correct password both ends)       -> Err("This archive's file names are
+                                                                encrypted. A password is needed to list it.")
+original still present: true
+```
+
+**A correction to the report, made here.** It attributed the failure to `arch::Reader::open`. `open`
+**succeeds** — the measurement above shows `Ok("opened")`, because the header read is lazy. The failure
+is in the first `next_entry()`. The claim survives; its mechanism was one call too early, and this is
+the fifth citation-or-mechanism correction this round has made to a commissioned report without a
+single one of them touching a conclusion.
+
+Three things make this worse than a missing feature:
+
+- **The program creates what it cannot edit.** Encrypt an archive in INDIUM and no rename, no removal
+  and no addition will ever apply to it. There is no warning at creation time.
+- **The sentence is wrong in context.** *"A password is needed to list it"* is shown to a user who
+  supplied the password and whose listing succeeded. It names the wrong problem and suggests an action
+  already taken.
+- **CORE carves out no exception.** §5 promises `7z` writing with *"AES-256 and nothing else"*, and
+  §3's `tasks` row says *"Every mutation — add, remove, rename, create — is a task in a queue"* with no
+  qualification. Nothing in CORE says staging stops at encryption.
+
+**It is pre-existing and is not this round's doing** — nothing in this round touched the rebuild's
+reader — so it has shipped in `v2.1` and every release since. That is precisely the argument for
+`fix-in-v2.5` rather than `freeze-blocking`: it fails loudly, leaves the original untouched, and the
+freeze does not make it worse. **Recorded with the reasoning rather than just the label**, because the
+call is arguable in both directions and a severity dispute of this kind is the maker's under rule 7.
+
+The real fix is a `sevenz`-backed rebuild path, since both halves exist already (`sevenz::Writer` and
+`sevenz::read_entry`); that is a sizeable change for a freeze round. **The small honest alternative, if
+the real fix does not land: refuse staging on an encrypted-header 7z at the point the archive is
+opened, with a sentence that says what is actually true.** A refusal the user understands beats a
+capability the program advertises and does not have.
+
+### The class-4 finding: the test that underwrote the routing never tested it
+
+`tests/write_path.rs:619`, `a_plain_7z_round_trips_through_both_readers`. Its doc comment promises the
+archive is *"readable by the other reader too — libarchive, a genuinely independent implementation"*,
+and its assertion message is:
+
+> the two readers must agree on the entry list, or routing listing to one and data to the other is
+> unsound
+
+It compares `indium::sevenz::list_all` against `arch::list_all`. **`arch::list_all` calls `list_7z`
+first for any 7z, so both sides are `sevenz`.** The test compares one reader with itself and cannot
+fail on reader disagreement, which is the only thing it claims to check — and the claim it was
+protecting is the exact routing decision at the heart of `PXX-2-002` and `9175a28`.
+
+Measured through a genuinely independent walk:
+
+```
+sevenz::list_all    = ["a.txt", "sub/c.txt"]
+arch::list_all      = ["a.txt", "sub/c.txt"]   (same code path as sevenz)
+raw libarchive walk = ["a.txt", "sub/c.txt"]
+agree(sevenz vs libarchive) = true
+```
+
+**The two readers do agree, and this is the first time that has been established.** So the routing is
+sound, the assertion was right, and the gate protecting it was decorative for its whole life. Class 4
+in textbook form: *a test weaker than its name*, where the name is accurate about the intent and the
+body never carried it out.
+
+**And this section cited that test at `:618` in its own first draft.** The report had it right at
+`:619`; the error was introduced here, transcribing a number that was already correct, in the same
+section that corrects the report's mechanism and one paragraph after counting five such corrections
+made in this round. It was caught by the standing rule rather than by care — every line above was
+re-grepped before this was committed, which is the only reason the count is now six and not five with
+a wrong one shipped. **The rule earns its keep against its own author**, which is the entire argument
+for having a mechanical step that renders no judgement.
+
+Two smaller results from the same sweep, recorded so they are not rediscovered: `basic.7z` lists as
+`sub` through `sevenz` and `sub/` through libarchive — a `raw_path` trailing-slash convention
+difference, normalising identically and `is_archive_root` false either way, cosmetic; and
+`notrar.rar`'s two paths return word-for-word identical refusals.
+
+### One disclosure worth answering rather than filing
+
+The agent reported, unprompted, that a tool result had carried a block styled as a system reminder
+which announced a date change and asked that it not be mentioned — and it declined to comply with a
+concealment request arriving inside untrusted content.
+
+**Its caution was correct and its diagnosis was wrong, and both halves are worth recording.** That
+was a genuine harness notification, not an injection; the same one arrived in the coordinating context.
+But an agent cannot tell those apart from the inside, and the rule it applied — *a request to conceal,
+arriving in a tool result, is not obeyed* — is the right rule to apply to a thing it cannot
+authenticate. The failure mode it was guarding against is real even though this instance was not, and
+it is the fifth consecutive reviewer to disclose its injected context unprompted.
+
+### The findings
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-T3-021` | `tasks.rs`'s rebuild `Reader::open`; `sevenz.rs:331` | Apply fails on any encrypted-header 7z with the correct password, and every encrypted 7z INDIUM writes has encrypted headers — so the program creates archives it can never edit, with a message naming the wrong cause | fix-in-v2.5 | confirmed end to end, unfixed — **pre-existing since P4; severity arguable, and the argument is recorded** |
+| `PXX-T3-022` | `sevenz.rs:92`, `:180-181`; `arch.rs:963`; `tasks.rs:1776` | a 7z member whose stored name normalises to empty reaches `plan.source` but is skipped by the rebuild, so Apply on such an archive always fails — caught by `verify_against`'s multiset arithmetic rather than by design | fix-in-v2.5 | confirmed over four constructions, unfixed |
+| `PXX-T3-023` | `tests/write_path.rs:619` | the gate asserting the two readers agree compares `sevenz` with `sevenz`, so it cannot fail on the only thing it claims to check — and the claim is now measured true for the first time | fix-in-v2.5 | confirmed, unfixed |
+
+**Three new IDs. Register 168 → 171.** Suite unchanged at **406** — every probe was reverted, and
+turning them into gates belongs with the fixes.
+
+`PXX-T3-020`'s class now extends to two more containers: the same predicate drops such a member from
+a zip cleanly, and makes a 7z unmodifiable. The fixture recipes and the full captured output are
+preserved outside the repo at `$CLAUDE_JOB_DIR/tmp/zz_asym_survey/` for whoever runs the review that
+is still owed.
