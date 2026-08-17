@@ -1083,10 +1083,17 @@ fn a_target_whose_name_is_not_utf8_still_has_its_temp_cleared() {
 /// fatal — and the message has to name the file, because a refusal the user cannot act on is
 /// the fault this round filed against the lock file at `PXX-C9-014`.
 ///
-/// **This test skips loudly rather than passing quietly** when the process can write into a
-/// directory it has just closed — which means root, and `CORE.md:657` allows INDIUM to be run
-/// as root. A skip that announced nothing would be a gate that cannot fail, in the round whose
-/// whole subject is gates that cannot fail.
+/// **This test can vacate, and the honest statement of that is: it records a reason, and the
+/// reason is only visible under `cargo test -- --show-output`.** It skips when the process can
+/// still write into a directory it has just closed — which means root, and `CORE.md:657` allows
+/// INDIUM to be run as root. The first draft of this comment claimed the skip was loud; libtest
+/// captures the output of *passing* tests, so it is not, and tier 3 measured that rather than
+/// taking the word for it.
+///
+/// Failing instead of skipping was the alternative, and it is rejected: it would turn an
+/// explicitly permitted way of running INDIUM into a red suite. So the residual risk is stated
+/// where the next reader will find it — under root this gate reports `ok` without having
+/// tested anything, and that is the class this round audits, admitted rather than hidden.
 #[test]
 fn a_leftover_that_cannot_be_removed_refuses_the_apply_and_says_which_file() {
     let dir = TempDir::new("apply-temp-stuck");
@@ -1130,6 +1137,103 @@ fn a_leftover_that_cannot_be_removed_refuses_the_apply_and_says_which_file() {
         fs::read(&path).expect("the original must still be readable"),
         original,
         "a refused Apply writes nothing"
+    );
+}
+
+/// **`PXX-T3B-002`.** The same `exists()` defect, one door over, in the same function.
+///
+/// Found by the tier-3 review of the commit that fixed the orphan removal: a hundred lines above
+/// that fix, the refusal that stops a new archive replacing an existing file asks the identical
+/// question the same identical way, and traverses for the same reason. A dangling symlink at the
+/// destination is not "an existing file" to `exists()`, so Create proceeds — and the commit
+/// `rename` then replaces the link with a regular file, which is the silent replacement the
+/// guard exists to prevent, performed by the code that refuses to perform it.
+///
+/// A dangling link points at nothing, so nothing of the user's is destroyed. What is destroyed
+/// is the guarantee, and a guarantee that holds for every input except the one shaped to defeat
+/// it is not one.
+#[test]
+fn creating_over_a_dangling_symlink_is_refused_like_any_other_existing_name() {
+    let dir = TempDir::new("create-over-link");
+    let target = dir.join("out.tar.gz");
+    let source = dir.join("payload.txt");
+    fs::write(&source, ALPHA).expect("could not write the source file");
+
+    // Points at nothing. `exists()` says false; the name is nonetheless taken.
+    std::os::unix::fs::symlink(dir.join("nowhere"), &target).expect("could not plant the link");
+
+    let input = ApplyInput {
+        target: target.clone(),
+        recipe: recipe(&target, Method::Gzip),
+        tasks: vec![
+            Task::Create {
+                recipe: recipe(&target, Method::Gzip),
+            },
+            Task::Add {
+                source: source.clone(),
+                dest: "payload.txt".to_string(),
+            },
+        ],
+        adds: Vec::new(),
+        staged_against: Vec::new(),
+        source_password: None,
+        target_password: None,
+    };
+
+    let (result, _) = run_apply(&input, &no_cancel());
+    let message = result.expect_err("creating over a name already taken must be refused");
+    assert!(
+        message.contains("already exists"),
+        "the refusal must say the name is taken; got: {message}"
+    );
+    assert!(
+        fs::symlink_metadata(&target)
+            .expect("the link must still be there")
+            .file_type()
+            .is_symlink(),
+        "a refused Create must leave the name exactly as it found it"
+    );
+}
+
+/// **`PXX-T3B-001`.** A refusal must not describe a file that is not there.
+///
+/// `unlink` reports path-resolution and mount failures *before* it looks for the name, so
+/// `EROFS`, `ENOTDIR`, `ENAMETOOLONG` and a missing search bit all come back for a name that
+/// does not exist and never did. The first draft of the fatal arm had one sentence for every
+/// errno, and it told that user a leftover was in the way and to go and remove it — a refusal
+/// nobody can act on, which is the fault this round filed at `PXX-C9-014` wearing a friendlier
+/// face.
+///
+/// Tier 3 measured it on a read-only bind mount inside a user namespace. This gate reproduces
+/// the same false premise with no privileges and no mounts at all: `ENAMETOOLONG`. The temp
+/// name is the target's plus twelve bytes, so a target close to `NAME_MAX` yields a temp name
+/// that cannot exist on any ext4 filesystem — and nothing is planted anywhere.
+#[test]
+fn an_unclearable_workspace_does_not_claim_a_leftover_that_is_not_there() {
+    let dir = TempDir::new("longname");
+    // 243 + ".tar.gz" = 250, inside NAME_MAX. The temp adds "." and ".indium-new": 262, outside.
+    let path = dir.join(&format!("{}.tar.gz", "n".repeat(243)));
+    write_payload(&path, &recipe(&path, Method::Gzip));
+
+    let temp = tasks::temp_path_for(&path);
+    assert!(
+        temp.file_name().map(|n| n.len()).unwrap_or(0) > 255,
+        "the fixture only works if the temp name is over NAME_MAX"
+    );
+    assert!(
+        fs::symlink_metadata(&temp).is_err(),
+        "nothing may be planted here — the whole point is that no leftover exists"
+    );
+
+    let (result, _) = run_apply(&input_for(&path, Vec::new()), &no_cancel());
+    let message = result.expect_err("a temp name that cannot exist must refuse the Apply");
+    assert!(
+        !message.contains("leftover"),
+        "nothing is in the way, so the refusal must not say a leftover is; got: {message}"
+    );
+    assert!(
+        message.contains(&temp.display().to_string()),
+        "the refusal must still name the path it could not clear; got: {message}"
     );
 }
 

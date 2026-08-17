@@ -1462,9 +1462,22 @@ pub fn apply(
     // 1. The lock, held for everything below.
     let _lock = Lock::take(&input.target)?;
 
-    // A new archive must never silently replace an existing file. `create_new` failing
-    // with `AlreadyExists` is the check, and it costs nothing.
-    if creating && input.target.exists() {
+    // A new archive must never silently replace an existing file, and this is the only thing
+    // that enforces it. The comment here used to credit `create_new` failing with
+    // `AlreadyExists` — an atomic, non-traversing check — and that was never what happened:
+    // neither writer takes an `O_EXCL`, both were measured following a planted link and
+    // creating the file at the other end, so the whole guarantee rests on the line below.
+    //
+    // Which is why it asks `symlink_metadata` rather than `exists()`. `exists()` traverses, so
+    // a **dangling** symlink at the destination is not "an existing file" to it — and Create
+    // then proceeds and the commit `rename` replaces the link with a regular file, which is the
+    // silent replacement this refusal exists to prevent, performed by the code refusing to
+    // perform it. Nothing of the user's is lost, since the link pointed at nothing; the
+    // guarantee is what is lost, and a guarantee that holds for every input except the one
+    // shaped to defeat it is not one. Same mechanism as `PXX-C9-001` and the same shape as the
+    // fix at `platform::store`'s copy-aside; found by the tier-3 review of that fix, a hundred
+    // lines from it, in this function.
+    if creating && std::fs::symlink_metadata(&input.target).is_ok() {
         return Err(format!(
             "{} already exists.",
             input.target.to_string_lossy()
@@ -1549,8 +1562,10 @@ pub fn apply(
     //    removed first — that is the whole of the orphan policy, and it only ever
     //    touches a file whose name is provably ours.
     //
-    //    The removal is **unconditional**, in the form the scratch candidate in `estimate`
-    //    has always used. `exists()` traverses, so it answers `false` for a dangling symlink
+    //    The removal is **unconditional**, as the scratch candidate in `estimate` has always
+    //    been — borrowing that precedent for the unconditionality only, since that one is
+    //    `let _ =` and this one is not, and a half-cited precedent is worse than none.
+    //    `exists()` traverses, so it answers `false` for a dangling symlink
     //    at the temp's name — which is precisely the input this removal exists to handle, and
     //    the only one that reaches a write through a name INDIUM did not choose. Testing first
     //    bought nothing (`remove_file` unlinks the name and does not care whether it resolves)
@@ -1575,12 +1590,29 @@ pub fn apply(
         match std::fs::remove_file(&temp) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            // Which sentence is true depends on whether anything is actually there, and it is
+            // not safe to assume. `unlink` reports the *path-resolution and mount* failures
+            // before it ever looks for the name — `EROFS`, `ENAMETOOLONG`, `ENOTDIR`, `EACCES`
+            // for a missing search bit — so an ordinary Apply onto a read-only mount, with
+            // nothing planted anywhere, arrives here with no leftover to speak of. Telling that
+            // user to go and remove a file that is not there, and never was, is the same fault
+            // as `PXX-C9-014`'s unexplained refusal wearing a more helpful face. One `stat` on
+            // an already-failing path buys the difference between the two sentences.
             Err(e) => {
-                return Err(format!(
-                    "A leftover from an interrupted rebuild is in the way at {}, and it could \
-                     not be removed ({e}), so nothing was written. Remove it and try again.",
-                    temp.display()
-                ))
+                return Err(if std::fs::symlink_metadata(&temp).is_ok() {
+                    format!(
+                        "A leftover from an interrupted rebuild is in the way at {}, and it \
+                         could not be removed ({e}), so nothing was written. Remove it and try \
+                         again.",
+                        temp.display()
+                    )
+                } else {
+                    format!(
+                        "The workspace beside the archive could not be cleared at {} ({e}), so \
+                         nothing was written.",
+                        temp.display()
+                    )
+                })
             }
         }
     }
