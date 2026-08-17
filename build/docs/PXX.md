@@ -4393,3 +4393,94 @@ not. Listed in the previous section's rule-8 row for that reason.
 **One new ID. Register 164 → 165.** Suite unchanged at **405** — and a count of image files against
 a redesign is not a thing a test can reach, which is the whole reason it survived four commits and a
 plan.
+
+## Phase 3 — `PXX-10-008`: the bump list checked against the tree, and what four of its seven items turned out to be
+
+`PXX-10-007` found one stage-3 work item understated by half. That prompted checking the rest of the
+list the same way, by grep against the tree rather than by reading it. **Four of the seven items are
+not what the list says they are**, and the two new ones are the interesting pair, because one of them
+is a commitment that has already been kept by a test that says so in its own doc comment.
+
+### The item that is already done
+
+The list asks for:
+
+> **A new doc-as-test for CORE §7's road table.** It names a tag; parse it and assert it equals a
+> tag `release.yml` would accept, so the document and the workflow cannot drift apart in silence.
+
+`src/lib.rs:290` is `every_tag_core_seven_names_is_one_the_release_workflow_would_accept`, and it is
+**more** than was asked for:
+
+- it reads `.github/workflows/release.yml` through `include_str!`, so a vanished workflow fails the
+  *build* rather than a test;
+- it collects every line carrying `EXPECT=` into a set and asserts the set has **exactly one**
+  member, because *"two hand-copied gates in one file is the sibling class"* — class 9, guarded
+  before either gate is compared to the model;
+- it parses every road-table row through `parse_release_tag` and panics naming the row if
+  `release.yml` would refuse the tag;
+- and it asserts `named > 0`, so the gate cannot pass by reading every cell as held. That last
+  assertion is the class-4 guard, written in by the author unprompted.
+
+There is a second test beside it at `:350`,
+`the_road_table_never_names_a_tag_earlier_than_the_row_above_it`, which nothing asked for at all.
+
+**And the test's own doc comment already records the closure**, at `:280-283`:
+
+> The commitment this closes was carried unkept from PXX Phase 4, and its own wording had gone stale
+> before anyone acted on it — it asked for *"the tenth"* doc-as-test when nine existed and eleven do
+> now. So the ordinal is deliberately absent here: a count of tests is a number nothing can check, in
+> the class this project has never beaten.
+
+### Why this one is worth a finding rather than a shrug
+
+Read the two passages together. The list's bullet **contains its own class-2 correction** — it
+explains, at length and correctly, that the ordinal *"the tenth"* had gone stale and removes it. The
+test's doc comment makes the identical observation independently.
+
+So the bullet was revisited, a stale number inside it was found, and the number was fixed — **while
+the sentence around it stayed stale.** The item was already complete. The correction addressed the
+count and left the claim standing one door over.
+
+That is class 9 nested inside a class-2 repair: *"the same defect one door over"*, in the same
+sentence, in the round whose charter quotes `P15.md:75` — **"A sweep is not a habit."** The plan's
+own note on class 9 calls it *"a second escape by construction."* Here is a third, and the
+construction is that fixing one thing in a sentence certifies the rest of it.
+
+### The list, checked
+
+| # | item | state against the tree |
+|---|---|---|
+| 1 | `Cargo.toml` / `PKGBUILD` / changelog | **accurate.** Stage 2's bump is complete and self-consistent at `2.3.0`, and `about.rs`'s `RELEASE_DATE` is pinned to the newest changelog stanza by a test |
+| 2 | CORE §7 annotated, not rewritten | **already drafted** — draft 7 at `:2025`, awaiting the maker |
+| 3 | the road table's PXX, v2.3 and v2.5 rows | **already drafted** — draft 8 at `:2066`. A tenth draft duplicating it was nearly filed during this round and was caught by verifying a figure rather than by re-reading; draft 8 also turned out to be the better of the two, because it knew the gate at `src/lib.rs:290` parses one tag per row and PXX therefore takes two rows |
+| 4 | README badge | **open and real** — `PXX-10-002`, `-003`, and `PXX-T2-002`'s six version strings |
+| 5 | "the two stale screenshots" | **stale — four.** `PXX-10-007` |
+| 6 | the road-table doc-as-test | **stale — done, twice over.** This finding |
+| 7 | release notes drop the beta sentence and say why | **open and real** |
+
+Three genuinely open, two already drafted, two stale. **Four of seven items were not what the list
+said**, and every one of the four was settled by a single grep.
+
+### The conclusion that is worth more than the finding
+
+Every remaining item on the bump list should be checked against the tree before it is worked, because
+the list's measured error rate on this pass was better than half. The rule this round has now
+demonstrated three times — twice here and once when a duplicate CORE draft was nearly filed — is
+short enough to keep:
+
+**The tree outranks the work list, and the check costs one grep.**
+
+The reason it keeps paying is structural rather than careless. A work list is written once, at the
+moment of most complete knowledge, and then every commit that lands makes it slightly less true while
+touching not a word of it. That is the definition of class 1, and a plan is the document most exposed
+to it, because unlike CORE it has no doc-as-test reading it and unlike a P-document it is not
+append-only — so nothing in it is dated and nothing in it is superseded, it is simply read as current.
+
+### The findings
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-10-008` | `src/lib.rs:278-341`, `:350`; the stage-3 bump list | the list asks for a road-table doc-as-test that exists, exceeds the spec, and records closing that very commitment in its own doc comment — in a bullet that had already been corrected for a *different* stale number inside itself | document-only | confirmed — **the item is done; the list is what needs correcting** |
+
+**One new ID. Register 165 → 166.** Suite unchanged at **405** — both tests already counted in it,
+which is itself the point: the work was in the suite the whole time.
