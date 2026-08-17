@@ -3941,3 +3941,133 @@ already fooled one grep this round — is `397`. Two methods, two tools, one num
 It also explained a figure that had been left loose: the tier-3 report's *"302 lib + 30 integration
 tests pass"* is `src/`'s own 302 plus `write_path.rs`'s 30, which is a lib-plus-one-file run and not
 a competing total.
+
+## Phase 3 — the ledger, and four findings the register made about itself
+
+A clerk was sent to build the definitive open-findings ledger, because the version bump cannot
+honestly begin while confirmed `fix-in-v2.5` findings sit unfixed and nothing in the tree could say
+how many there were. It returned the ledger — 24 `OPEN-CODE` and 10 `OPEN-MAKERS-CALL` at the
+146-finding boundary it was given — and it returned four things about the register itself.
+
+Every one of the four was put through tier 0 here before being written down, by grep against the
+tree rather than by trusting the report. Two of them came back **sharper than filed**, in the
+direction that makes them narrower and more precise, and both are recorded in the corrected form.
+This is class 12 — *the record correcting its own record* — which the hunt list says has no gate and
+can have none, because **a milestone cannot audit itself from the inside.** So the clerk is the
+instrument, and these are what it found.
+
+### `PXX-C12-001`: three commits that closed seven findings, and the document names none of them
+
+Seven rows — `PXX-C9-007`, `-008`, `-009`, `-014`, `-017`, `PXX-T2-001` and `PXX-10-001` — are
+closed in the tree by three commits:
+
+| commit | its own subject line |
+|---|---|
+| `318d9e6` | *"PXX-C9-014: a lock file this account cannot write is still a lock file"* |
+| `cd90057` | *"PXX-C9-007/008/009: the predictable names in the shared temp directory, closed by a lint rather than by four edits"* |
+| `429b97f` | *"PXX-10-001: the dangling doc citation is fixed, and a test now reads every citation like it"* |
+
+**`grep -c '318d9e6\|cd90057\|429b97f' build/docs/PXX.md` returns `0`.** Not one of the three hashes
+appears anywhere in the document.
+
+**The filed claim was that these are `FIXED-UNRECORDED` — that the record says "not fixed" where the
+tree says fixed. Tier 0 narrows it, and the narrowing matters.** Take the clearest case.
+`PXX-C9-014`'s findings-table row at `:2611` does read *"not fixed — the fix is not a one-liner"* —
+but `:2934` opens a later section, `### PXX-C9-014: an archive that can never be rebuilt again`,
+which describes the fix in full. Under rule 4 a later section supersedes an earlier one and the
+earlier text stays exactly as written, so **the document is internally consistent by its own
+governing rule.** It is not wrong.
+
+What is true is narrower and still worth a finding: **a reader who consults the findings table —
+the thing built to be consulted — gets "not fixed" for something that is fixed, and no hash anywhere
+ties the superseding prose to the commit that did it.** The traceability lives entirely in `git log`,
+where the commit messages are exemplary and name their findings precisely. So the defect is not a
+false record; it is a record whose index disagrees with its body and whose body cannot be tied to
+the tree without leaving the document.
+
+Severity `document-only`. The fix is a hash in each superseding section, not a rewrite of any row.
+
+### `PXX-C12-002`: a freeze-blocking fix that owes tier 3 and never got it
+
+`PXX.md:2608`, verbatim:
+
+> | `PXX-C9-011` | `tasks.rs:1545` | Apply's commit discards the archive's mode; an encrypted 7z's
+> ciphertext becomes world-readable on any rebuild | **freeze-blocking** | **fixed, `25be01d`** — the
+> fix owes tier 3 |
+
+**It is still owed.** Its two siblings both got their reviews and both reviews found something:
+`PXX-2-001`'s fix returned `REPLACE`, and the `PXX-C9-001`/`-002` pair returned `AMEND` — that second
+one is the whole `PXX-T3B` block, which reviews `c9878b2`. Nothing reviews `25be01d`. Its own subject
+line is *"The mode-discard class, closed at the two sites the tier-3 fix left open"*, which makes it
+a **follow-up to** a tier-3 review rather than an artifact of one.
+
+So a `freeze-blocking` fix stands in the register marked fixed, with the sentence recording what it
+owes still true, and the row reads as closed.
+
+**This is the finding of the four, and the reason is sitting three sections above it.** This round has
+now sent two fixes through tier 3 and got `REPLACE` once and `AMEND` once. `da6c821` passed 332
+tests, carried two real defects including one that destroyed a file, and fixed a function the window
+never calls. The rule that a freeze-blocking fix goes back through the pipeline is not ceremony, and
+the one row that skipped it is a row nobody has checked. Severity `fix-in-v2.5`, and the fix is a
+review.
+
+### `PXX-C12-003`: a filing that cited the wrong file, corrected silently
+
+`PXX-4-001` was filed against `platform/window.rs`. The site is `platform/apps.rs:513-515` —
+`window.rs`'s `open_new()` calls `reap()` and is provably not the defect. Tier 2 corrected it while
+confirming the finding and **did not flag the citation error**, which is not what this round does
+elsewhere: `PXX-T2-001` and `PXX-T2-006` both exist precisely to call out drift of exactly this kind.
+
+Recorded because the inconsistency is in the *practice*, not in the finding. A confirmer that
+silently repairs a citation is indistinguishable from one that never noticed, and tier 0 exists on
+the premise that the two are different things. `document-only`.
+
+### `PXX-C12-004`: the register's count is right, and right for the wrong reason
+
+`146 = 146` at the boundary the clerk was given, and `159 = 159` at HEAD. Both agreements hold. **Neither
+is over the same set of findings.**
+
+Two counting errors cancel, exactly, at both snapshots:
+
+- **`PXX-9-008` is counted and is not a finding.** `PXX.md:1151` says so in its own words: *"A
+  numbering gap at `PXX-9-008`, unexplained. No finding is lost."* Any census built on the
+  `PXX-<n>-<nnn>` pattern picks the string up regardless.
+- **`PXX-385` is a finding and is not counted.** It sits at `:900`, `:1709` and `:2004` as *"closed
+  seed, never severity-tagged"*, and its two-segment ID matches no three-segment census regex.
+
+One phantom in, one real one out, and the total lands on the document's own figure either way.
+
+**This is class 2, and it is class 2 in its purest available form.** The charter names it *"a number
+nothing can check"* and calls it the one class this project has formally declared unbeaten: *"Every
+number a test can reach has been right for sixteen milestones. This is the class that has not."*
+Here is a number that **was** checked, twice, at two different document lengths, by a mechanical
+census — and it agreed both times while being wrong twice. A check that passes for the wrong reason
+is worse than no check, because it retires the question.
+
+The fix is not a corrected total; the total is already correct. It is that the census be **stated**:
+which strings it counts, which it excludes, and why — so the next hand that recomputes it gets the
+same number from the same set rather than from a different pair of mistakes. `document-only`, and it
+belongs beside the register line rather than in a section of its own.
+
+### The findings
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-C12-001` | `PXX.md:2611`, `:2934`; and six sibling rows | seven findings closed by `318d9e6`, `cd90057`, `429b97f`; the findings table still reads "not fixed" for one of them and no hash appears anywhere in the document | document-only | confirmed, unfixed |
+| `PXX-C12-002` | `PXX.md:2608` | a `freeze-blocking` fix (`25be01d`) marked fixed with "the fix owes tier 3" still true; both its siblings' reviews found something | fix-in-v2.5 | confirmed, unfixed — **the fix is a review** |
+| `PXX-C12-003` | `PXX-4-001`'s filing | cited `platform/window.rs`; the site is `platform/apps.rs:513-515`, and tier 2 corrected it without flagging it | document-only | confirmed, unfixed |
+| `PXX-C12-004` | the register line, every section | `146 = 146` and `159 = 159` both hold over different sets: `PXX-9-008` counted and not a finding, `PXX-385` a finding and not counted | document-only | confirmed, unfixed |
+
+**Four new IDs, and a new prefix. Register 159 → 163.** Suite unchanged at **405** — none of these is
+a code defect, and three of the four cannot have a gate, which is the whole of what class 12 means.
+
+`PXX-C12` follows `PXX-C9`'s convention: the prefix names the class the sweep was hunting. C9 was
+*the same defect one door over*; C12 is *the record correcting its own record*, and unlike every
+other class on the list it has no guard and can have none. The hunt list says why, and it says it in
+the form of a rule rather than a complaint: **"a milestone cannot audit itself from the inside."**
+These four exist because something outside the milestone was sent to read it.
+
+**One of them is about this section.** `PXX-C12-004` says a mechanical census agreed with the
+register twice while being wrong twice — and the `159 → 163` line above was produced by adding four
+to a number that inherits both errors. It is stated rather than silently corrected, because
+correcting the total would hide the finding, and the total is not what is wrong.
