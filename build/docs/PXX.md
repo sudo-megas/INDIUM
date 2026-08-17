@@ -1755,3 +1755,147 @@ finding produced by a tier-2 confirmation is filed and tier-0'd, and enters tier
 `fix-in-v2.5` or above; a finding produced by *that* pass is filed, tier-0'd, and carried to v2.6 as
 an open item rather than confirmed here.** The round is not permitted to chase its own tail into the
 freeze. What it *is* required to do is say where it stopped, which is this sentence.
+
+---
+
+## Phase 3 — tier 2 on the tier's own three, and a finding withdrawn
+
+The three `fix-in-v2.5` findings the verification tier produced went out to blind confirmers under
+the same brief the fleet's findings got: `file` + `line_range` + one word, and nothing else. Two came
+back confirmed. **The third refuted a finding this pass had filed itself, and it was right.**
+
+| ID | Site | Verdict | Confidence |
+| --- | --- | --- | --- |
+| `PXX-T2-002` | `README.md:87` | **CONFIRMED** | `certain` |
+| `PXX-T2-010` | `ui/mod.rs:1023-1027` | **CONFIRMED** | `certain` |
+| `PXX-T2-009` | `ui/mod.rs:2141-2144` | **REFUTED** | `certain` |
+
+### `PXX-T2-002` confirmed, and it is six sites rather than one
+
+The README does not carry one stale version string. It carries **six**, and every one of them is
+wrong: the version badge at `:9`, the two `pacman` lines at `:65` and `:68`, the two `apt` lines at
+`:73` and `:76`, and the tarball name at `:87`. Counted here directly: `grep -c '2\.1\.0' README.md`
+returns **6**.
+
+Those six are not six findings. They are the three already filed — `PXX-10-002` (the badge),
+`PXX-10-005` (the four install filenames) and `PXX-T2-002` (the tarball) — and the count closing
+exactly is itself the check: the class-9 sweep found no seventh site.
+
+**What the blind pass added, and it is the part that matters.** It closed the one live counter-argument
+nobody had addressed: that a README might legitimately describe the last *published* release rather
+than the tree. `git show v2.3:README.md | grep -c '2\.1\.0'` returns **6** as well. The drift is
+baked into the v2.3 release tree itself, so this is not a working tree running ahead of its front
+page — it is a front page that was already two tagged releases stale when those releases were cut.
+Last edit to `README.md` is `e34e844`, *"P22: … a front page read against the tree"* — a v2.1-era
+commit, in a round whose own title claims the page was read against the tree.
+
+### `PXX-T2-010` confirmed, and the file already had the cure
+
+The confirmation traced the whole chain and reached `certain`: `self.status` is a single slot
+(`:150-155`) with no queue anywhere in the program; `open_archive` overwrites it at `:736`; the paint
+happens at `:3051` → `:3863`, after `drain_worker` ran at the top of `ui()`. So the sentence is
+destroyed **inside the same synchronous call stack** that wrote it, and the careful singular/plural at
+`:1025` is unreachable output.
+
+Then it found the thing that turns this from an oversight into an omission: **`discarded_on_open`
+(`:289-302`) exists for precisely this hazard**, and its own comment says so — that `open_archive`
+sets *"Reading …"* and `ListMsg::Done` overwrites it *"so a sentence said at the close would be gone
+before it was read."* The sentence is parked in a field at `:728` and composed into the surviving line
+at `:812-815`. Three siblings use the pattern or avoid the hazard: `ExtractMsg::Done` (`:838-848`)
+survives because nothing re-opens after it; `close_archive` (`:684-692`) sets its sentence after the
+transition; `PickerFor::Preselect` (`:969-987`) reasons explicitly about answers that arrive frames
+later. `ApplyMsg::Done` is the one site that neither uses the carrier nor avoids the need for it.
+
+**And one path does escape**, which the original had not found: `path == None` at `:1054` needs both no
+creation recipe in the queue and no `archive_path` — reachable by pressing *Discard* during a creation
+rebuild, since the tray stays clickable and `discard_tasks` has no `work_running()` gate. There the
+sentence survives, **and the archive that was just written is never opened at all, the draft is never
+cleared, and the window sits empty.** That is `PXX-8-003`, independently re-derived from a different
+site by an agent that had never seen it — and extended, because `PXX-8-003` named the skipped
+`draft.clear()` and did not name the archive that goes unopened.
+
+### `PXX-T2-009` refuted, and it was this pass's own finding
+
+Filed here, verified here against source, and **wrong**. The facts all held: `spawn_extract:2144`
+installs a fresh flag with no `store(true)`, where `reset_view:620` and `begin_apply:1862` both raise
+first. The inference was inverted, and the blind pass showed why in three legs — each of which is
+verified here:
+
+1. **Raising the flag there would break a listing the user still wants.** `arch::list` answers a
+   raised flag with `ListMsg::Done { count }` (`arch.rs:797-799`, `:762-764`), which the handler at
+   `:799-816` treats as a completed listing — table truncated, status clobbered. And the file states
+   the intended behaviour in as many words at `:3947-3949`: *"`E` works while a listing is still
+   streaming in, and when both are true the Cancel has to reach the worker that is writing files."*
+   Replace-without-raise **is** that sentence's implementation.
+2. **Only a listing worker can hold the outgoing flag at `:2144`.** All four callers gate on
+   `work_running()`, which refuses on `extract_rx`/`apply_rx`, and both are cleared only in terminal
+   message arms.
+3. **Orphaning the flag is observably equivalent to raising it.** `arch::list` returns on send failure
+   at the same loop iteration the flag check would have caught, so a stale walker dies within one
+   entry either way; and the Cancel button is drawn only when `progress.is_some()` (`:3915`), so it
+   always names the newest worker.
+
+**The comment, which was the finding's strongest point, does not say what this pass read it as saying.**
+`:2141-2142` reads *"Same preemption Apply makes, for the same reason: an extraction is work the user
+is waiting on, and a measurement is not"* — and the line it introduces is `self.cancel_estimate()`.
+`begin_apply:1859-1860` says the same thing about the same call: *"The estimate is advisory and the
+rebuild is not, so the advisory one goes."* **Both comments are about the estimator.** The
+`store(true)` at `:1862` is a separate and entirely uncommented act. So the comment claims parity on
+`cancel_estimate()`, which is byte-identical between the two sites, and claims nothing about the flag.
+Read correctly, there is a **missing comment** where this pass read a **false one**.
+
+**Withdrawn.** And the resolution is clean rather than merely negative: the *inverse* is the defect.
+`begin_apply:1862` raising the flag over a live listing is `PXX-1-003`, which tier 2 confirmed
+independently — and this confirmer reached it too, adding that the behaviour is *inconsistent between
+runs*, because an intervening extraction orphans the flag and there is then nothing to raise.
+
+That the tier refuted a finding the tier itself filed, on the strongest evidence that finding had, is
+the most useful single result of the whole verification pass. A gate that never fires on its own
+author's work is not a gate.
+
+### Four more findings, and the stopping rule applied to them
+
+These come from the confirmation *of a confirmation* — the second-order pass. **Under the stopping
+rule recorded above they are filed, tier-0'd here, and carried unconfirmed rather than chased**, and
+the severity column is the confirmer's judgement, not a disposition dressed up as one.
+
+| ID | Site | What it is | Severity | Disposition |
+| --- | --- | --- | --- | --- |
+| `PXX-T2-012` | `ui/mod.rs:1825` | `let needs_source = self.entries.iter().any(\|e\| e.encrypted);` reads a **partial listing**, so an Apply started while rows are still streaming can decide no password is needed, skip the upfront prompt, and fail in the worker instead. A class-9 sibling of `PXX-1-002`, which is the same partial-`entries` read one decision over | correctness | carried to v2.6, unconfirmed |
+| `PXX-T2-013` | `ui/mod.rs:2131` | `spawn_extract`'s doc says *"so the three callers cannot drift apart"*. There are **four** — `:2212`, `:2334`, `:2401`, `:2533` — since `bring_from_archive` joined at P22. A number nothing can check, in a sentence about drift | doc-drift | carried to v2.6, unconfirmed |
+| `PXX-T2-014` | `ui/mod.rs:2150` vs `arch.rs:1079` | The UI seeds `total: wanted.len()` from selection strings; the worker reports `total: selected.len()` after directory expansion. A single-directory selection shows `0/1` and then jumps to `1/57` | resource | carried to v2.6, unconfirmed |
+| — | `ui/mod.rs:2200-2201` | **An extension to `PXX-1-003`, not a new ID.** `E` with an empty selection snapshots `self.entries` under the comment *"Nothing selected means the whole archive"* — and needs **no** precondition at all: no truncated listing, no prior Apply. Press `E` while 500 of 200,000 rows have arrived and exactly 500 are written, reported as *"Extracted 500 entries."* `work_running()` does not count a listing, so the press is not refused. `PXX-1-003` reached this consequence only through its own truncation; it is reachable directly | correctness | folded into `PXX-1-003` |
+
+All four confirmed present at their cited lines here, by reading them.
+
+### What "blind" was actually able to mean, disclosed
+
+One confirmer reported a slip it could not have avoided: **the harness injected the maker's own
+`MEMORY.md` into its context before its first action** — a path the brief marks off limits. It
+disclosed unprompted, characterised the content, and showed it bears on nothing at this site.
+
+The verdict stands, and the *method* is what gets recorded: **blindness in this round means blind to
+the finding and to `build/docs/`, not blind to everything outside `src/`.** An agent's context is not
+wholly under the briefer's control, and a brief that says "off limits" cannot make it so. Nothing here
+was contaminated — the injected file concerns commit conventions and machine layout and names no site
+under audit — but the *next* round cannot assume the instruction is sufficient, and this is the
+sentence that tells it so. The other confirmer's slip was smaller and of the same shape: a `find` over
+`build/` printed filenames under `build/docs/` without opening one.
+
+### One thing settled before stage 3 trips over it
+
+Three dates disagree, and only one of them is authority. The changelog's newest stanza is stamped
+`Fri, 14 Aug 2026` (`build/package/deb/changelog.Debian`); `RELEASE_DATE` in `about.rs:28` reads
+`2026-08-14` and agrees with it, pinned by
+`the_date_about_prints_is_the_one_the_changelog_stamped`; the `v2.3` **tag** is dated `2026-08-15`;
+and the README badge reads `2026-08-12`, which is v2.0-era.
+
+**The badge's authority is the changelog stanza, not the tag.** The tag-to-changelog gap is one
+evening — the stanza is stamped 23:30 +0300 and the tag commit landed the next day — and it is not a
+defect, because nothing claims they match. Setting the badge from `git log` at v2.5 would introduce a
+*fresh* disagreement with a constant a test already pins, which is why it is written down here before
+the round that edits that badge begins.
+
+Also flagged and deliberately **not** guessed at: the two package-size badges at `README.md:15-16`
+(9.80 MB / 6.92 MB) are v2.1-era on the same reasoning as the version badge, and no local artefact is
+a release authority. They need a measurement, not an estimate, and they are stage 3's to take.
