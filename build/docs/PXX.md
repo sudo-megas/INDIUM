@@ -5624,3 +5624,89 @@ different thing and is recorded as one: it is predictable, it resets, and it doe
 later at no cost but time, `fa73bf8` is gated four ways and sabotage-checked 4 of 4, and this
 section's salvage has already found the class of thing an independent reader finds — twice over,
 neither of which the author's own matrices were pointed at.
+
+## Phase 3 — tier 0 over the whole register, and agent 10's other mechanical brief, both run
+
+Agent 11's charter is *"Runs after agents 1–10. For every finding: re-open the cited file, confirm the
+verbatim quote exists at the cited range, confirm line numbers did not drift."* It had never been run
+against the current tree. Twenty-odd commits have landed since most of these findings were filed, and
+**a citation that was right when written is exactly what this round's first class describes.**
+
+Run mechanically, because the tier's own definition is *"Mechanical, no judgement"* and a judgement
+would have been out of scope even where one was tempting.
+
+### The register's citations
+
+Every `file:line` and `file:line-range` reference in `PXX.md`, resolved against `git ls-files` and
+checked for existence and bounds.
+
+```
+citations found: 415   distinct: 298
+resolved and in range: 396
+resolved but OUT OF RANGE: 0
+unresolved names: 19 (6 distinct)
+```
+
+**Nothing drifted.** Not one citation in the register points past the end of its file, across 415
+references and a tree that has moved by more than twenty commits since the earliest of them were
+written. That is the standing re-grep rule paying off in bulk rather than one finding at a time.
+
+The nineteen unresolved are six names, and every one is deliberate: `README.md` (eleven times — it is
+cited as a document, not as a repo path), `sevenz-rust2-0.21.4/src/writer.rs`,
+`wl-clipboard-rs-0.9.3/src/copy.rs`, `epaint-0.36.1/src/text/mod.rs`, and two bare `copy.rs`/`mod.rs`
+shorthands for those same crate files. **Crate-internal references are the one class this check cannot
+resolve and should not**, since they name files outside the repository on purpose.
+
+### The other half of agent 10's brief
+
+*"Also: every `///`-cited identifier in `src/` must resolve to a real `fn` — one dangling reference is
+already known."*
+
+```
+identifiers defined in src/ + tests/: 1274
+snake_case identifiers cited in doc comments: 114
+distinct names resolving to nothing: 18 — all external APIs
+```
+
+Every one of the eighteen is a genuine citation of somebody else's API: egui and epaint
+(`allocate_ui_with_layout`, `automatic_area_position`, `constrain_window_rect_to_area`,
+`clamp_corner_radius`, `override_text_color`, `weak_bg_fill`, `set_min_height`, `with_min_inner_size`,
+`focus_given_to`), `std` (`create_dir_all`, `remove_dir_all`, `read_to_end`, `get_or_insert_with`),
+`image` (`from_png_bytes`, `from_rgba_unmultiplied`), glib (`g_shell_parse_argv`) and `sevenz-rust2`
+(`for_each_entries`, `set_encrypt_header`). **Zero dangling INDIUM identifiers.**
+
+**And the seed finding is closed.** The plan named one known dangling reference — `theme.rs:153`
+citing `the_cast_lands_in_the_band_core_gives_it` where the real test is `..._core_six_gives_it`. At
+HEAD, `theme.rs:153` cites the correct name, the test exists at `theme.rs:1874`, and `theme.rs:2038`
+carries the correction in place: *"the real one is `the_cast_lands_in_the_band_core_six_gives_it`. The
+wrong name is deliberately…"*. Fixed during the round with the record kept, which is the convention.
+
+### One correction, made to this section before it was filed
+
+The identifier check first reported **25** dangling names, seven of which were INDIUM's own long test
+names — `a_dot_slash_rooted_tar_lists_and_extracts_like_any_other`,
+`a_traversal_entry_is_refused_and_writes_nothing`, `every_lzma2_level_the_slider_offers_builds_a_7z_that_reads_back`
+and four more.
+
+**The instrument was wrong, not the tree.** It indexed definitions from `src/` alone while those tests
+live in `tests/`, so a doc comment in `src/` citing a gate in `tests/` looked dangling. Indexing the
+whole crate took the count to 18 and every survivor to an external API.
+
+Recorded rather than silently corrected, because the failure mode is the one this round exists to
+hunt: **a number produced by a tool nobody checked, about to be written into the record as a finding
+of seven defects that do not exist.** It was caught by the twenty seconds of reading the names, which
+is the only reason this paragraph describes a script and not a retraction. *Ask the program — and then
+ask whether the program was asked the right question.*
+
+### What this does and does not establish
+
+It establishes that **no finding in this register cites a location that does not exist**, and that the
+`src/` tree has no doc comment pointing at an identifier of its own that is gone.
+
+It establishes **nothing about whether any claim is true.** Tier 0 renders no judgement and this
+section renders none: a finding can cite a real line and be entirely wrong about it, which is what
+tiers 1 through 3 are for, and what the three commissioned reviews were for.
+
+No new IDs. Register unchanged at **189**; suite unchanged at **410**. The scripts are preserved
+outside the repo at `$CLAUDE_JOB_DIR/tmp/clerk.py` and `clerk_idents.py` so the pass is repeatable
+against a moved tree rather than being a one-time assertion.
