@@ -868,6 +868,125 @@ fn a_rooted_archive_of_equal_length_members_is_not_silently_shuffled() {
     );
 }
 
+/// Build a `./`-rooted tar of equal-length members with `tar -C dir .`, which is both the ordinary
+/// way to tar a directory's contents and the thing that writes the root member.
+///
+/// Equal lengths are the point everywhere this is used: after a misalignment, sizes are the thing
+/// that coincides, so a gate built on them passes over a corrupted archive by construction.
+fn rooted_equal_tar(dir: &TempDir, name: &str, members: &[(&str, &[u8])]) -> PathBuf {
+    let payload = dir.join(&format!("payload-{name}"));
+    fs::create_dir_all(payload.join("sub")).expect("payload dir");
+    for (member, body) in members {
+        fs::write(payload.join(member), body).expect("could not write a member");
+    }
+    let path = dir.join(name);
+    let ok = std::process::Command::new("tar")
+        .arg("-cf")
+        .arg(&path)
+        .arg("-C")
+        .arg(&payload)
+        .arg(".")
+        .status()
+        .expect("tar must be runnable — this gate needs it and must not vacate quietly")
+        .success();
+    assert!(ok, "tar could not build the fixture");
+
+    let raw = std::process::Command::new("tar")
+        .arg("-tf")
+        .arg(&path)
+        .output()
+        .expect("tar -tf must run");
+    let listed = String::from_utf8_lossy(&raw.stdout).to_string();
+    assert!(
+        listed.lines().any(|l| l == "./"),
+        "the fixture is only the case if it carries a ./ root: {listed:?}"
+    );
+    path
+}
+
+/// **`PXX-T2-015`, the coverage hole its own fix left.** Apply with *staged mutations* over a
+/// `./`-rooted archive.
+///
+/// Every measurement made of the root skip — both of its gates, and the probes a tier-3 reviewer
+/// left behind before dying — used an **empty task list**. That exercises the rebuild loop's
+/// alignment and nothing downstream of it. `Task::Rename` rewrites the `staged` vector by position
+/// and carries a directory's children with it, and `expected()` is built from the same vector, so a
+/// root that consumed a slot would misalign the *plan* as well as the walk. An empty queue cannot
+/// see that, because with nothing renamed every `out_path` equals its source path and a shift of the
+/// plan looks exactly like no shift at all.
+///
+/// Four nine-byte members, so no assertion here can lean on a size.
+#[test]
+fn a_rooted_archive_survives_staged_renames_and_removes() {
+    let dir = TempDir::new("rooted-staged");
+    let path = rooted_equal_tar(
+        &dir,
+        "staged.tar",
+        &[
+            ("a.txt", b"aaaaaaaa\n"),
+            ("b.txt", b"bbbbbbbb\n"),
+            ("sub/c.txt", b"cccccccc\n"),
+            ("sub/d.txt", b"dddddddd\n"),
+        ],
+    );
+
+    // A rename, a remove, and a directory rename that must take its two children with it.
+    let tasks_list = vec![
+        Task::Rename {
+            from: "a.txt".to_string(),
+            to: "z.txt".to_string(),
+        },
+        Task::Remove {
+            path: "b.txt".to_string(),
+        },
+        Task::Rename {
+            from: "sub".to_string(),
+            to: "dir2".to_string(),
+        },
+    ];
+    let input = ApplyInput {
+        target: path.clone(),
+        recipe: recipe(&path, Method::Store),
+        tasks: tasks_list,
+        adds: Vec::new(),
+        staged_against: Vec::new(),
+        source_password: None,
+        target_password: None,
+    };
+    let (result, _) = run_apply(&input, &no_cancel());
+    result.expect("a staged Apply over a ./-rooted archive must succeed");
+
+    // Bytes by name, which is the only assertion that can see a shift.
+    for (name, want) in [
+        ("z.txt", &b"aaaaaaaa\n"[..]),
+        ("dir2/c.txt", &b"cccccccc\n"[..]),
+        ("dir2/d.txt", &b"dddddddd\n"[..]),
+    ] {
+        let (got, _) = arch::head_of(&path, name, 64, None)
+            .unwrap_or_else(|e| panic!("{name} could not be read back: {e:?}"));
+        assert_eq!(
+            got, want,
+            "{name} holds the wrong member's bytes — the rename moved a name but the rebuild \
+             moved a different member's contents under it"
+        );
+    }
+
+    let after = arch::list_all(&path, None).expect("could not list after");
+    let names: std::collections::BTreeSet<&str> = after.iter().map(|e| e.path.as_str()).collect();
+    assert!(
+        !names.contains("b.txt") && !names.contains("a.txt"),
+        "the removed member and the old name must both be gone: {names:?}"
+    );
+    assert!(
+        names.contains("z.txt") && names.contains("dir2/c.txt") && names.contains("dir2/d.txt"),
+        "the renamed member and both carried children must be present: {names:?}"
+    );
+    assert!(
+        after.iter().all(|e| !e.is_dir || e.path == "dir2"),
+        "nothing but the renamed directory may come back as a directory: {after:?}"
+    );
+}
+
 /// A removed entry goes, and every survivor keeps its exact bytes.
 #[test]
 fn a_removed_entry_is_gone_and_every_survivor_is_byte_identical() {
