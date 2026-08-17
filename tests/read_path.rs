@@ -989,6 +989,148 @@ fn a_link_planted_in_the_destination_cannot_redirect_an_encrypted_header_write()
     );
 }
 
+/// **Tier 3 on `PXX-2-001`'s own fix returned REPLACE, and this is the case it returned it for.**
+///
+/// The first draft of `create_dir_under` refused every component that was not
+/// `Component::Normal`, `Component::CurDir` among them. A *leading* `./` survives into
+/// `Path::components` (an interior one is folded away), `path_escapes` answers `false` for it, and
+/// `tasks::out_path_for` keeps a stored name byte for byte — so INDIUM could write a
+/// header-encrypted 7z naming `./alpha.txt` and then refuse to extract the archive **it had just
+/// written itself**, telling the reader that an entry would be written outside the destination.
+///
+/// The two tests that shipped with the fix both passed with that defect present, which is why
+/// this one exists and why it is written to fail on the draft it replaces. `.` is the lexical
+/// identity component: nothing is reachable through it that is not reachable without it.
+///
+/// The archive is built here rather than committed. `py7zr` is absent on this machine, nothing
+/// large may enter the history, and the writer that produces the fixture is the same one the
+/// defect was reached through — so building it in the test is the stronger fixture, not the
+/// weaker one.
+#[test]
+fn a_dot_slash_name_in_an_encrypted_header_7z_extracts_instead_of_being_called_an_escape() {
+    use indium::tasks::{Meta, Method, Recipe, Sink};
+    use std::io::Cursor;
+
+    let dir = TempDir::new("pxx2001-dot");
+    let path = dir.path().join("dotted.7z");
+    let dest = dir.path().join("dest");
+    let pass = Secret::from_text("indium");
+    let body = b"alpha, reached through a dot\n";
+
+    let recipe = Recipe {
+        path: path.clone(),
+        method: Method::Lzma2,
+        level: Method::Lzma2.default_level(),
+        // The whole point: `encrypt` also encrypts the headers, which is what routes extraction
+        // into the `sevenz` branch where the Rust guard is the only guard there is.
+        encrypt: true,
+    };
+    {
+        let mut writer = indium::sevenz::Writer::create(&path, &recipe, Some(&pass))
+            .expect("could not open the 7z writer");
+        let meta = Meta {
+            out_path: "./alpha.txt".to_string(),
+            size: body.len() as u64,
+            is_dir: false,
+            mode: 0o644,
+            mtime: Some(1_704_164_645),
+            atime: None,
+            ctime: None,
+            uid: 0,
+            gid: 0,
+            uname: Some("root".to_string()),
+            gname: Some("root".to_string()),
+            symlink: None,
+            hardlink: None,
+        };
+        writer
+            .put(&meta, Some(&mut Cursor::new(body.to_vec())))
+            .expect("could not write the dotted member");
+        writer.finish().expect("could not finish the archive");
+    }
+
+    // Asserted separately from the extraction so that a selection mismatch and a refusal to
+    // extract cannot arrive as the same failure. The stored name must still carry its `./`, or
+    // this test is no longer testing what it says.
+    let listing = arch::list_all(&path, Some(&pass)).expect("the dotted 7z must list");
+    let dotted = listing
+        .iter()
+        .find(|e| e.raw_path.starts_with("./") && !e.is_dir)
+        .expect("the stored name must still begin with './' or this fixture proves nothing");
+
+    let wanted: HashSet<String> = [dotted.path.clone()].into_iter().collect();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let result = arch::extract(&path, &wanted, &dest, Some(&pass), None, &cancel);
+
+    assert!(
+        result.is_ok(),
+        "a './'-named entry escapes nothing and must extract; got {result:?}"
+    );
+    let landed = dest.join(&dotted.path);
+    assert_eq!(
+        std::fs::read(&landed).ok().as_deref(),
+        Some(&body[..]),
+        "the dotted member's bytes must land at {landed:?}"
+    );
+}
+
+/// **Tier 3 finding F3 on the same fix.** `std::fs::write` opened with `O_TRUNC`, which keeps an
+/// existing file's mode. Unlink-then-`create_new` makes a new inode, which takes
+/// `0o666 & ~umask` — so re-extracting over a file the user had tightened to `0600` widened it to
+/// `0644`. A permission regression living inside a security fix, and nothing caught it, because
+/// no test in the suite had ever extracted twice over one path.
+#[test]
+fn re_extracting_over_a_tightened_file_does_not_widen_its_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new("pxx2001-mode");
+    let dest = dir.path().join("dest");
+    let pass = Secret::from_text("indium");
+    let wanted: HashSet<String> = ["f.txt".to_string()].into_iter().collect();
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    let first = arch::extract(
+        &fixture("secret-headers.7z"),
+        &wanted,
+        &dest,
+        Some(&pass),
+        None,
+        &cancel,
+    );
+    assert!(
+        first.is_ok(),
+        "the first extraction must work, got {first:?}"
+    );
+
+    // The user tightens it. Nothing about the archive changed.
+    let target = dest.join("f.txt");
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600))
+        .expect("could not tighten the extracted file");
+
+    let second = arch::extract(
+        &fixture("secret-headers.7z"),
+        &wanted,
+        &dest,
+        Some(&pass),
+        None,
+        &cancel,
+    );
+    assert!(
+        second.is_ok(),
+        "the second extraction must work, got {second:?}"
+    );
+
+    let mode = std::fs::metadata(&target)
+        .expect("the file must still be there")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(
+        mode, 0o600,
+        "re-extracting must not widen a mode the user tightened; got {mode:o}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Names outside ASCII — P11
 // ---------------------------------------------------------------------------

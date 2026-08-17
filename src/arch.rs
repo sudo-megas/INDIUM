@@ -998,10 +998,17 @@ pub fn path_escapes(raw: &str) -> bool {
 /// which is a larger change than this branch; that race needs a hostile process already running
 /// as the user, where what this closes is an archive doing it alone.
 fn create_dir_under(root: &Path, rel: &Path) -> Result<(), ArchiveError> {
-    // `root` is the destination the *user* named, not anything the archive said, and the
-    // libarchive path creates it the same way. Only the components the archive names are
-    // descended strictly — refusing a destination the user reached through their own symlink
-    // would be the guard overreaching into their business.
+    // `root` is the destination the *user* named, not anything the archive said. Only the
+    // components the archive names are descended strictly — refusing a destination the user
+    // reached through their own symlink would be the guard overreaching into their business.
+    //
+    // **The two read paths disagree about that last point, and the disagreement is recorded
+    // rather than papered over.** Measured at tier 3: libarchive also creates a *missing*
+    // destination, but it *refuses* one reached through the user's own symlink
+    // ("Cannot extract through symlink"), because `ARCHIVE_EXTRACT_SECURE_SYMLINKS` makes no
+    // exception for the destination the user chose. So this branch is the permissive one. Which
+    // of the two is right is a mechanism question under CORE §3 and is the maker's to settle;
+    // an earlier draft of this comment asserted the two branches agreed, which was simply false.
     std::fs::create_dir_all(root)
         .map_err(|e| ArchiveError::Other(format!("could not create {root:?}: {e}")))?;
 
@@ -1009,9 +1016,20 @@ fn create_dir_under(root: &Path, rel: &Path) -> Result<(), ArchiveError> {
     for part in rel.components() {
         // `path_escapes` has already refused `..` and an absolute name. Anything that is not a
         // plain component here is a shape it did not anticipate, and is refused rather than
-        // interpreted.
-        let std::path::Component::Normal(name) = part else {
-            return Err(ArchiveError::UnsafePath(rel.display().to_string()));
+        // interpreted — **except `.`, which it deliberately permits.**
+        //
+        // The first draft of this guard refused `CurDir` along with the rest, and that was a
+        // freeze-blocking regression rather than caution: a `./`-rooted archive is ordinary
+        // (`tar` writes them, and `is_archive_root` exists to recognise one), `path_escapes`
+        // answers `false` for `"./"`, and `tasks::out_path_for` keeps a stored name byte for
+        // byte — so INDIUM could encrypt a `./`-named 7z and then refuse to extract the archive
+        // it had just written, telling the reader it tried to escape the destination. `.` is the
+        // lexical identity component; nothing can be reached through it that could not be
+        // reached without it, so it is skipped rather than interpreted or refused.
+        let name = match part {
+            std::path::Component::Normal(name) => name,
+            std::path::Component::CurDir => continue,
+            _ => return Err(ArchiveError::UnsafePath(rel.display().to_string())),
         };
         cur.push(name);
         match std::fs::symlink_metadata(&cur) {
@@ -1112,6 +1130,9 @@ pub fn extract(
     if headers_need_sevenz {
         // The trait for `write_all`, brought in here as the two `Read` uses in this file are.
         use std::io::Write as _;
+        // `.mode()` on `OpenOptions`, and `from_mode`/`mode` on `Permissions`. Local for the same
+        // reason: this is the only branch in the file that carries a mode across a write.
+        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 
         let mut written = 0usize;
         for entry in &selected {
@@ -1138,6 +1159,18 @@ pub fn extract(
             //
             // Severing is not refusing. A destination holding a stale link is not a hostile
             // archive, and the user asked for their files: the entry is replaced, not rejected.
+            // What `std::fs::write` preserved and unlink-then-create does not: the mode of a file
+            // already on the disk. `O_TRUNC` kept it; a new inode takes `0o666 & ~umask` instead,
+            // so re-extracting over a file the user had tightened to `0600` widened it to `0644` —
+            // measured at tier 3, and a security regression hiding inside a security fix.
+            //
+            // Read through `symlink_metadata`, so `is_file()` is false for a symlink and a mode is
+            // carried over only from a *real* file. The link is being severed on purpose; its mode
+            // is not something to inherit.
+            let prior_mode = std::fs::symlink_metadata(&target)
+                .ok()
+                .filter(|md| md.is_file())
+                .map(|md| md.permissions().mode());
             match std::fs::remove_file(&target) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -1150,10 +1183,24 @@ pub fn extract(
             let mut file = std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
+                // Opened at the mode it is going to end up at, not at the default. `open`'s mode
+                // is masked by the umask, so this can land narrower than `prior_mode` but never
+                // wider — the bytes are never on the disk behind laxer permissions than the file
+                // had before. The exact restore happens after the write.
+                .mode(prior_mode.unwrap_or(0o666))
                 .open(&target)
                 .map_err(|e| ArchiveError::Other(format!("could not create {target:?}: {e}")))?;
             file.write_all(&bytes)
                 .map_err(|e| ArchiveError::Other(format!("could not write {target:?}: {e}")))?;
+            if let Some(mode) = prior_mode {
+                std::fs::set_permissions(&target, std::fs::Permissions::from_mode(mode)).map_err(
+                    |e| {
+                        ArchiveError::Other(format!(
+                            "could not put {target:?}'s permissions back: {e}"
+                        ))
+                    },
+                )?;
+            }
             written += 1;
             if let Some(tx) = tx {
                 let _ = tx.send(ExtractMsg::Progress {
@@ -1950,6 +1997,46 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    /// **`.` is the identity component, not an escape.** The tier-3 review of `PXX-2-001`'s fix
+    /// returned REPLACE for this: the draft refused every non-`Normal` component, and a leading
+    /// `./` is `Component::CurDir`, so an ordinary `./`-rooted archive became unextractable and
+    /// was reported as trying to escape the destination. `..`, an absolute name and a Windows
+    /// prefix are still refused — the point is that one of the four was never in that company.
+    #[test]
+    fn a_dot_component_is_descended_as_identity_and_still_nothing_else_is() {
+        let s = Scratch::new("dot");
+        let root = &s.0;
+
+        // The two shapes production actually produces. A `./`-named *file* entry reaches
+        // `create_dir_under` through `rel.parent()`, which is `Some(".")`; a `./` *directory*
+        // entry reaches it as the whole `rel`.
+        assert_eq!(Path::new("./a.txt").parent(), Some(Path::new(".")));
+        assert!(create_dir_under(root, Path::new(".")).is_ok());
+        assert!(create_dir_under(root, Path::new("./")).is_ok());
+        assert!(create_dir_under(root, Path::new("./a.txt").parent().unwrap()).is_ok());
+
+        // A leading `.` survives into `components()`; an interior one is folded away by
+        // `Path` itself. Both must land in the same place as the undotted name.
+        assert!(create_dir_under(root, Path::new("./x/y")).is_ok());
+        assert!(root.join("x/y").is_dir());
+        assert!(create_dir_under(root, Path::new("x/./y")).is_ok());
+        assert!(create_dir_under(root, Path::new("x/y")).is_ok());
+
+        // And the company `.` was wrongly keeping. These are the shapes the guard exists for.
+        assert!(matches!(
+            create_dir_under(root, Path::new("../up")),
+            Err(ArchiveError::UnsafePath(_))
+        ));
+        assert!(matches!(
+            create_dir_under(root, Path::new("/etc")),
+            Err(ArchiveError::UnsafePath(_))
+        ));
+        assert!(matches!(
+            create_dir_under(root, Path::new("a/../../up")),
+            Err(ArchiveError::UnsafePath(_))
+        ));
     }
 
     /// `create_dir_under` refuses a link and nothing else. **PXX-2-001.**
