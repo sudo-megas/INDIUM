@@ -6567,3 +6567,294 @@ stopping rule invented after the stop would be worth nothing.
 **Six new IDs. Register 215 → 221.** Suite unchanged at **416**.
 
 **The hardening is complete.**
+
+## Phase 3 — the v2.5 release artefacts, drafted
+
+Three artefacts the ritual needs and the repository does not otherwise hold: a release body,
+an annotated tag message, and an annotation to the CORE draft that carries §7's road-table
+rows. They live here rather than in a scratch directory because the last time this round left
+a designed artefact outside the tree — the Phase 3 fleet itself — recovering it cost a scan of
+a 116 MB transcript, and the plan opens by saying so.
+
+---
+
+### Draft 8, annotated — two things it does not say, and how the annotation came to be written
+
+**Not applied. CORE is the maker's hand** (`CORE.md:3-5`, `:630`). Draft 8 at `:2066-2096` stands as
+written; the rows it drafts are better than the ones drafted to replace them, and nothing below
+changes them.
+
+#### How this was nearly a duplicate, which is the round's own class 9 landing on the round
+
+A tenth CORE draft was written proposing three rows for §7's road table, with prose, a gate analysis
+and a recommendation. **Draft 8 had already done all of it**, better — it derives the one-tag-per-cell
+constraint from `every_tag_core_seven_names_is_one_the_release_workflow_would_accept` reading the last
+cell, which is *why* PXX takes two rows rather than one, and it reserves the third row's title for the
+maker on the same grounds the plan did.
+
+The duplicate was not written for lack of a warning. `stage3-step3-worksheet.md`, written earlier in
+this same round by the same hand, says in as many words:
+
+> **Recorded because I nearly filed a tenth draft duplicating them.** … The document outranks the
+> plan's to-do list, and the check costs one grep.
+
+The warning was written, filed, and then not read — because the tenth draft was written from the
+plan's stage-3 to-do line, exactly as the near-miss had been. **`P15.md:75`: a sweep is not a habit.**
+The round has spent five reviews establishing that a fix closes the door it is pointed at and leaves
+the one beside it open; here the finding, the warning and the repeat are all one hand's, one round
+apart, and the check that would have caught it is the one the warning names. Recorded rather than
+quietly discarded, because a near-miss that recurs is evidence about the practice and a discarded
+draft is not.
+
+Two things survive the deduplication, because draft 8 does not say them.
+
+#### 1. The gate cannot see a tag that has no row
+
+`every_tag_core_seven_names_is_one_the_release_workflow_would_accept` iterates the rows that exist and
+checks each named tag parses. Read at HEAD, `src/lib.rs`:
+
+```rust
+        let mut named = 0;
+        for (p, cell) in &rows {
+            if held(cell) { continue; }
+            match parse_release_tag(bare(cell)) {
+                Ok(_) => named += 1,
+                Err(why) => panic!("CORE §7's row for {p} names a tag release.yml would refuse: {why}"),
+            }
+        }
+```
+
+It has a `named > 0` guard, so it cannot pass by absence *of every row* — that much was designed for.
+But **there is no comparison against the tags that actually exist**, so a tag cut with no row at all is
+invisible to it. That is not hypothetical: three tags stand unrecorded right now (`v2.2`, `v2.3`, and
+`v2.5` when it is cut), under a gate built in this round to stop the road table drifting from the
+workflow.
+
+The gate is still worth what it cost — it caught the two-tags-in-one-cell shape before anyone wrote it,
+which draft 8 records. **The point is the boundary, not the gate:** it holds the rows that are there to
+the workflow's rule and says nothing about rows that are not. That is the round's own recurring
+observation — *reach, not depth, is the blind spot* — in the instrument the round built.
+
+**Not proposed as a fix.** Closing it means a test that reads `git tag`, and a test that shells out to
+git fails in a source tarball with no repository, which is how the `.deb` is built. Recorded as a known
+edge of the instrument, which is the escape valve the round was told to use.
+
+#### 2. `v2.4` was never cut, and the table will not say so
+
+With draft 8's rows applied the road reads `v2.1 → v2.2 → v2.3 → v2.5`. The ordering gate passes — it
+requires non-decreasing, not contiguous — and a reader is left to wonder whether a row was lost.
+Suggested as a line beneath the table rather than a row, since a row would have to name a tag that does
+not exist and the gate would then be asked to accept it:
+
+> `v2.4` was never cut. The hardening round was tagged `v2.5` so that the one release on this
+> stretch of road carries the number the work was planned under.
+
+His wording, his call, and the table is honest without it — only quieter.
+
+---
+
+### The v2.5 release body, drafted
+
+Shaped after `v2.1`'s, which was read back from the published release rather than reconstructed.
+The last line is the maker's and is marked so in the draft: CORE §7's beta sentence is carried
+verbatim by every release since `v1.0.0-4`, and whether the walk answers its condition is draft
+7's question, still unanswered.
+
+```markdown
+**Two faults in this release were serious, and neither of them looked like anything from the outside.**
+A correct password was refused on every encrypted archive INDIUM makes. And removing one file from a
+`./`-rooted tar quietly wrote every other file's contents under the wrong name, dropped the last one
+entirely, and reported success.
+
+This is the round that went looking for faults like those on purpose, and it is the last one before the
+design work freezes.
+
+Nothing about the window has changed. The same eight formats, the same estimator, the same rebuild,
+the same ten popups, drawn exactly as 2.3 drew them. What changed is underneath.
+
+### The password gate
+
+When INDIUM encrypts a 7z it hides the file names as well as the contents. That is the stronger
+choice and it is the one this program has always made.
+
+The check that decides whether your password is right asked a reader that cannot see past those hidden
+names. That reader answered *"the headers are encrypted"* — which is true, and is not an answer about
+the password — and the check read it as **wrong password**. So the correct passphrase was rejected on
+every encrypted archive INDIUM had ever produced, and the only way past it was to open the archive in
+something else.
+
+The check now asks the reader that can answer, before the one that cannot. It also picks the member it
+tests deliberately, so that a right password is confirmed by reading real bytes rather than by nothing
+going wrong.
+
+**And when the archive is one INDIUM cannot rebuild** — because its file names are encrypted — removing
+a member now says that, instead of asking again for a password you have already given correctly.
+
+### Removing one file from a `./`-rooted tar no longer destroys the rest
+
+`tar -cf x.tar -C dir .` is the commonest way a tar gets written, and it puts the archive root in as
+the first member. That root has no name once normalised, so it is dropped from the list INDIUM plans
+against — but not from the list it walked while rebuilding. Two lists differing by one element, paired
+by position.
+
+The result was that **every file's contents were written under its neighbour's name, and the last file
+was not written at all.** Apply reported success. The verification that runs after a rebuild compares
+names as a set, which matched, and compares sizes only for regular files — so the one member that was
+destroyed outright was the one member the check skipped over.
+
+It is fixed, and both halves of it are now gated: one test for the case where sizes happen to disagree
+and the failure is loud, and one built with equal-length members for the case where they coincide and
+it is silent. The rebuilt archive now comes out unrooted deliberately rather than as a side effect.
+
+### Extraction stays in the folder you chose
+
+INDIUM has always refused a member whose stored name tries to climb out of the destination, and it has
+always leaned on two further protections its archive reader applies. **The reader that handles 7z
+archives with encrypted names is a different one, and applies neither.**
+
+The stored name did not have to escape anything. Extracting an ordinary tar that contains a symlink
+plants that symlink on your disk — that is what the archive says to do, and it succeeds. Extract into
+the same folder afterwards and the write followed the link, landing outside the folder you chose.
+
+Extraction now walks down to each file one directory at a time, refusing a link where a directory
+should be, and writes each file by removing the name first and then creating it exclusively. That
+second part matters more than it looks: refusing to *follow* a symlink does nothing about a hard link,
+which is not a link the system resolves but a second name for the same file. Removing the name is what
+severs it.
+
+Two smaller things came out of the same work. **INDIUM no longer refuses to extract an archive it wrote
+itself** — a member stored as `./alpha.txt` was read as an escape attempt, because the check rejected
+every part of a path that was not a plain name, and `.` is the way a path says "here". And **extracting
+over a file whose permissions you had tightened keeps them tightened**, where the new way of writing
+had been resetting them.
+
+### A rebuild no longer widens what it is rebuilding
+
+Removing a member rebuilds the archive beside the original and renames it into place. That working copy
+was created with default permissions and narrowed at the end — so an archive only you could read spent
+the whole rebuild as a file **anyone on the machine could read**, under a name that could be guessed.
+Measured at two thirds of a second on a 64 MiB archive, and longer on larger ones. If the archive was
+encrypted, that working copy is the ciphertext.
+
+The permissions are now set before the first byte is written rather than after the last. The settings
+file is saved the same way, for the same reason. And the archive's own permissions survive the rebuild,
+which they did not reliably do before.
+
+### Also changed
+
+**The temporary names INDIUM makes in the shared temporary directory are its own.** Four of them were
+predictable enough that another account on the same machine could take the name first. A check now
+refuses a fifth, rather than four separate fixes each standing on its own.
+
+**A lock file this account cannot write is still a lock file.** It had been read as an absent one, so a
+second window could open on an archive the first was already rebuilding.
+
+**The notice shown when the settings file cannot be read no longer promises a copy that is not there.**
+It said *"a copy is at"* whenever the name was occupied — including when what occupied it was a link
+pointing at nothing.
+
+### What this release does not fix
+
+Rounds like this one usually list what they closed. This one also lists what it did not, because the
+alternative is that you find it instead.
+
+A handful of faults were found, confirmed by measurement, and **deliberately left alone**: they sit at
+one root — a 7z member is identified by its name after normalisation, and two members can normalise to
+the same name — and repairing that properly means changing how members are addressed throughout. That
+is not work to do in the week before a freeze. Each one is written down in the round's document with
+what was measured and why it was left, so the next round starts from a record rather than a rediscovery.
+
+The visible consequence, if you ever meet it, is an unusual 7z built by hand with two members that
+differ only in a leading `./`. INDIUM does not write those and no ordinary tool does.
+
+### Install
+
+- **Arch** — `sudo pacman -U indium-2.5.0-1-x86_64.pkg.tar.zst` (needs glibc 2.43)
+- **Debian / Ubuntu** — `sudo apt install ./indium_2.5.0-1_amd64.deb` (needs glibc 2.35, so bookworm, trixie, Ubuntu 22.04 onward)
+- **Anything else** — `indium-2.5.0-1-x86_64.tar.gz` is the `.deb`'s binary with no packaging around it
+
+All three are built in containers from the tag by [`release.yml`](.github/workflows/release.yml), never
+on a personal machine, and INDIUM's own reader opens both packages and checks they put identical files
+on a machine before either ships.
+
+<!-- ============================================================================
+     THE LAST LINE IS THE MAKER'S CALL. Draft 7 asks the question; it is unanswered.
+     Ship exactly ONE of the two below and delete the other, plus these comments.
+
+     (A) KEEP THE BETA — the wording every release since v1.0.0-4 has carried, verbatim,
+         and what CORE §7 requires while the condition is unmet:
+
+Still a **beta**: the `1.0` line stays one until the design work it is named for has been in real hands.
+
+     (B) LIFT IT — only if he judges the v2.1 walk to be the "real hands" §7 asks for.
+         CORE §7 must be annotated in the same breath, by his hand, or the document and
+         the release contradict each other:
+
+**No longer a beta.** The condition §7 set was that the design work the `1.0` line is named for had to
+be in real hands. It was: 158 steps walked against the released 2.1, and the window this release ships
+walked again before it went out. The line is what it says it is.
+
+     (B) IS NOT SHIPPABLE UNTIL THE REDESIGN WALK HAS ACTUALLY HAPPENED. Its second
+     sentence asserts it. At the time of writing only the 2.1 walk is done; the
+     100/125/150% check on the 2.3 window is outstanding and is the maker's.
+     ============================================================================ -->
+```
+
+---
+
+### The `v2.5` tag annotation, drafted
+
+Shaped after `v2.1`'s, `v2.2`'s and `v2.3`'s. Its count of reviews was drafted at four, corrected
+to six when the chain closed.
+
+```
+INDIUM 2.5 — the hardening, and the fix that was read by someone who did not write it
+
+PXX's third phase on CORE §7's road, and the last round before the design work freezes. Its
+subject is the code rather than the window: nothing about what the program does or how it is
+drawn has moved since 2.3, and the round shipped no feature by charter.
+
+The fault it exists for was found on the first pass. INDIUM hides file names as well as
+contents when it encrypts a 7z, and the check deciding whether a password was right asked a
+reader that cannot see past those names. That reader answers "the headers are encrypted",
+which is true and is not an answer about a password, and the check read it as a refusal — so
+a correct passphrase was rejected on every encrypted archive this program has ever written.
+It now asks the reader that can answer first, and confirms a right password by reading real
+bytes rather than by nothing going wrong.
+
+A second of the same weight, and quieter. Removing a member from an archive rooted at ./ —
+the shape tar -cf x.tar -C dir . makes, which is the commonest there is — destroyed the rest
+of it. The root has no name once normalised, so the list the rebuild planned against and the
+list it walked differed by one element and were paired by position: every payload was written
+under its neighbour's name and the last member was not written at all. Apply reported success.
+The verification behind it compares names as a set, which matched, and compares sizes only for
+regular files, so the one member lost outright was the one member it skipped.
+
+Two more. Extraction could write outside the folder that was chosen, and the stored name did
+not have to escape anything to do it: the guard was the archive reader's, the reader that
+handles 7z with encrypted names is a different one that never had it, and a symlink planted on
+disk by an ordinary tar extracted earlier was enough. Extraction now walks down one directory
+at a time refusing a link where a directory belongs, and writes by removing the name before
+creating it exclusively — which also answers a hard link, where refusing to follow a symlink
+would not have. And a rebuild sets the working copy's permissions before the first
+byte rather than after the last, which had left an archive only its owner could read sitting
+world-readable under a guessable name for the length of the rebuild — two thirds of a second
+on 64 MiB, and the ciphertext if the archive was encrypted.
+
+What is worth recording about the round is not the count. Every fix that could have blocked
+the release was put back through the pipeline and read by an agent that did not write it, on
+the argument that a correct diagnosis with a wrong patch is what a frozen repository cannot
+survive. Six such reviews ran and not one returned ACCEPT at first reading. One caught a
+patch that was wrong before it shipped; four found the patch correct and incomplete —
+closing the door it was aimed at and leaving the one beside it open, each time invisible to a
+suite its author had just extended on purpose, and one of those was a fix that broke what it
+was protecting. The sixth found only sentences, which is what ended the chain. The rule's own
+justification turned out to understate the case it was written for.
+
+The faults left unrepaired are written down rather than left to be found. They sit at one
+root — a 7z member is identified by its name after normalisation, and two members can
+normalise to the same name — and addressing it properly is not work for the week before a
+freeze.
+
+415 tests pass, ten more wait on a published package.
+```
