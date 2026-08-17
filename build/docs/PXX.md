@@ -1899,3 +1899,121 @@ the round that edits that badge begins.
 Also flagged and deliberately **not** guessed at: the two package-size badges at `README.md:15-16`
 (9.80 MB / 6.92 MB) are v2.1-era on the same reasoning as the version badge, and no local artefact is
 a release authority. They need a measurement, not an estimate, and they are stage 3's to take.
+
+---
+
+## Phase 3 — `PXX-2-001` closed, and draft 3's condition met
+
+The one freeze-blocking *code* defect is fixed and in the tree at **`401c5d5`**. It had been designed,
+tier-3 reviewed with a REPLACE verdict against the original patch, and measured — and it had not
+landed, which the tier-2 section recorded as the largest thing this round still owed.
+
+### The evidence, in the order it was produced
+
+The reproduction was written **before** the fix and run against the unfixed tree, where it failed
+with its own message:
+
+```
+the payload was written through a symlink to
+/tmp/indium-test-pxx2001-sym-106255-0/outside/pwned.txt, outside the destination
+```
+
+Then the fix, then the same test, passing. **Fail-before, pass-after** — tier-2 route (a), and the
+strongest evidence the tiers recognise. The order matters and is recorded because a test written after
+a fix demonstrates that the fix does what its author expected, which is a weaker claim.
+
+### What landed, and what did not
+
+**Agent 2's `O_NOFOLLOW` patch is not what shipped**, and the tier-3 verdict that refused it was
+right for a reason worth keeping in one place: `O_NOFOLLOW` does not refuse a hardlink, because a
+hardlink is not a link the kernel resolves — it is a second name for one inode. So:
+
+| part | what it does |
+| --- | --- |
+| `create_dir_under(root, rel)` | Descends one component at a time, asking `symlink_metadata` before each step **precisely because it does not follow the last component**: a symlink *to* a directory answers `is_dir() == false` there, which is exactly the case that must be refused. `root` — the destination the *user* named — is still created with `create_dir_all`, because refusing a destination somebody reached through their own symlink would be the guard overreaching into their business |
+| the write | Unlink, then `create_new`. **The unlink is the part that severs a hardlink**, because it removes the *name*. `create_new` is `O_CREAT\|O_EXCL`, so it then refuses anything that has reappeared there — including a dangling symlink, which `std::fs::write` followed and created through |
+
+And a distinction the code states in a comment because it is easy to get backwards: **severing is not
+refusing.** A destination holding a stale link is not a hostile archive, and the user asked for their
+files, so the entry is replaced and the extraction still succeeds. A patch that returned an error here
+would have passed a security test and broken every ordinary re-extraction.
+
+### Two tests, and neither one is the gate
+
+`a_link_planted_in_the_destination_cannot_redirect_an_encrypted_header_write`
+(`tests/read_path.rs`) covers three variants — symlink, hardlink, and a linked *directory* component —
+and pins the case that must keep working: a destination the user named through their own link.
+`create_dir_under_refuses_a_link_and_permits_everything_else` (`src/arch.rs`) asserts six legitimate
+cases and three refusals, and the legitimate ones are asserted at greater length than the hostile
+ones on purpose.
+
+**Sabotaged in both directions before either was trusted**, and the result is the argument for having
+two:
+
+| sabotage | security test | permissiveness test |
+| --- | --- | --- |
+| guard made permissive (the pre-fix code) | **FAILS** | passes |
+| guard made refuse-everything | **passes** | **FAILS** on an existing directory |
+
+A fix that refused all input would have shipped behind the security test alone. That is class 4 — a
+test weaker than its name — caught by construction rather than by luck.
+
+**Suite: 374 → 380**, zero failures, `fmt` and `clippy --all-targets -D warnings` clean.
+`src/lib.rs` 286 → 291 and `tests/read_path.rs` 34 → 35, which is the tier-3 verdict's own predicted
+286→287 and 34→35 plus the four road-table gates committed separately at `a3aa129`.
+
+### Recorded and not closed
+
+An intermediate-component race remains, between the `symlink_metadata` and the `create_dir`. Closing
+it needs `openat2(RESOLVE_BENEATH)` and descriptor-relative writes throughout, which is a larger
+change than this branch. It requires a hostile process **already running as the user**; what the fix
+closes is an archive doing it alone. The code says so at the helper, in the same words.
+
+### Draft 3's condition is met, which changes which half applies
+
+Draft 3 was deliberately split, and its own words were: *"When the fix lands — the row's replacement
+clause."* **The fix has landed, so the replacement clause is now the applicable draft and the
+Deviations entry written beside it is superseded** — that entry described an unfixed hole, and the
+hole is fixed. Applying it now would make CORE describe a defect the program no longer has, which is
+the same class-5 error as the one that kept it from being applied before, pointing the other way.
+
+**But the replacement clause should not go in alone**, because it ends *"so that neither a symlink nor
+a second name for an inode elsewhere can stand where the write is about to land"* — and the residual
+race means that is true of an archive acting alone, not of a concurrent hostile local process. The
+sentence it sits beside has the same character: libarchive's own `SECURE_SYMLINKS` carries a
+comparable limitation. So the draft below is at parity with its neighbour, and this round's rule is to
+state a limit rather than let it be inferred:
+
+**Draft 3b — §3's `arch` row, now applicable.** As written in draft 3 above, unchanged.
+
+**Draft 3c — a Deviations entry, replacing draft 3a and narrower than it:**
+
+> **Deviation.** §3's `arch` row says the header-encrypted 7z branch earns the secure-flag guarantee
+> in its own code. It earns it against the archive: no name the archive supplies, and no link already
+> sitting at the destination, can redirect a write outside it. It does not earn it against a hostile
+> process running concurrently as the same user, which could swap a directory component for a link in
+> the window between the check and the creation. Closing that needs `openat2(RESOLVE_BENEATH)` and
+> descriptor-relative writes through the whole branch. Recorded because the guarantee is real and
+> bounded, and a bounded guarantee stated as an unbounded one is the class this round hunts.
+
+### The register, counted again
+
+| Source | Count |
+| --- | --- |
+| Numbered fleet findings (`PXX-<agent>-<nnn>`) | **95** |
+| Closed seed, never severity-tagged (`PXX-385`) | **1** |
+| Filed by the verification tier (`PXX-T2-001` … `-014`) | **14** |
+| **Total findings in this round** | **110** |
+
+The earlier counts of 96 and 107 are left standing. Rule 4 makes this document append-only, and a
+count is corrected by a later count that says what it includes — not by an edit that makes an earlier
+one appear never to have been written.
+
+### What this fix now owes
+
+It is a new artifact, so it owes its own tier-3 review **by an agent that did not write it** — the
+rule that produced the REPLACE verdict on the previous patch applies to the thing that verdict
+produced. That review is commissioned and its outcome is not recorded here, because it has not
+returned. A class-9 sweep runs beside it over every other filesystem write in the tree, on the
+principle this project wrote down after fixing nineteen of something and finding the twentieth a
+milestone later: **a sweep is not a habit.**
