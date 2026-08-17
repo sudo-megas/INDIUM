@@ -939,3 +939,302 @@ mod content_only_encryption {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// The other half of the encrypted-7z surface: **ciphertext headers**, which is what INDIUM's own
+/// writer produces for every archive it encrypts.
+///
+/// `content_only_encryption` above covers `7z a -p` — the 7-Zip CLI default, plaintext headers. This
+/// module covers `-mhe=on`, and it exists because a tier-3 review of `9175a28` found that the
+/// commit had repaired the first class and left the second one broken at the gate the window
+/// presses. The two modules are deliberately separate: the classes fail differently, and one
+/// module named for both would have hidden exactly this.
+#[cfg(test)]
+mod header_encryption {
+    use super::*;
+
+    /// A member: name, body, and whether a compressor sits behind the cipher.
+    ///
+    /// The `false` case — AES with **no** compressor, a COPY coder — is the one that matters, and
+    /// it is not decoration. A wrong key's noise passes through COPY intact and at full length, so
+    /// nothing but the member's own CRC can refuse it, and that CRC is compared at end of stream
+    /// and nowhere else.
+    type Member<'a> = (&'a str, &'a [u8], bool);
+
+    fn write_7z(path: &Path, password: &str, encrypt_header: bool, members: &[Member]) {
+        let mut inner = ArchiveWriter::create(path).expect("could not open the 7z for writing");
+        inner.set_encrypt_header(encrypt_header);
+        for (name, body, lzma2) in members {
+            let mut methods: Vec<EncoderConfiguration> =
+                vec![AesEncoderOptions::new(password.into()).into()];
+            if *lzma2 {
+                methods.push(Lzma2Options::from_level(6).into());
+            }
+            inner.set_content_methods(methods);
+            let meta = Meta {
+                out_path: (*name).to_string(),
+                size: body.len() as u64,
+                is_dir: false,
+                mode: 0o644,
+                mtime: Some(1_704_164_645),
+                atime: None,
+                ctime: None,
+                uid: 0,
+                gid: 0,
+                uname: None,
+                gname: None,
+                symlink: None,
+                hardlink: None,
+            };
+            inner
+                .push_archive_entry(seven_z_entry(&meta), Some(&mut &body[..]))
+                .unwrap_or_else(|e| panic!("could not write {name}: {e}"));
+        }
+        inner.finish().expect("could not finish the archive");
+    }
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("indium-7z-header-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        dir
+    }
+
+    /// **`PXX-T3-026`. The program refused the correct password on its own archives.**
+    ///
+    /// `sevenz.rs`'s writer ties `set_encrypt_header` to the same flag that turns AES on, so
+    /// *every* encrypted 7z INDIUM has ever written has ciphertext headers. `verify_passphrase`
+    /// walked libarchive first, `next_entry()` answered `EncryptedHeaders`, and the function
+    /// returned `Ok(false)` before its 7z branch was ever reached — so the password popup refused
+    /// the right password three times and cancelled, on six of the seven pending actions, while
+    /// `extract`, `head_of` and `crc32_of` all read the same archive with the same password.
+    ///
+    /// `PXX-2-002` fixed this for plaintext headers and `the_window_accepts_a_right_password_on_a_
+    /// content_encrypted_7z` is its gate. This is the sibling site that fix did not reach: **class
+    /// 9, and found by a reader rather than by the sweep that wrote the first fix.**
+    #[test]
+    fn the_window_accepts_a_right_password_on_a_header_encrypted_7z() {
+        let dir = scratch("gate");
+        let path = dir.join("headers.7z");
+        write_7z(
+            &path,
+            "indium",
+            true,
+            &[("alpha.txt", b"INDIUM fixture alpha\n", true)],
+        );
+
+        assert!(
+            crate::arch::verify_passphrase(&path, &Secret::from_text("indium"))
+                .expect("verification must answer, not error"),
+            "the right password must verify on an archive INDIUM itself wrote — this is what the \
+             password popup asks, and it answered no for every encrypted archive the program \
+             produced, from v2.1 to v2.5"
+        );
+        assert!(
+            !crate::arch::verify_passphrase(&path, &Secret::from_text("not-the-password"))
+                .expect("verification must answer, not error"),
+            "and a wrong password must still be refused, or reachability has been bought by \
+             giving up the check"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **`PXX-T3-027`. Two verification sites, one archive, opposite answers.**
+    ///
+    /// `verification_target` picks the *smallest* encrypted member and its doc argues the case at
+    /// length. `verify_passphrase` then chose the **first** member with bytes instead — so on an
+    /// archive whose first member is a large AES+COPY one, the popup said "unlocked" to a password
+    /// `extract` refused a moment later, with the popup and its three-attempt counter already
+    /// dismissed and no way to retype.
+    ///
+    /// The first member here is deliberately over the 1 MiB bound and deliberately has no
+    /// compressor behind the cipher: that combination is the only one where a capped read cannot
+    /// discriminate at all, because COPY returns noise at full length and the read stops before
+    /// the CRC. The smallest member is small enough that its read runs to the end.
+    ///
+    /// Class 9 in its textbook form — **the same defect one door over, written by the hand that
+    /// had just written the door.**
+    #[test]
+    fn the_password_gate_and_the_pre_flight_choose_the_same_member() {
+        let dir = scratch("chooser");
+        let path = dir.join("first-is-big.7z");
+        let big = vec![0xA5u8; (1 << 20) + 4096];
+        write_7z(
+            &path,
+            "indium",
+            false,
+            &[
+                ("a-big.bin", &big, false),
+                ("z-small.bin", &[7u8; 4096], false),
+            ],
+        );
+
+        assert!(
+            !crate::arch::verify_passphrase(&path, &Secret::from_text("not-the-password"))
+                .expect("verification must answer, not error"),
+            "a wrong password must be refused even when the first member with bytes is a large \
+             AES+COPY one — taking the first rather than the smallest is what let this through"
+        );
+        assert!(
+            crate::arch::verify_passphrase(&path, &Secret::from_text("indium"))
+                .expect("verification must answer, not error"),
+            "and the right password must still pass, or the chooser has been fixed by refusing \
+             everything"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **`PXX-T3-028`. A correct password refused because the selection had nothing to test it on.**
+    ///
+    /// `extract`'s pre-flight falls back to `verify_passphrase` when the selection holds no
+    /// encrypted member with bytes — a directory-only or empty-file-only extraction. That fallback
+    /// asked a function that could not answer for a header-encrypted archive, so a correct
+    /// password was refused on a selection that was perfectly extractable. Reachable from the CLI,
+    /// which calls `arch::extract` directly and has no popup in front of it.
+    ///
+    /// The companion assertion is the one that matters more: a **wrong** password on the same
+    /// selection must still be refused, because the archive is asked instead of the selection.
+    #[test]
+    fn an_empty_only_selection_from_a_header_encrypted_7z_still_answers_both_ways() {
+        let dir = scratch("emptyonly");
+        let path = dir.join("headers.7z");
+        write_7z(
+            &path,
+            "indium",
+            true,
+            &[
+                ("empty.txt", b"", true),
+                ("alpha.bin", b"twenty-one bytes here", true),
+            ],
+        );
+
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        // The premise, pinned rather than assumed, exactly as the plaintext-header sibling pins
+        // it: an empty member inside an AES block still lists as encrypted, so it passes the
+        // `encrypted` filter and fails the `size > 0` one — which is what routes the pre-flight
+        // into the fallback this gate is about.
+        let listing =
+            crate::arch::list_all(&path, Some(&Secret::from_text("indium"))).expect("it must list");
+        let empty = listing
+            .iter()
+            .find(|e| e.path == "empty.txt")
+            .expect("the empty member must be listed");
+        assert!(
+            empty.encrypted,
+            "an empty member in an AES block is encrypted"
+        );
+        assert_eq!(empty.size, 0, "and it has no bytes to verify a key against");
+
+        let wanted: std::collections::HashSet<String> =
+            ["empty.txt".to_string()].into_iter().collect();
+
+        let dest = dir.join("out-right");
+        let got = crate::arch::extract(
+            &path,
+            &wanted,
+            &dest,
+            Some(&Secret::from_text("indium")),
+            None,
+            &cancel,
+        );
+        assert!(
+            got.is_ok(),
+            "the right password must extract an empty-only selection, not be refused by a check \
+             that could not run: {got:?}"
+        );
+
+        let dest2 = dir.join("out-wrong");
+        let got2 = crate::arch::extract(
+            &path,
+            &wanted,
+            &dest2,
+            Some(&Secret::from_text("not-the-password")),
+            None,
+            &cancel,
+        );
+        assert!(
+            matches!(got2, Err(ArchiveError::WrongPassword)),
+            "and a wrong password must still be refused even though the selection carries nothing \
+             to test it on — the question goes to the archive instead: {got2:?}"
+        );
+        assert!(
+            !dest2.join("empty.txt").exists(),
+            "and nothing may be written on the way to finding out"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **The arm that had no gate, added because a sabotage survived.**
+    ///
+    /// `verify_passphrase`'s 7z branch answers `Ok(true)` when the archive holds no encrypted
+    /// member with bytes, on the stated ground that there is no ciphertext in it to get wrong.
+    /// Flipping that `Ok(true)` to `Ok(false)` was caught by **nothing** — 309 tests passed with a
+    /// plain 7z's correct password being refused.
+    ///
+    /// This is the practice working on the round's own fix rather than on an inherited defect: the
+    /// two arms either side of it were each caught by exactly one gate, and the survivor is the one
+    /// whose behaviour nobody had thought to assert because it reads as obviously right. **A gate
+    /// exists for the arms that look like they need one; this is the other kind.**
+    #[test]
+    fn an_archive_with_no_ciphertext_in_it_accepts_a_needless_password() {
+        let dir = scratch("nociphertext");
+
+        // A plain 7z, no encryption anywhere, handed a password it never asked for. `extract`'s
+        // pre-flight reaches this whenever a password is supplied for an archive that does not
+        // need one, and refusing it would refuse the archive.
+        let plain = dir.join("plain.7z");
+        {
+            let mut inner = ArchiveWriter::create(&plain).expect("could not open the 7z");
+            let meta = Meta {
+                out_path: "alpha.txt".to_string(),
+                size: 6,
+                is_dir: false,
+                mode: 0o644,
+                mtime: Some(1_704_164_645),
+                atime: None,
+                ctime: None,
+                uid: 0,
+                gid: 0,
+                uname: None,
+                gname: None,
+                symlink: None,
+                hardlink: None,
+            };
+            inner
+                .push_archive_entry(seven_z_entry(&meta), Some(&mut &b"hello\n"[..]))
+                .expect("could not write alpha.txt");
+            inner.finish().expect("could not finish the archive");
+        }
+        assert!(
+            crate::arch::verify_passphrase(&plain, &Secret::from_text("needless"))
+                .expect("verification must answer, not error"),
+            "a plain 7z has nothing to disagree with, so a needless password must pass — \
+             refusing it refuses the archive"
+        );
+
+        // And the same arm reached the other way: plaintext headers, every encrypted member
+        // empty. The listing succeeds for any password because the headers are in the clear, and
+        // there is no member with bytes to test the key against. Both answers must be yes, and
+        // that is honest rather than lax — no ciphertext was read, so none was got wrong.
+        let hollow = dir.join("hollow.7z");
+        write_7z(
+            &hollow,
+            "indium",
+            false,
+            &[("empty-one.txt", b"", true), ("empty-two.txt", b"", true)],
+        );
+        assert!(
+            crate::arch::verify_passphrase(&hollow, &Secret::from_text("indium"))
+                .expect("verification must answer, not error"),
+            "the right password must pass on an archive whose every encrypted member is empty"
+        );
+        assert!(
+            crate::arch::verify_passphrase(&hollow, &Secret::from_text("not-the-password"))
+                .expect("verification must answer, not error"),
+            "and so must a wrong one, because nothing in the archive can tell them apart — if \
+             this ever starts failing, something has begun claiming a verdict it cannot support"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

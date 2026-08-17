@@ -1683,12 +1683,66 @@ fn verify_cap(size: u64) -> usize {
     }
 }
 
-/// Try a password against the first encrypted entry, writing nothing.
+/// Try a password against the archive's encrypted content, writing nothing.
 ///
 /// P2 §5: "verify by test-reading the first data block of the first encrypted entry
 /// with a throwaway reader" — so three wrong attempts cost the user nothing and leave
-/// no partial output to clean up.
+/// no partial output to clean up. **The word "first" in that sentence is superseded for a
+/// 7z**, deliberately: `verification_target` picks the *smallest* encrypted member for the
+/// reasons written on it, and this function has to make the same choice `extract`'s
+/// pre-flight makes or the two disagree about one archive and one password. They did
+/// disagree. On an archive whose first member with bytes was a 2 MiB AES+COPY member, this
+/// answered `Ok(true)` to a password `extract` then refused — so the window accepted the
+/// unlock and the extraction failed behind it with the popup, and its three-attempt
+/// counter, already gone.
+///
+/// **The 7z branch is above the libarchive walk rather than inside it, and that placement is
+/// the whole of the repair.** It used to sit in the loop, after `next_entry()` — which for an
+/// encrypted-header 7z returns `Err(EncryptedHeaders)`, taking the `Ok(false)` arm before the
+/// branch was ever reached. Every encrypted 7z INDIUM writes has encrypted headers, because
+/// `sevenz.rs`'s writer ties the two to one flag, so the window refused the correct password
+/// on the program's own archives three times and cancelled — while `extract`, `head_of` and
+/// `crc32_of` all read those same archives with that same password without complaint.
 pub fn verify_passphrase(path: &Path, passphrase: &Secret) -> Result<bool, ArchiveError> {
+    // libarchive cannot decrypt 7z AES content at any codec, and cannot read an encrypted
+    // header at all, so for a 7z the question is put to `sevenz` and never reaches the walk
+    // below. The measured shapes this rests on: with encrypted headers a wrong password fails
+    // the *listing* with `WrongPassword` and the right one lists cleanly, so a successful list
+    // is itself a discriminator; with plaintext headers the listing succeeds either way and
+    // the member read is what discriminates.
+    if looks_like_7z(path) {
+        let entries = match crate::sevenz::list_all(path, Some(passphrase)) {
+            Ok(v) => v,
+            // Wider than its name, measured: `sevenz-rust2` also answers `WrongPassword` for
+            // a 64-byte stub, a half-truncation and a bit-flipped tail. For encrypted headers
+            // that conflation is honest and unavoidable — a wrong key and a corrupt header
+            // fail the same decrypt, and nothing downstream can separate them. For plaintext
+            // headers it is a real conflation, recorded rather than papered over: a listing
+            // that fails at all on plaintext headers means damage, since a wrong password
+            // lists those cleanly. Not worth speculative machinery in a freeze round, because
+            // the only caller (`ui/password.rs`) flattens the alternative to `false` anyway.
+            Err(ArchiveError::WrongPassword) => return Ok(false),
+            // What the crate does name precisely — a missing codec, an unsupported filter,
+            // an unreadable member after a good listing — is not a verdict on the password
+            // and is not swallowed here.
+            Err(e) => return Err(e),
+        };
+        let refs: Vec<&Entry> = entries.iter().collect();
+        let Some(entry) = verification_target(&refs) else {
+            // No encrypted member carries bytes: a plain 7z handed a needless password, or an
+            // archive whose every encrypted member is empty. There is no ciphertext in it to
+            // get wrong — and where the headers were encrypted, the listing above has already
+            // proved the password on its own.
+            return Ok(true);
+        };
+        let cap = verify_cap(entry.size);
+        return match crate::sevenz::read_entry(path, &entry.path, cap, Some(passphrase)) {
+            Ok(_) => Ok(true),
+            Err(ArchiveError::WrongPassword) => Ok(false),
+            Err(e) => Err(e),
+        };
+    }
+
     let mut reader = match Reader::open(path, Some(passphrase)) {
         Ok(r) => r,
         Err(ArchiveError::EncryptedHeaders) => return Ok(false),
@@ -1711,28 +1765,9 @@ pub fn verify_passphrase(path: &Path, passphrase: &Secret) -> Result<bool, Archi
             continue;
         }
 
-        // **This is the function the window gates extraction on** — `ui/password.rs` calls it and
-        // nothing else — and for a 7z it was answering a question libarchive cannot answer.
-        // libarchive does not decrypt 7z AES content at any codec: measured, its refusal is
-        // byte-identical for the right password and a wrong one. So the data-block call below
-        // returned an error either way, this returned `Ok(false)` either way, and a user holding
-        // the correct password for the commonest encrypted 7z there is was refused three times and
-        // told the archive was cancelled.
-        //
-        // `da6c821` fixed the routing inside `extract` and left this alone, so the corrected code
-        // was unreachable from the window and the symptom never moved. That is why the check is
-        // made here too, by the reader that can make it.
-        if looks_like_7z(path) {
-            let cap = verify_cap(entry.size);
-            return match crate::sevenz::read_entry(path, &entry.path, cap, Some(passphrase)) {
-                Ok(_) => Ok(true),
-                Err(ArchiveError::WrongPassword) => Ok(false),
-                // A missing codec, a malformed archive: not a verdict on the password, and not
-                // this function's to swallow into `false`.
-                Err(e) => Err(e),
-            };
-        }
-
+        // A 7z never reaches here: it returned above, before `Reader::open`. This walk is
+        // libarchive's alone, and its data-block call is a real discriminator for the
+        // containers libarchive can actually decrypt — zip among them.
         let mut buf: *const c_void = std::ptr::null();
         let mut size: usize = 0;
         let mut offset: i64 = 0;
