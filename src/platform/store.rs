@@ -278,12 +278,23 @@ fn load<T: Default + for<'de> Deserialize<'de>>(path: &Path, label: &str) -> Loa
             // cases that did not matter (a real file, or a live link, both of which read as
             // present). Asking about the *name* rather than what it resolves to closes it, and
             // keeps the "copy aside once" policy exactly as written.
-            let kept = if std::fs::symlink_metadata(&broken).is_ok() {
-                true
-            } else {
-                std::fs::copy(path, &broken).is_ok()
-            };
-            let where_ = if kept {
+            let occupied = std::fs::symlink_metadata(&broken).is_ok();
+            if !occupied {
+                let _ = std::fs::copy(path, &broken);
+            }
+            // **Whether a copy was made and whether one is *there to read* are different
+            // questions, and the sentence promises the second.** Guarding on `occupied` alone
+            // was true for a dangling symlink — the name is taken, nothing resolves — so the
+            // notice sent the user to a path holding nothing. That was introduced by the same
+            // change that closed the write-through, which is the shape of `P6`'s own warning
+            // about guards creating quieter hazards than they close.
+            //
+            // `metadata` deliberately, not `symlink_metadata`: a live link to a real copy is a
+            // copy the user can read, and the sentence is about reading it.
+            let readable = std::fs::metadata(&broken)
+                .map(|m| m.is_file())
+                .unwrap_or(false);
+            let where_ = if readable {
                 format!(" A copy is at {}.", broken.display())
             } else {
                 String::new()
@@ -353,21 +364,36 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         // for good. The unlink severs that, and unlike `create_new` it stays tolerant of a
         // leftover from a crashed save under a since-recycled pid, which `O_EXCL` would turn into
         // a permanent refusal to save. This is the form `estimate.rs` already uses.
+        //
+        // What this does not close, stated because `tasks.rs` states it at the same hazard and a
+        // comment claiming otherwise here would be worse than no comment: a name re-planted
+        // between this unlink and the `File::create` below is still followed. That needs a racing
+        // actor, it is `PXX-3-009`'s mechanism, and it keeps its own `document-only` row. What is
+        // closed here is the one that needs no timing.
         match std::fs::remove_file(&tmp) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e),
         }
         let mut f = std::fs::File::create(&tmp)?;
+        // **Before the bytes, not after them, and on the descriptor rather than the path.**
+        //
+        // `25be01d` set this after `sync_all` and claimed parity with `arch.rs`'s extraction
+        // write. Tier 3 measured that claim false: `arch.rs` opens at the target mode
+        // (`create_new(true).mode(prior_mode…)`), so the bytes are never on disk behind laxer
+        // permissions, while this site left the whole file world-readable at a predictable name
+        // for as long as the write took. The class the commit closed at the archive's own name
+        // was still open at the scratch name beside it.
+        //
+        // `File::set_permissions` is `fchmod` on the descriptor already open, so neither the
+        // umask default nor a name re-planted after the unlink can intervene between the two.
+        if let Some(mode) = prior_mode {
+            let want = <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(mode);
+            f.set_permissions(want)?;
+        }
         f.write_all(bytes)?;
         f.flush()?;
         f.sync_all()?;
-        if let Some(mode) = prior_mode {
-            // On the temp, before the rename, so the file is never at its own name carrying
-            // permissions the user did not choose.
-            let want = <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(mode);
-            std::fs::set_permissions(&tmp, want)?;
-        }
     }
 
     match std::fs::rename(&tmp, path) {
@@ -558,13 +584,95 @@ mod tests {
         store.save_settings(&Settings::default()).unwrap();
         let path = store.settings_path();
 
-        std::fs::set_permissions(&path, PermissionsExt::from_mode(0o600)).unwrap();
+        // `0o640` and not `0o600`, deliberately. Tier 3 mutated the shipping code to
+        // `from_mode(0o600)` — pinning the mode instead of carrying it — and the whole suite
+        // passed, because every fixture asked for exactly the constant a lazy implementation
+        // would hardcode. `0o640` is neither that constant nor the umask default `0o644`, so it
+        // can only be reached by actually reading the file's own mode.
+        std::fs::set_permissions(&path, PermissionsExt::from_mode(0o640)).unwrap();
         store.save_settings(&Settings::default()).unwrap();
 
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(
-            mode, 0o600,
+            mode, 0o640,
             "saving must carry the file's own permissions over; got {mode:o}"
+        );
+    }
+
+    /// **`PXX-T3-047`. The fourth behaviour `25be01d` changed, which it never gated.**
+    ///
+    /// That commit added the unconditional `remove_file(&tmp)` to `atomic_write` and its message
+    /// counted three new gates for four behaviour changes. Tier 3 deleted the entire unlink block
+    /// and **the whole suite passed** — `tasks.rs` had a gate for its equivalent hazard and this
+    /// site had none, so the sibling was protected and the original was not.
+    ///
+    /// This is that gate, ported from `a_dangling_link_at_the_apply_temp_is_unlinked_not_written_through`.
+    #[test]
+    fn a_dangling_link_at_the_save_temp_is_unlinked_not_written_through() {
+        let tmp = Tmp::new("save-temp-link");
+        let store = tmp.store();
+        let path = store.settings_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+
+        // Nothing is created here. A dangling link is the whole point: `File::create` is
+        // `O_CREAT|O_TRUNC` with no `O_EXCL`, so without the unlink it follows the link and the
+        // settings land in the victim instead — and the rename then moves the *link* over the
+        // real file, redirecting every future save.
+        let victim = path.parent().unwrap().join("victim");
+        let temp = set_extension_suffix(&path, &format!("tmp.{}", std::process::id()));
+        std::os::unix::fs::symlink(&victim, &temp).expect("could not plant the link");
+
+        store
+            .save_settings(&Settings::default())
+            .expect("saving must proceed over a planted link");
+
+        assert!(
+            !victim.exists(),
+            "the save landed at {}, so the link was followed instead of unlinked",
+            victim.display()
+        );
+        assert!(
+            std::fs::symlink_metadata(&path)
+                .expect("the settings file must be there")
+                .file_type()
+                .is_file(),
+            "settings.toml must be a regular file, not the link the rename moved into place"
+        );
+    }
+
+    /// **`PXX-T3-048`. The notice must not promise a copy that is not there to read.**
+    ///
+    /// `25be01d` changed the occupied-name check from `exists()` to `symlink_metadata()` to stop
+    /// `fs::copy` writing through a dangling link — correct, and it introduced a quieter fault in
+    /// the same line. `symlink_metadata` is `Ok` for a dangling link, so `kept` became true and
+    /// the user was told *"A copy is at …"* about a path resolving to nothing.
+    ///
+    /// Whether a copy was made and whether one is there to read are different questions, and the
+    /// sentence promises the second. P6's own warning about guards creating quieter hazards than
+    /// they close, one milestone later and in the line that closed the first one.
+    #[test]
+    fn the_broken_notice_does_not_promise_a_copy_that_is_not_there() {
+        let tmp = Tmp::new("broken-dangling");
+        let store = tmp.store();
+        let path = store.settings_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "not toml [").unwrap();
+
+        let broken = set_extension_suffix(&path, "broken");
+        std::os::unix::fs::symlink(path.parent().unwrap().join("nowhere"), &broken)
+            .expect("could not plant the dangling link");
+
+        let loaded = store.load_settings();
+        let notice = loaded.notice.expect("a broken file must say so");
+
+        assert!(
+            !notice.contains("A copy is at"),
+            "the name is taken by a link resolving to nothing, so there is no copy to send \
+             anyone to: {notice}"
+        );
+        assert!(
+            loaded.was_broken,
+            "and the file must still be marked broken so it is not overwritten"
         );
     }
 

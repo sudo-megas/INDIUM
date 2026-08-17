@@ -1654,6 +1654,28 @@ pub fn apply(
         }
     }
 
+    // Stage the rebuild at the mode it will end up at, the way `arch.rs`'s extraction write
+    // already does — **before a byte of it exists**, not after the whole archive is written.
+    //
+    // `25be01d` chmodded the temp after `build_and_verify` returned, which leaves the complete
+    // rebuilt archive readable by everyone at a predictable name beside the original for the whole
+    // rebuild. Tier 3 measured 647 ms at `0644` holding the full archive on a 64 MiB source, and
+    // it scales with size and compression cost. For an AES-256 7z that is the ciphertext, and a
+    // `SIGKILL` mid-rebuild leaves it there — cleared only by the next Apply of the same archive.
+    //
+    // `open`'s mode is masked by the umask, so this can land narrower than `prior_mode` but never
+    // wider; the exact restore still happens on the temp before the rename. Both writers open the
+    // pre-created file with `O_TRUNC`, so staging it empty costs them nothing.
+    if let Some(mode) = prior_mode {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(mode & 0o7777)
+            .open(&temp)
+            .map_err(|e| format!("could not stage the rebuild at {}: {e}", temp.display()))?;
+    }
+
     let outcome = build_and_verify(input, &plan, &source, &temp, tx, cancel);
 
     match outcome {
@@ -1682,9 +1704,13 @@ pub fn apply(
                     <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(mode);
                 if let Err(e) = std::fs::set_permissions(&temp, want) {
                     let _ = std::fs::remove_file(&temp);
+                    // `mode & 0o7777`, because `PermissionsExt::mode` returns the whole
+                    // `st_mode` — `S_IFREG` included — so this sentence read "could not be set
+                    // to 100600" and named a mode no user has ever typed.
+                    let shown = mode & 0o7777;
                     return Err(format!(
-                        "the rebuild is good but its permissions could not be set to {mode:o}, so \
-                         it was not committed: {e}"
+                        "the rebuild is good but its permissions could not be set to {shown:o}, \
+                         so it was not committed: {e}"
                     ));
                 }
             }

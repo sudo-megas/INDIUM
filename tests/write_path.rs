@@ -1252,7 +1252,11 @@ fn an_apply_does_not_widen_the_mode_of_the_archive_it_rebuilds() {
     write_payload(&path, &recipe(&path, Method::Gzip));
 
     // The user's stated intent about who may read this archive.
-    fs::set_permissions(&path, PermissionsExt::from_mode(0o600))
+    //
+    // `0o640` and not `0o600`: tier 3 mutated the shipping code to `from_mode(0o600)` and the
+    // whole suite passed, because the fixture asked for exactly the constant a hardcoding
+    // implementation would choose. `0o640` is neither that nor the umask default `0o644`.
+    fs::set_permissions(&path, PermissionsExt::from_mode(0o640))
         .expect("could not tighten the archive");
 
     let (result, _) = run_apply(&input_for(&path, Vec::new()), &no_cancel());
@@ -1264,7 +1268,7 @@ fn an_apply_does_not_widen_the_mode_of_the_archive_it_rebuilds() {
         .mode()
         & 0o777;
     assert_eq!(
-        mode, 0o600,
+        mode, 0o640,
         "rebuilding must not widen a mode the user tightened; got {mode:o}"
     );
 }
@@ -1820,5 +1824,102 @@ fn apply_on_an_encrypted_7z_does_not_blame_the_password() {
     assert!(
         message.contains("cannot rebuild"),
         "and it must name what is actually wrong, or the user is left guessing: {message}"
+    );
+}
+
+/// **`PXX-T3-049`. The archive's bytes must never be on disk behind permissions the user did not
+/// choose — including at the scratch name, which is where `25be01d` left them.**
+///
+/// That commit set the mode on the temp *after* `build_and_verify` returned, and its comment
+/// claimed parity with `arch.rs`'s extraction write. Tier 3 measured the claim false: `arch.rs`
+/// opens at the target mode (`create_new(true).mode(prior_mode…)`), while this site left the
+/// **complete** rebuilt archive world-readable at a predictable name for the whole rebuild — 647 ms
+/// on a 64 MiB source, scaling with size. For an AES-256 7z that is the ciphertext, and a `SIGKILL`
+/// mid-rebuild leaves it there until the next Apply of the same archive.
+///
+/// The class the commit closed at the archive's own name was still open at the scratch name beside
+/// it. This gate watches that name.
+///
+/// **It asserts it saw the temp at least once.** A poller that misses the window entirely would
+/// otherwise pass while measuring nothing, which is the exact shape of the four mutations that
+/// survived this commit's own gates.
+#[test]
+fn the_rebuilds_scratch_file_is_never_wider_than_the_archive() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let dir = TempDir::new("temp-mode");
+    let path = dir.join("out.tar.gz");
+
+    // Big enough that the rebuild takes long enough to watch, and incompressible so the writer
+    // cannot finish it instantly.
+    {
+        let mut writer =
+            arch::Writer::create(&path, &recipe(&path, Method::Gzip)).expect("could not open");
+        let mut bytes = vec![0u8; 6 << 20];
+        let mut x: u32 = 0x12345678;
+        for b in bytes.iter_mut() {
+            x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            *b = (x >> 24) as u8;
+        }
+        let meta = Meta {
+            out_path: "bulk.bin".to_string(),
+            size: bytes.len() as u64,
+            is_dir: false,
+            mode: 0o644,
+            mtime: Some(1_704_164_645),
+            atime: None,
+            ctime: None,
+            uid: 0,
+            gid: 0,
+            uname: None,
+            gname: None,
+            symlink: None,
+            hardlink: None,
+        };
+        let mut cursor = Cursor::new(bytes);
+        writer.put(&meta, Some(&mut cursor)).expect("could not put");
+        writer.finish().expect("could not finish");
+    }
+
+    fs::set_permissions(&path, PermissionsExt::from_mode(0o640)).expect("could not tighten");
+
+    let temp = tasks::temp_path_for(&path);
+    let stop = Arc::new(AtomicBool::new(false));
+    let watcher_stop = Arc::clone(&stop);
+    let watch_path = temp.clone();
+    let watcher = std::thread::spawn(move || {
+        let mut seen: Vec<u32> = Vec::new();
+        while !watcher_stop.load(Ordering::Relaxed) {
+            if let Ok(md) = fs::symlink_metadata(&watch_path) {
+                let m = md.permissions().mode() & 0o777;
+                if seen.last() != Some(&m) {
+                    seen.push(m);
+                }
+            }
+            std::hint::spin_loop();
+        }
+        seen
+    });
+
+    let (result, _) = run_apply(&input_for(&path, Vec::new()), &no_cancel());
+    result.expect("an empty Apply must succeed");
+    stop.store(true, Ordering::Relaxed);
+    let seen = watcher.join().expect("the watcher must not panic");
+
+    assert!(
+        !seen.is_empty(),
+        "the watcher never saw the scratch file at all, so this gate measured nothing — \
+         raise the payload size rather than trusting the pass"
+    );
+    let wide: Vec<String> = seen
+        .iter()
+        .filter(|m| *m & 0o007 != 0)
+        .map(|m| format!("{m:o}"))
+        .collect();
+    assert!(
+        wide.is_empty(),
+        "the rebuild's scratch file was readable by everyone while it held the archive's bytes: \
+         saw modes {seen:?} (offending: {wide:?}) for an archive the user set to 0640"
     );
 }
