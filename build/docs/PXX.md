@@ -4484,3 +4484,155 @@ append-only — so nothing in it is dated and nothing in it is superseded, it is
 
 **One new ID. Register 165 → 166.** Suite unchanged at **405** — both tests already counted in it,
 which is itself the point: the work was in the suite the whole time.
+
+## Phase 3 — `PXX-T3-020`: a member named `\` is the archive root, and three of `05aa76a`'s claims measured
+
+Both tier-3 reviews commissioned for `9175a28` and `05aa76a` **died on server-side API errors** —
+one on a mid-response server error, then both on `529 Overloaded`. Neither delivered a verdict. The
+second died having written *"Rich results. Let me now probe the 7z asymmetry"*, so it had findings and
+lost them.
+
+**It did not lose its probes.** It left 316 lines of clearly-labelled temporary tests in
+`tests/write_path.rs` — *"TIER3 PROBES — temporary, reverted before the report. Not for commit."* —
+five of them, aimed squarely at the attacks it had been given. They were run here before the file was
+reverted, and they answer three questions and open a fourth.
+
+The probe patch is preserved outside the repo at
+`$CLAUDE_JOB_DIR/tmp/tier3-probes-05aa76a.patch`; `tests/write_path.rs` is back at HEAD.
+
+**This is salvage, not verification.** The probes are a third party's instrument and the results are
+what they are, but the hand that ran them wrote the code under test. Both commits still owe tier 3.
+
+### The finding: `is_archive_root` does not mean what its name says
+
+`arch.rs:963-964`, verbatim:
+
+```rust
+pub fn is_archive_root(entry: &Entry) -> bool {
+    entry.path.is_empty() && !entry.raw_path.is_empty()
+}
+```
+
+It does not detect the archive root. It detects **any member whose stored name normalises to
+nothing**, and probe 1 read the table straight out of the library:
+
+| stored name | normalises to | empty? |
+|---|---|---|
+| `.` | `.` | no |
+| `./` | `` | **yes** — the intended case |
+| `/` | `` | **yes** |
+| `//` | `` | **yes** |
+| `./.` | `.` | no |
+| `././` | `` | **yes** |
+| `\` | `` | **yes — and this is a legal Linux filename** |
+| `./\` | `` | **yes** |
+| `\\` | `` | **yes** |
+| `sub/` | `sub` | no |
+| `a\b` | `a/b` | no |
+
+The mechanism is two lines of `util.rs`, and neither is wrong on its own. `:275` is
+`let mut s = raw.replace('\\', "/");` — backslashes become separators, which is what makes `a\b`
+read as `a/b` for archives written on Windows. `:282` then trims a trailing slash. **So a member
+named `\` becomes `/` becomes nothing**, and `is_archive_root` calls it the root.
+
+### What that costs, measured
+
+Probe 2 built an ordinary `./`-rooted tar holding `a.txt`, `b.txt` and a file named `\`:
+
+```
+T3BS tar sees:             ["./", "./\\", "./b.txt", "./a.txt"]
+T3BS INDIUM lists before:  [("./b.txt", "b.txt"), ("./a.txt", "a.txt")]
+T3BS apply result:         Ok(2)
+T3BS tar sees after:       ["./b.txt", "./a.txt"]
+T3BS head a.txt:           Ok(("aaaaaaaa\n", false))
+T3BS head b.txt:           Ok(("bbbbbbbb\n", false))
+```
+
+Four members in, two listed, two out. **The `\` member is invisible before Apply and gone after it.**
+
+Two things must be said precisely, because the temptation is to file this as a regression and it is
+not one.
+
+**The invisibility is older than this fix.** `list_all` has filtered on this same predicate at
+`arch.rs:851` since long before `05aa76a`, and the streaming listing at `:811` does too. A member
+named `\` has never appeared in INDIUM's table. Nothing the user could see was lost here.
+
+**And `05aa76a` made this archive dramatically better, not worse.** Before it, the stream carried
+four entries against a plan of two, so the misalignment consumed everything: `b.txt` would have been
+written as a directory, the `\` member's three bytes would have landed under `a.txt`'s name, and both
+real files would have fallen off the end of the plan. The probe's `head` assertions show both members
+now come back with their own correct bytes.
+
+So the honest shape of the finding: **a pre-existing misclassification, harmless while it only hid a
+member from a listing, now also decides a write.** The predicate was promoted from a display filter
+to a rebuild filter without anyone asking whether it was precise enough to carry that. It is the
+difference between a member being hidden and a member being deleted, and `05aa76a` moved it across
+that line — while simultaneously repairing a far worse fault on the same archives.
+
+**Proposed fix**, sketched and not applied, because a fix in this position owes its own review: test
+the *stored* name against the root forms rather than testing the normalised name for emptiness —
+`entry.raw_path.chars().all(|c| c == '.' || c == '/')` accepts `.`, `./`, `/`, `//` and `././` and
+rejects `\`, `./\` and `\\`. It needs its own gate over a member named `\`, and it needs a decision
+this section does not make: whether `/` and `//` should count as roots at all, which is a question
+about what a hostile archive is allowed to say rather than about normalisation.
+
+### Three of the commit's claims, now measured rather than argued
+
+Probes 3 and 4 went after the two things `05aa76a` asserted without running.
+
+**Multiple roots, and a root mid-stream — both hold.** `continue` without advancing the index is
+indifferent to how many roots there are or where they sit:
+
+```
+T3MR TWO tar sees:  ["./", "./b.txt", "./a.txt", "./", "./d.txt", "./c.txt"]
+T3MR TWO apply:     Ok(4)      a,b,c,d all correct=true
+T3MR MID tar sees:  ["a.txt", "b.txt", "./", "./d.txt", "./c.txt"]
+T3MR MID apply:     Ok(4)      a,b,c,d all correct=true
+```
+
+Two roots from concatenated tars, and a root arriving fourth in the stream. Every member's bytes
+correct in both.
+
+**Idempotence and external validity — both hold.**
+
+```
+T3ID apply1: Ok(4)   apply2: Ok(4)
+T3ID orig_len=10240  pass1_len=4608  pass2_len=4608  pass1==pass2: true
+T3ID extract status=Some(0) stderr=""
+T3ID extracted tree: ["a.txt", "b.txt", "sub", "sub/c.txt"]
+```
+
+A second Apply over the already-rebuilt archive produces a **byte-identical** file, so the
+normalisation is a fixed point rather than a slow erosion — which was the real risk in dropping the
+root, and the commit did not test it. `tar -x` on the output exits 0 and yields the right tree, so an
+external tool is unaffected. The members keep their `./` prefixes in `raw_path`; it is the root
+*entry* that is gone, which is exactly what the commit claimed and is now shown.
+
+The size drop from 10240 to 4608 is the root's own 512-byte header plus tar's block padding, and it
+is stable across passes.
+
+### The findings
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-T3-020` | `arch.rs:963-964`; `util.rs:275`, `:282` | `is_archive_root` is true for any name normalising to empty, which includes a member literally named `\` — a legal Linux filename. Invisible in the listing since long before this round, and now dropped from a rebuild as well | fix-in-v2.5 | confirmed by measurement, unfixed |
+| `PXX-T2-015` | — | **multiple roots, mid-stream roots, idempotence and external extraction all measured and holding.** The commit argued three of these and ran none | — | claims upheld |
+
+**One new ID. Register 166 → 167.** Suite unchanged at **405** — the probes were reverted rather than
+kept, because a probe that prints is not a gate that fails, and turning them into gates belongs with
+the fix for `PXX-T3-020` and with the review both commits are still owed.
+
+### And the reviews themselves
+
+Two commissioned tier-3 reviews died without verdicts, on three separate server-side failures. That
+is not a finding about the code, and it is recorded because the round's own rule is that a
+`freeze-blocking` fix is not finished until an independent reader has tried to break it. **Two such
+fixes are now committed and neither has been reviewed.** What exists instead is: a five-of-five
+orthogonal sabotage matrix on one, a two-of-two on the other, one dead reviewer's probes run against
+the second, and the preserved proof-of-concept archive from the first review run against the first —
+where the exact wrong password that once truncated a 100 000-byte file to zero now returns
+`Err(WrongPassword)` with the destination untouched, and `verify_passphrase` finally answers `Ok(true)`
+to the right password.
+
+That is a great deal of evidence and it is **not** the thing the rule asks for. The rule asks for a
+reader who did not write the code. The obligation stands.
