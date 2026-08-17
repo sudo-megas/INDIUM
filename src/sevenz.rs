@@ -1243,4 +1243,60 @@ mod header_encryption {
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// **`PXX-T3-040`. The one argument the fix rests on, which nothing was testing.**
+    ///
+    /// `verify_passphrase` chooses a member with `verification_target` and then reads it with
+    /// `read_entry(path, &entry.path, …)` — the **normalised** path. `read_entry` resolves by
+    /// `normalize_archive_path(&f.name) == entry_path`, so the two only meet because one side is
+    /// normalised and the other normalises before comparing. That coupling is the whole of the
+    /// glue, and a tier-3 review measured it pinned by nothing: changing `entry.path` to
+    /// `entry.raw_path` — a one-token mutation that breaks verification on every 7z whose member
+    /// names need normalising — **passed all 410 tests.**
+    ///
+    /// It passed because every other fixture in this module names its members `alpha.txt` and
+    /// `a-big.bin`, where `raw_path` and `path` are the same string. **The gates were the easy
+    /// set**, and the review said so in those words. This one is the hard case: a `./` prefix, which
+    /// any tool that stores a rooted path produces, and which normalises away.
+    ///
+    /// Under the mutation this archive returns `Err(Other("no such entry: ./alpha.txt"))`, and
+    /// `ui/password.rs` flattens that with `unwrap_or(false)` — so the window refuses the correct
+    /// password three times and cancels, which is verbatim the symptom the fix exists to close.
+    #[test]
+    fn a_member_whose_stored_name_normalises_is_still_verified() {
+        let dir = scratch("normalising");
+        let path = dir.join("dotted.7z");
+        write_7z(
+            &path,
+            "indium",
+            true,
+            &[("./alpha.txt", b"INDIUM fixture alpha\n", true)],
+        );
+
+        // The premise, asserted rather than assumed, or the gate goes vacuous the moment the
+        // writer starts normalising names on the way in.
+        let listing =
+            crate::arch::list_all(&path, Some(&Secret::from_text("indium"))).expect("it must list");
+        let entry = listing.first().expect("the member must be listed");
+        assert_ne!(
+            entry.raw_path, entry.path,
+            "this fixture is worthless unless the stored name and the normalised name differ — \
+             stored {:?}, normalised {:?}",
+            entry.raw_path, entry.path
+        );
+
+        assert!(
+            crate::arch::verify_passphrase(&path, &Secret::from_text("indium"))
+                .expect("verification must answer, not error"),
+            "the right password must verify a member whose stored name normalises — the chooser \
+             hands on a normalised path and the reader resolves by normalising, and nothing was \
+             testing that those two agree"
+        );
+        assert!(
+            !crate::arch::verify_passphrase(&path, &Secret::from_text("not-the-password"))
+                .expect("verification must answer, not error"),
+            "and a wrong password must still be refused on the same archive"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

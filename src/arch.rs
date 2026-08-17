@@ -1690,9 +1690,26 @@ fn verification_target<'a>(selected: &[&'a Entry]) -> Option<&'a Entry> {
 /// member inside a solid block can only be reached by decoding every member ahead of it in that
 /// block, and the cap does not bound that: picking the *smallest* member maximises the chance it
 /// sits at the end of a block, so the cheapest member to read can be the most expensive to reach.
-/// Measured on a true solid block of 24 MiB + 5 bytes, the right password costs ~66 ms here and the
-/// wrong one ~0.4 ms, because LZMA2 noise fails immediately. Not alarming, and not what a sentence
-/// about a one-megabyte bound would lead a reader to expect.
+///
+/// **This paragraph carried one measurement and read it as the rate. It is not the rate.** A solid
+/// block of 24 MiB + 5 bytes gave ~66 ms for the right password, and that figure went in here as
+/// though it generalised. Re-measured on less compressible data at 64 MiB: **1 656 ms** — 25.9 ms
+/// per MiB against the 2.75 the first sample implied, a factor of ten. The number was real and the
+/// sentence around it was a sample of one, which is the mistake this round has now made twice with
+/// the same shape and recorded both times.
+///
+/// **And the cost is paid on the UI thread.** `ui/password.rs` calls `verify_passphrase` inline
+/// inside egui's `update`, so on a foreign solid archive the window is frozen for the duration —
+/// about **26 seconds for a 1 GiB solid block**, extrapolated from the slope above. `arch::extract`
+/// does not have this problem because P6 moved it to a worker after the same defect; this call was
+/// never moved with it. Recorded rather than repaired, because the repair is either a worker (a UI
+/// change a freeze round should not make) or preferring an early member on solid archives, which
+/// trades the CRC-reaching read back for a prefix and re-opens what `PXX-T3-027` closed.
+///
+/// **Reachability, stated so the severity is not read as worse than it is.** INDIUM's own writer
+/// uses `push_archive_entry` and produces non-solid archives — measured `(false, 3)` on a
+/// three-member encrypted 7z it wrote. This is foreign solid archives only, which is 7-Zip's
+/// default and therefore common, but never one of ours.
 ///
 /// **Above the bound, and only for AES with no compressor behind it, this check is worth nothing.**
 /// A prefix read never reaches the CRC, and COPY returns a wrong key's noise at exactly the stated
@@ -1739,6 +1756,15 @@ pub fn verify_passphrase(path: &Path, passphrase: &Secret) -> Result<bool, Archi
     // the *listing* with `WrongPassword` and the right one lists cleanly, so a successful list
     // is itself a discriminator; with plaintext headers the listing succeeds either way and
     // the member read is what discriminates.
+    //
+    // **One asymmetry, named because it is real even though its class may be empty.** `list_7z`
+    // falls back to libarchive when `sevenz` cannot parse (`Err(_) => None`); this branch has no
+    // such fallback and answers for every 7z. So a 7z libarchive reads and `sevenz-rust2` refuses
+    // is listed in the window and then fails at the password gate. Tier 3 built the witness — a
+    // 32-byte empty 7z from `bsdtar`, which `arch::list_all` reads as `Ok(0)` and `sevenz` refuses
+    // — but reaching this gate needs the listing to report an *encrypted* member, and no archive
+    // was found that is both. Stated rather than closed: a fallback here would have to guess which
+    // reader's silence to trust about a password.
     if looks_like_7z(path) {
         let entries = match crate::sevenz::list_all(path, Some(passphrase)) {
             Ok(v) => v,
@@ -1760,8 +1786,24 @@ pub fn verify_passphrase(path: &Path, passphrase: &Secret) -> Result<bool, Archi
         let Some(entry) = verification_target(&refs) else {
             // No encrypted member carries bytes: a plain 7z handed a needless password, or an
             // archive whose every encrypted member is empty. There is no ciphertext in it to
-            // get wrong — and where the headers were encrypted, the listing above has already
-            // proved the password on its own.
+            // get wrong.
+            //
+            // Where the headers were encrypted, the listing above is the check — and **it is a
+            // structural one, not a checksum**, which this comment used to imply. Tier 3 read the
+            // crate: `reader.rs` guards the encoded-header CRC on the *folder* section's
+            // `has_crc`, and `writer/unpack_info.rs` never emits `kCRC` there, saying so in its
+            // own comment — 7-Zip writes substream CRCs instead, and the encoded-header path has
+            // no substream fallback. So that verifier is never installed, for any archive 7-Zip
+            // or this crate writes.
+            //
+            // What actually refuses a wrong key is a gauntlet rather than a hash: the AES noise
+            // must decode as a raw LZMA stream at all — the range coder demands a zero first
+            // byte, which is 255/256 of keys gone immediately — and must then yield *exactly*
+            // the declared unpacked length and parse as a 7z header. That is strong in practice
+            // and it is not a cryptographic bound. **1200 wrong passwords produced no false
+            // accept, which by the rule of three bounds the rate at about 2.5e-3 and no tighter.**
+            // Member reads are the opposite case and INDIUM's claim about them holds: the crate
+            // installs a CRC verifier on `file.has_crc`, which the writer always sets.
             return Ok(true);
         };
         let cap = verify_cap(entry.size);
