@@ -1468,6 +1468,124 @@ crate — is already rejected by project convention, which makes this the maker'
 | 5 — §3 `cli` row | `CORE.md:109` | **Now.** The codes are already pinned by tests |
 | 6 — Deviations, transcribed constants | Deviations section | **Now** |
 
+---
+
+## Phase 3 — `PXX-7-004` refuted at tier 2, and settled by the compiler
+
+The re-run of the contaminated site came back **`defect: NO`**, and it is the most useful verdict in
+the tier. It agrees with the original on every fact and disagrees about whether the fact is a defect.
+
+### The arithmetic, confirmed to the file
+
+The original claimed 9 insertions covering 30 of 34, leaving `arch.rs`, `cli.rs`, `secret.rs` and
+`lib.rs`'s own scope. The blind re-derivation produced the same total **and decomposed it**, which
+the original did not:
+
+| Insertion | Covers |
+| --- | --- |
+| `#[forbid(unsafe_code)]` on `pub mod estimate;` | 1 |
+| on `pub mod model;` | 1 |
+| on `pub mod platform;` | 8 — `mod` + apps, clipboard, open, picker, scratch, store, window |
+| on `pub mod sevenz;` | 1 |
+| on `pub mod tasks;` | 1 |
+| on `pub mod theme;` | 1 |
+| on `pub mod ui;` | 15 — `mod` + about, extract, filter, inspector, keys, measure, newarchive, openwith, password, pending, settings, sidebar, table, tray |
+| on `pub mod util;` | 1 |
+| `#![forbid(unsafe_code)]` at the top of `main.rs` | 1 |
+
+29 from `lib.rs`, plus `main.rs` = **30**. Uncovered: `arch.rs`, `cli.rs`, `secret.rs` — each holds
+`unsafe` and so cannot sit inside any `forbid` scope — and **`lib.rs` itself, which holds no unsafe
+at all** and is excluded for a structural reason: the only attribute that could cover a declaring
+file is an inner `#![…]` covering the whole crate, and that crate lexically contains the other three.
+**There is no lint scope meaning "this file's own tokens but not its child modules."** 30 + 4 = 34.
+
+This is what the round asks for and what the original did not supply: a total that is the sum of a
+list you can name. *A number nothing can check* is this project's unbeaten class, and a covered-file
+count is exactly such a number.
+
+### Settled by running it, not by reading it
+
+The confirmer filed two `NEEDS-RUN` commands rather than asserting lint semantics from memory. Both
+were run here — tier 2 route (b), reproduction on the maker's machine:
+
+```
+$ cargo rustc --lib -- -D unsafe_code
+   FAILS. Lint hits, by file:  arch.rs 34   cli.rs 6   secret.rs 1
+   By kind:  37 usage of an `unsafe` block
+              2 usage of an `unsafe extern` block
+              2 declaration of an `unsafe` function
+
+$ cargo rustc --bin indium -- -D unsafe_code
+   Finished `dev` profile ... in 4.12s        exit 0
+```
+
+Two results, and the second is the one that matters. **The lint fires in exactly three files** — no
+fourth, no macro-expanded surprise in the other 29 — and **`main.rs` compiles clean under it**, a
+direct compile witness that it is a separate crate root outside `lib.rs`'s reach and is itself
+unsafe-free.
+
+And the standing baseline held **exactly**: `usage of an unsafe block` = **37**, the number this
+round has carried since the fleet was designed, now confirmed by the compiler rather than by a grep.
+The other four hits are an `unsafe extern` block in each of `arch.rs` and `cli.rs` and two
+`unsafe fn` declarations in `arch.rs` — a different counting basis, fully reconciled, not a
+discrepancy. *Ask the program, not the record of it*, turned on the round's own record, and the
+record was right.
+
+### Why `NO`, and why that is not a technicality
+
+Three reasons, in the confirmer's order:
+
+1. **The block is correct and self-checking.** All eleven declarations resolve; 1 + 1 + 11 + 7 + 14 =
+   34 with no orphan file; and `the_architecture_table_names_every_module_and_nothing_else` already
+   closes the loop against disk *and* against CORE §3, in both directions.
+2. **A crate-root `#![forbid(unsafe_code)]` is structurally impossible, not merely absent.** `forbid`
+   is precisely the level a nested scope cannot escape — a nested `#![allow(unsafe_code)]` under it
+   is a hard error, E0453. The attribute cannot be placed at `lib.rs` at all without failing the
+   build. **A gate that cannot be correctly placed is not a missing gate.**
+3. **The strongest thing this site could actually carry is `deny`, which is weaker than the framing
+   implies.** `deny` is escapable by any future module adding an `allow`. It is a greppable review
+   signal, not a non-bypassable compiler gate.
+
+**And the honest ceiling is lower than 30/34 suggests.** `build.rs` is a **third** crate root, at the
+repo root, outside the 34 — and its entire body links libarchive. Every archive byte this program
+reads crosses the `arch.rs` FFI boundary into C that `unsafe_code` says nothing about, as it says
+nothing about `eframe`/`glow`, `wl-clipboard-rs`, `image`, `sevenz-rust2` or `ashpd`, which is where
+supply-chain unsafe actually lives. The measure's honest description is *"the 30 files that are not
+the FFI boundary cannot grow one"* — **not** "INDIUM forbids unsafe." A badge saying the latter would
+be a claim, not a record.
+
+A one-insertion alternative exists and was not in the original: `[lints.rust] unsafe_code = "deny"`
+in `Cargo.toml` reaches every package target — the lib, the bin, **and the five `tests/*.rs`
+integration crates, which no `lib.rs` attribute can reach at all.** Still `deny`, never `forbid`,
+and still needing the same three opt-outs.
+
+### The disposition, and whose it is
+
+The two passes agree on every fact and disagree on one judgement: whether the absence of an
+inexpressible gate is a *defect*. `PXX-7-004` is the largest code change among the twenty-one — nine
+insertions — and reclassifying it from `fix-in-v2.5` to `document-only` would be a policy call about
+how much elective hardening a freezing repository takes on.
+
+**That is rule 7: some decisions are the maker's by category.** It is recorded as
+**REFUTED-ON-SEVERITY, facts confirmed**, and it is **not** reclassified here. Editing another
+agent's severity to agree with a later argument is the class-12 shape this document exists to
+prevent. The ledger's counts are left exactly as the fleet filed them.
+
+### One more finding, and it is a trap laid for whoever implements this
+
+| ID | Site | What it is | Severity |
+| --- | --- | --- | --- |
+| `PXX-T2-008` | `lib.rs:41-43` | `the_architecture_table_names_every_module_and_nothing_else` builds its `declared` set with `include_str!("lib.rs").lines().filter_map(\|l\| l.trim().strip_prefix("pub mod "))`. An outer attribute written **inline** — `#[forbid(unsafe_code)] pub mod estimate;` — no longer starts with `pub mod ` after trimming, so that module **silently drops out of `declared`** and the doc-as-test fails with a misleading message about what `lib.rs` declares versus what `src/` holds. Written on its own line, as rustfmt places item attributes, the parser never sees it and the test is unaffected | document-only |
+
+Verified here by reading `lib.rs:39-48`. This is the shape the round keeps meeting: **the gate that
+guards the change is broken by the change**, and it would have been discovered as a confusing red
+test rather than as a known cost. It is filed `document-only` because nothing is wrong today — it is
+a note owed to whoever applies the patch, if the maker decides it is applied at all.
+
+---
+
+## Phase 3 — the CORE drafts, continued
+
 Agent 9 drafted nothing and was right to: it grepped `CORE.md` for every defective figure it found
 — 1.37, 1.87, 1.88, 1.95, 2.24, 2.45, 318, 328, 27.4, 4.42 — and **all ten are absent**. Every wrong
 number it found is `theme.rs`-comment-local: the file disagreeing with its own arithmetic or its own
