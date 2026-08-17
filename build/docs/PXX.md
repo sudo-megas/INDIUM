@@ -3419,3 +3419,333 @@ So the transferable rule is not about `DIVERGENT` at all, and it is the one thin
 section: **a fix is not verified until something the user can actually press has been shown to
 change.** Every measurement here was real, every gate passes, the routing is right, the diagnosis was
 right — and the only claim never tested was the one the whole finding existed to make.
+
+## Phase 3 — `PXX-T3-010` was not a verification bug: the rebuild walks a different list from the one it was planned against
+
+A blind confirmer was sent to `tasks.rs:1138-1177` — `verify_against` — with nothing but the line
+range, to give `PXX-T3-010` the tier 2 it still owed. It confirmed a defect there. **It also
+mentioned, under "noticed nearby", something four hundred lines away that reclassifies
+`PXX-T3-010` from an annoyance into the most serious finding of this round.** Every line below was
+re-read here against production source before it was written down.
+
+It disclosed unprompted that `MEMORY.md` had been injected into its context before its first
+action. **Four agents for four.** The observation is no longer provisional: blindness cannot be
+briefed, only the reasoning withheld — and withholding the reasoning is what did the work here,
+because it arrived at the mechanism from the code rather than from the record's account of it.
+
+### The record's account, and why it was wrong
+
+`PXX-T3-010` reads: *"`apply` on a `./`-rooted tar fails with `"alpha.txt was written at 20 bytes
+instead of 21"` — `rooted.tar` stores beta (20) first and alpha (21) second, so sizes are attributed
+to the wrong members."* Filed against `tasks.rs` `verify_against`, severity `fix-in-v2.5`.
+
+That reads as a **false alarm**: a correct rebuild, a confused verifier. It is the opposite.
+**The archive really was built wrong. `verify_against` reported it correctly, and its sentence is
+true** — `alpha.txt` genuinely was written at 20 bytes. Verification is not the defect here.
+Verification is the only thing that noticed.
+
+### The mechanism, read from five sites
+
+| # | site | what it establishes |
+|---|---|---|
+| 1 | `arch.rs:851` in `list_via_libarchive` | `list_all` **drops the archive root**: `if !is_archive_root(&e) { out.push(e); }` |
+| 2 | `arch.rs:811` in `list(…)` | the UI's streaming listing drops it too, the same way |
+| 3 | `arch.rs:954` + grep | `is_archive_root` has **exactly two production call sites** — the two above. It is **never** called in `Reader::next_entry`, and never anywhere in `tasks.rs` |
+| 4 | `tasks.rs:1541-1546` | `apply` re-lists with `crate::arch::list_all(…)`, so the `source` behind `plan.source` and `expected()` is **root-filtered** |
+| 5 | `tasks.rs:1739-1746` | the rebuild loop walks `reader.next_entry()` — **raw, root included** — and pairs by position: `let disposition = plan.source.get(index); index += 1;` |
+
+**The two lists differ by one element, and the code walks one while indexing the other.**
+
+`tasks.rs:596-600` states the contract the code breaks, and states it in the very words that make
+the breach legible:
+
+> /// One entry per member of the source listing, **in listing order**.
+> ///
+> /// Indexed by position rather than keyed by path on purpose: a tar may legally hold
+> /// two members with the same stored name, and a path-keyed lookup breaks on that
+> /// silently. **Apply walks the source and this vector in step.**
+
+Apply does not walk the source. It walks the *stream*. On any archive whose stream carries a root
+member, those are not the same walk — and the root member is precisely what `is_archive_root` was
+written to recognise.
+
+### What actually lands in the archive
+
+`rooted.tar` holds four members and a `./` root, so the stream is five long and `plan.source` is
+four. Stored order puts beta (20 bytes) before alpha (21):
+
+| stream index | entry read | disposition taken | what is written |
+|---|---|---|---|
+| 0 | `./` root, `is_dir`, size 0 | member 0's (beta) | **beta.txt, as a directory**, carrying the root's mode, uid, gid and every timestamp |
+| 1 | beta, 20 bytes | member 1's (alpha) | beta's 20 bytes **under alpha's name** |
+| 2 | alpha, 21 bytes | member 2's (sub) | alpha's bytes under sub's name |
+| 3 | sub | member 3's (sub/gamma.txt) | sub under gamma's name |
+| 4 | sub/gamma.txt | `plan.source.get(4)` → **`None`** | `_ => reader.skip_data()` — **dropped** |
+
+`Meta::from_entry` takes `out_path` and `hardlink` from its arguments and **`size`, `is_dir`,
+`mode`, `mtime`, `atime`, `ctime`, `uid`, `gid`, `uname`, `gname` and `symlink` from the entry**. So
+row 0 is not a mislabelled file; it is `has_data() == false`, written through `sink.put(&meta,
+None)` as a directory. **The first member of the archive is replaced by a directory wearing its
+name.**
+
+Then verification runs, and this is the part that matters:
+
+- The path multiset **matches exactly.** Four names expected, four names present. `verify_against`'s
+  first two loops (`:1148-1163`) enforce equality in both directions and both pass.
+- The size loop (`:1165-1173`) is gated on `is_regular_file(entry)`, and row 0 is now a directory.
+  **The one member that was destroyed outright is the one member the size check cannot see.**
+- Rows 1–3 are checked, and they fail only because the shifted sizes happen to differ. Here
+  20 ≠ 21, so Apply refuses with the exact sentence the record quoted.
+
+**`rooted.tar` errors out by luck, not by guard.** Give the shifted members equal sizes — four
+same-length files, or a set where the shift lands size-on-size — and every check passes, the temp is
+renamed over the original, and the user's archive is silently replaced by one in which the first
+member is a directory, every payload sits under its neighbour's name, and the last member is gone.
+
+### Severity: freeze-blocking
+
+`PXX-T3-010` is re-filed. It is not `fix-in-v2.5` and it is not about `verify_against`.
+
+- **Silent data loss on committed output**, which is the one outcome CORE's write rules exist to
+  prevent, and it lands on the original file after the rename.
+- **The affected shape is ordinary.** `tar -cf x.tar -C dir .` writes a `./` root. `read_path.rs:134`
+  already records what this shape cost once: *"It went unnoticed for twenty-two rounds because not
+  one committed fixture was rooted that way."*
+- **The detector is coincidental.** Nothing in the code is trying to catch this; a size comparison
+  written for a different purpose catches some instances of it.
+
+The fix is small and it is symmetrical with what already exists — the rebuild loop must skip a root
+entry the way both listing loops do, **without advancing `index`**:
+
+```rust
+if crate::arch::is_archive_root(&entry) {
+    reader.skip_data();
+    continue;
+}
+```
+
+placed before the disposition is taken. That makes `tasks.rs:596-600` true for **every** archive
+rather than only for the unrooted ones it has always been true for.
+
+**Its blast radius, stated because it is a behaviour change and not only a repair.** A rebuilt
+`./`-rooted archive comes out *unrooted*: the root member is skipped rather than re-emitted, because
+`plan.source` is root-filtered and there is no disposition to re-emit it from. Extraction is
+unaffected — a `./` entry names the destination directory, which already exists — and the listing
+already hid it, so what the user sees does not change. What is lost is the root entry's own mode,
+uid, gid and timestamps. That is the correct trade against writing a directory over the first
+member's name, but it is a normalisation and it should be recorded as one rather than discovered
+later.
+
+#### The class-9 sweep this defect owes
+
+The shape is *a raw `next_entry()` walk paired positionally against a filtered structure*. Filing
+class 9 without sweeping for its siblings is the omission tier 3 already caught once this round, so
+the sweep was run: **`grep -rn 'next_entry' src/`**, every hit read.
+
+| site | how it identifies a member | verdict |
+|---|---|---|
+| `tasks.rs:1739` | `plan.source.get(index)`, **position** | **the defect** |
+| `estimate.rs:363` | `carries_data(&entry)` predicate; name from `&entry.path` | immune |
+| `estimate.rs:410` | same predicate; byte-offset arithmetic, no list index | immune |
+| `arch.rs:1380` (`head_of`) | `entry.path != entry_path`, **name** | immune |
+| `arch.rs:1454` (`stream_via_libarchive`) | `entry.path != entry_path`, **name** | immune |
+| `arch.rs:1519` (`crc32_via_libarchive`) | `entry.path != entry_path`, **name** | immune |
+
+**`tasks.rs:1745` is the only positional pairing in the tree**, and the five siblings are immune for
+a reason worth keeping rather than merely noting: every one of them **re-derives what it needs from
+the entry it just read** instead of trusting an ordinal. `estimate.rs` is the closest analogue —
+it walks the same raw stream over the same archives, and its own comment at `:346-347` says it
+applies *"the same predicate `Meta::has_data` applies, against a listing rather than a member"*. Its
+root handling is not special-cased at all: the `./` root is a directory, so it is skipped at `:367`
+and `:417` by the rule that skips every other directory. Its `total` at `:352` is summed from the
+root-filtered list, and agrees, because the root contributes zero bytes under the same predicate
+from either side.
+
+So the fix's shape already exists one door over, in the file that walks the same stream. That is
+worth more than a precedent — it is the reason to prefer skipping the root by predicate over
+patching the index arithmetic.
+
+#### The gate, and the one it cannot be
+
+`rooted.tar` is already committed and gives the **loud** half: before the fix, Apply over it returns
+`Err`, so a gate asserting a clean round-trip fails-before and passes-after.
+
+It cannot give the quiet half, and this is the trap in gating this fix by size. **After the shift,
+sizes are the thing that coincides** — that is the whole mechanism. A gate written in size
+assertions passes over a corrupted archive by construction. The discriminating gate is therefore an
+equal-length `./`-rooted tar built in-test, Applied, with **bytes asserted by name** and the first
+member asserted to still be a file. Before the fix that gate watches verification return green over
+shifted contents and fails on the bytes; after, it passes. The pair is the same discriminating
+structure `PXX-2-002` used, and it is also the experiment that raises the silent-commit claim from
+`probable` to `certain`.
+
+**Not written yet, deliberately.** The build lane is held by another review, a fix cannot be
+believed until it has been run, and a `freeze-blocking` fix owes tier 3 by this round's own rule —
+which has now returned REPLACE once and AMEND once on fixes that looked finished.
+
+### `PXX-T2-016`: the size map cannot hold a duplicate name, in the file that argues it must
+
+This is what the confirmer was actually sent to find, and it is real independently of the above.
+`Expected` splits its two halves into incompatible shapes (`tasks.rs:1058-1063`):
+
+> pub paths: Vec\<String\>,
+> pub sizes: BTreeMap\<String, u64\>,
+
+`tasks.rs:1093-1096` fills them together — `paths.push(normalised.clone())` then
+`sizes.insert(normalised, entry.size)`. **`BTreeMap::insert` overwrites**, so *n* members sharing a
+normalised name leave exactly one size behind: the last in listing order. `verify_against` then
+compares **every** built entry against that single survivor (`:1166`), so at most one of the
+duplicates can match and the other returns
+
+> notes.txt was written at 4 bytes instead of 9 — nothing was replaced.
+
+on a rebuild that was byte-for-byte correct. **Every Apply that keeps both duplicates under their
+own names fails**, whatever the edit was for — remove an unrelated member, add one, change
+compression.
+
+**There is a way out, and it is worth being exact about it, because the first draft of this section
+said there was not.** The map is keyed on `normalize_archive_path(out_path)` (`tasks.rs:1092`) —
+the **planned output name**, taken from `Disposition::Keep`, not the stored name. So renaming one
+duplicate gives two distinct keys, both sizes survive, and that Apply verifies and commits. The
+escape hatch works. What is true is narrower and still bad: the failure is total until the user
+renames, and **nothing tells them that renaming is the way out** — the sentence they are shown
+accuses the rebuild of writing the wrong number of bytes.
+
+That correction is recorded rather than quietly applied because of where it came from. The confirmer
+supplied both the mechanism and the consequence; the mechanism was verified here line by line and
+**the consequence was copied without being traced**, in a section whose own next paragraph states
+the fact that refutes it. A verified premise sitting beside an unverified one, in the same
+paragraph, under the same confidence — which is the shape this round keeps finding and the reason
+tier 2 confirms claims one at a time.
+
+**And the argument against this is written four hundred lines above the code that does it.**
+`tasks.rs:598-600` chose position-indexing for `Plan.source` precisely because *"a tar may legally
+hold two members with the same stored name, and a path-keyed lookup breaks on that silently."* The
+size map is a path-keyed lookup that breaks on that silently. `normalize_archive_path` widens it
+further, since `./a.txt` and `a.txt` collapse to one key.
+
+The same collapse hides a **missed alarm** in the other direction: a build emitting the last
+duplicate's bytes twice matches the surviving size on both entries and commits. That needs a writer
+bug to reach, so it is latent rather than live — but it means this line cannot detect the one
+data-loss shape it is most exposed to.
+
+**The inbound route was checked, and it is closed.** Two *differently* named members both renamed to
+the same name would collide identically, so the question was whether anything refuses that. The UI
+does not: `commit_rename` (`ui/mod.rs:1471-1491`) validates only that the name is non-empty, holds no
+slash, and differs from the original. But the plan builder does, at `tasks.rs:739-746`:
+
+```rust
+let taken = staged
+    .iter()
+    .enumerate()
+    .any(|(i, s)| i != index && s.as_deref() == Some(&*to_n))
+    || pending.iter().any(|a| a.out_path == to_n);
+if taken {
+    return Err(Conflict::NameTaken(to_n));
+}
+```
+
+It compares normalised forms on both sides, so `./a.txt` colliding with `a.txt` is caught too.
+**`PXX-T2-016` is therefore reachable only from an archive that already stores the duplicate** — the
+tar case `Plan.source`'s own comment names — and no sequence of renames can create one.
+
+### `PXX-T2-018`: the same root cause at two more sites, and one of them mutates the wrong member
+
+Checking that route turned up the rest of the family. The root cause of `PXX-T2-016` is not a map: it
+is **a path used as a member's identity in the write path**, and `tasks.rs:695` is where that starts.
+
+```rust
+let mut staged: Vec<Option<String>> = source.iter().map(|e| Some(e.path.clone())).collect();
+```
+
+`Entry.path` is the **normalised** name — `raw_path` holds what was stored — so two members whose
+stored names normalise alike give **two slots holding one string**. Everything downstream that looks a
+member up by that string finds the first one.
+
+**Site 1 — `tasks.rs:736`, and this one mutates.**
+
+```rust
+let Some(index) = staged.iter().position(|s| s.as_deref() == Some(&*from_n)) else {
+```
+
+`position` returns the first match. A rename staged against the **second** of two identically-named
+members is applied to the **first**. The user selected one row and a different row changed. It is
+visible in the staged table before Apply, which is what keeps this out of `freeze-blocking` — but it
+is a mutation landing on a member the user did not choose.
+
+It also refines the escape hatch described above rather than removing it: whichever twin moves, the
+two names then differ, the collision is gone, and Apply commits. **The way out works and may take the
+other member with it.**
+
+**Site 2 — `ui/table.rs:224`, where the same identity leak is visible on screen.**
+
+```rust
+if app.rename_target.as_deref() == Some(row.path.as_str()) {
+```
+
+`rename_target` is a `String` (`ui/mod.rs:364`), so it cannot distinguish two rows sharing a path.
+Pressing `F2` on either opens the editor on **both** — two text fields for one rename — and
+`commit_rename` then stages exactly one `Task::Rename`, which site 1 resolves to the first slot.
+
+So: one root cause, three sites, in ascending order of how quietly each fails — the table shows two
+editors (visible), the plan renames the wrong member (visible before Apply), and the size map collapses
+(a verification failure blaming the rebuild for bytes it wrote correctly). **`Plan.source` is the only
+structure in this file that got identity right, and its comment says why in the words the other three
+needed.**
+
+### `PXX-T2-017`: the fixture that exists because of this shape, tested on every path but the broken one
+
+`tests/read_path.rs:139` is `a_dot_slash_rooted_tar_lists_and_extracts_like_any_other`, and the name
+is the finding. It asserts the root does not become a row, that four members list at their true
+sizes, and that all four extract. **It covers listing and extraction and stops there.** `rooted.tar`
+was committed *because* this archive shape had gone unnoticed for twenty-two rounds — and the write
+path, where it is still broken, never got a gate.
+
+Class 9 again, and this time across a test file rather than across a function: the lesson was
+learned for reads and not carried one door over to writes. `P15.md:75` — *"A sweep is not a habit."*
+
+### The findings
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-T2-015` | `tasks.rs:1739-1746` | the rebuild pairs raw-stream position against a root-filtered plan, so a `./`-rooted archive is rebuilt with its first member turned into a directory, every payload under its neighbour's name, and the last member dropped — caught only when the shifted sizes happen to differ | **freeze-blocking** | confirmed, unfixed; fix sketched, owes tier 3 |
+| `PXX-T2-016` | `tasks.rs:1096`, `:1166` | `Expected.sizes` is path-keyed and collapses duplicate normalised names, in the file whose own comment rejects path-keyed lookups for that exact reason | fix-in-v2.5 | confirmed, unfixed |
+| `PXX-T2-017` | `tests/read_path.rs:139` | the `./`-rooted fixture is asserted through listing and extraction and never through Apply, the one path that is broken | test-gap | confirmed, unfixed |
+| `PXX-T2-018` | `tasks.rs:695`, `:736`; `ui/table.rs:224` | a normalised path is used as member identity, so a rename staged against the second of two identically-named members is applied to the first, and `F2` opens an editor on both rows at once | fix-in-v2.5 | confirmed, unfixed |
+| `PXX-T3-010` | — | **reclassified.** Not a `verify_against` defect and not `fix-in-v2.5`; superseded by `PXX-T2-015` | — | see above |
+
+**Register 155 → 159.** Suite unchanged at 397 — nothing is fixed yet, and saying so is the point.
+
+The register moved from 146 to 155 in the section above and to 159 here, so both lines are
+checkable against the tables that produced them rather than against each other.
+
+Confidence, stated separately from severity because they are different things. The **mechanism** is
+`certain`: five sites read directly, and the trace independently reproduces the exact error string
+and both byte counts the record captured months of rounds ago from a real run. The **silent commit**
+— that equal shifted sizes let a corrupted archive through — is `probable`: reasoned from the same
+lines, not executed, because the build lane was held by the tier-3 review while this was written. The
+lane is free as of that review's report, and the experiment that settles it is one fixture — a
+`./`-rooted tar of four equal-length members, Applied — which is the same artefact as the fix's
+discriminating gate, so it is run with the fix rather than ahead of it.
+
+For `PXX-T2-016` and `PXX-T2-018` the mechanism is `certain` at every site quoted, and the
+**reachability is `probable` for one shared reason worth stating once**: all three sites need an
+archive that already stores two members whose normalised names are equal. Tar permits it and
+`Plan.source`'s comment says so; INDIUM cannot create one, since `Conflict::NameTaken` refuses the
+rename that would. So the family is real, bounded, and reachable only from the outside — which is
+also why twenty-three rounds of INDIUM-written fixtures never met it.
+
+### What this says about the tier
+
+`PXX-T3-010` cleared tier 0. Its quote was real, its line range was right, its error string was
+copied from a genuine run, and **its diagnosis was still wrong in the direction that matters** — it
+named the messenger. It sat in the register as `fix-in-v2.5` because a false alarm is an annoyance,
+and the same six words describe a defect that overwrites archives.
+
+Tier 2's rule is that a confirmer gets the `file` and `line_range` and **not the reasoning**. This
+round has now watched that rule pay twice: once on `PXX-2-002`, where two blind reads of six lines
+found two different defects that turned out to be two halves of one fix, and once here, where a
+confirmer sent to the verifier looked at what fills its inputs and found that the wrong list was
+being walked. **Neither was findable from the finding.** A confirmer handed the reasoning would have
+checked `verify_against`'s arithmetic, found it correct, and filed REFUTED — which would have closed
+a freeze-blocking corruption bug as a non-issue.
