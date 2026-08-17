@@ -4158,3 +4158,159 @@ Two of the four remain open and both are the maker's business more than a clerk'
 `freeze-blocking` fix at `25be01d` whose owed tier-3 review has still never been run, where **the fix
 is a review**; and `PXX-C12-003`, tier 2 having silently repaired a citation in a round whose own
 tier 0 exists to distinguish a repaired citation from an unnoticed one.
+
+## Phase 3 — CORE draft 9, and everything now waiting on the maker's hand
+
+Two things. A tenth CORE draft that `9175a28` made necessary, and a consolidation of every decision
+this round has reached and may not make — because they are scattered across four thousand lines and
+the version bump is waiting behind several of them.
+
+### Draft 9 — §3's `sevenz` row and §2's dependency row, which `9175a28` made understate the module
+
+Written out in full per rule 3, both cells, current text then proposed. **Not applied.**
+
+`9175a28` routes every read of an encrypted 7z member through `sevenz` — extraction, Preview,
+`indium cat`, CRC32, and the password check itself — because libarchive cannot decrypt 7z AES
+content at **any** codec, and its refusal is byte-identical for the right password and a wrong one.
+Two CORE cells describe that module in terms of *writing*.
+
+**`CORE.md:103` — §3's module table, the `sevenz` row. Current:**
+
+> | `sevenz` | The 7z half, over `sevenz-rust2`: AES-256 writing, which libarchive cannot do, and
+> the detail the generic reader does not expose — solid blocks, the per-entry method, and headers
+> that are themselves encrypted. It sits beside `arch` rather than inside it because `arch`'s own
+> first sentence is hand-written FFI over the system libarchive, and a crate-backed backend does not
+> belong inside that sentence. |
+
+**Proposed:**
+
+> | `sevenz` | The 7z half, over `sevenz-rust2`: AES-256 in **both directions** — writing, which
+> libarchive cannot do, and reading, which it cannot do either — and the detail the generic reader
+> does not expose: solid blocks, the per-entry method, and headers that are themselves encrypted.
+> **Every read of an encrypted 7z member routes here, the password check included**, because
+> libarchive refuses 7z AES content at any codec and refuses it identically for the right password
+> and a wrong one, so asking it is not a check. It sits beside `arch` rather than inside it because
+> `arch`'s own first sentence is hand-written FFI over the system libarchive, and a crate-backed
+> backend does not belong inside that sentence. |
+
+**`CORE.md:47` — §2's dependency table, the `sevenz-rust2` row. Current:**
+
+> | `sevenz-rust2` | P4 | Writes 7z with AES-256, which libarchive cannot do; also the source of
+> 7z-specific detail (solid blocks) the generic reader does not expose. |
+
+**Proposed:**
+
+> | `sevenz-rust2` | P4 | Reads and writes 7z AES-256, neither of which libarchive can do; also the
+> source of 7z-specific detail (solid blocks) the generic reader does not expose. |
+
+**Why this is a draft and not a correction of the record.** The tier-3 reviewer of `da6c821`
+concluded CORE needed no change, and that judgement stands — it was answering whether §5's promise
+to *read everything libarchive reads* survives the routing, and it does, which its own F9 proves on
+AES+COPY with `bsdtar`. **This is a different question.** §3's row is not about coverage; it is
+about which module owns what, and it now names one direction of a thing the module does in two.
+Nothing here contradicts the review.
+
+Class 5, and in the inverse of its usual direction: not CORE describing behaviour the code lacks,
+but CORE understating behaviour the code has — in a row about who owns decryption, which is the
+last place an omission should sit.
+
+### Everything waiting on the maker, in one place
+
+Not a to-do list. Every row is something this round reached, wrote down, and stopped at because a
+recorded rule puts it with him.
+
+#### 1. Ten CORE drafts, written out in full and not applied
+
+| draft | §  | closes / covers | at |
+|---|---|---|---|
+| 1 | §2 | `PXX-10-006` — the typeface, **freeze-blocking** | `:1335` |
+| 2 | §3 | `PXX-1-006` — threading | `:1358` |
+| 3b | §3 | the `arch` row, now applicable — draft 3's condition was met at `:1972` | `:1987` |
+| 3c | Deviations | replaces draft 3a, narrower | `:1989` |
+| 4 | §3 | `PXX-3-002`, `PXX-3-003` — the `tasks` row | `:1414` |
+| 5 | §3 | the `cli` row, exit codes | `:1429` |
+| 6 | Deviations | the transcribed C constants | `:1441` |
+| 7 | §7 | the beta clause, **annotated with the verdict deliberately withheld** | `:2025` |
+| 8 | §7 | the road table's three new rows | `:2066` |
+| 9 | §3, §2 | the `sevenz` rows, above | this section |
+
+Draft 8 carries one clause to add when it lands, recorded at the time: its third row's *content*
+claims the hardening shipped, and if any item it names is still open when v2.5 is cut that clause
+must come out rather than ship. **A road table describing hardening that did not land is class 5
+written into CORE on purpose** — and CORE is the one document where the hand that notices cannot fix
+it.
+
+#### 2. Ten findings that are his by category, not by difficulty
+
+Rule 7 — *some decisions are the maker's by category* — and rule 8, *verdicts a test cannot render
+belong to the maker's eye*.
+
+| finding | the decision |
+|---|---|
+| `PXX-10-006` | apply draft 1 (freeze-blocking, and the only freeze-blocker of the ten) |
+| `PXX-1-006` | apply draft 2 |
+| `PXX-3-002`, `PXX-3-003` | apply draft 4 |
+| `PXX-5-001` | a `-sys` crate for the termios constants — rejected by convention — or a documented Deviation |
+| `PXX-6-010` | which side of the Password/Measure modal asymmetry is the anomaly; the round deliberately drafted nothing |
+| `PXX-7-004` | whether to pursue crate-root `#![forbid(unsafe_code)]`, which is structurally impossible today. **A policy call, not a bug** |
+| `PXX-T3-002`, `PXX-T3-009` | whether the two read paths should agree about symlinked destinations, and which wins. A §3 mechanism question |
+| `PXX-T3-008` | the §4 status text for the Failed arm — should it disclose partial destination contents the way Cancelled does |
+
+Plus two reclassifications that are his under rule 7 (`PXX-7-004`, `PXX-4-002`), and the §7 beta
+lifting itself: **the mechanical half is met** — the walk against a released build ran and returned
+139 approvals — and *"real hands"* is left undefined on purpose, so lifting it is his sentence to
+write.
+
+#### 3. Two verdicts no agent may claim
+
+The **25-row re-walk against the v2.3 build**, and **round 13 at 100 / 125 / 150 %**. Rule 8 quotes
+`P21.md:550` for why: *"a test cannot tell anyone that text got sharper."* The mechanical capture is
+available on this machine — `spectacle -a` is client-area, `ydotool --absolute` is a no-op here —
+but the judgement is not, and the four screenshots are recorded at `P22.md:318` as his to retake.
+`screenshot-about.png` is necessarily last of the four, because it shows the version and the date.
+
+#### 4. The one decision that actually gates v2.5
+
+A clerk built the open-findings ledger the bump was waiting on. At the 146-finding boundary:
+**24 `OPEN-CODE`** and 10 `OPEN-MAKERS-CALL`. Since then this round closed six more — `PXX-T3-011`,
+`-012`, `-013`, `-018`, `PXX-T2-015`, `PXX-T2-017` — and opened four of its own, of which two are
+now closed.
+
+Most of the 24 carry severity `fix-in-v2.5`, and that severity is a promise. **So the question is
+not which of them to fix; it is whether v2.5 ships when they are fixed, or ships with the remainder
+reclassified and recorded in CORE's Deviations.** Both are defensible. The second is explicitly
+blessed by this round's own escape valve — *"for a repo about to freeze, 'this is a known
+limitation, recorded in CORE Deviations' is frequently the correct engineering answer"* — and the
+first is what the label currently says.
+
+What is **not** defensible is cutting v2.5 while the label still reads `fix-in-v2.5` on findings
+that were not fixed. That is class 5 committed on purpose, and it is the one thing the bump must not
+do quietly. **This is a scope decision, it is the maker's, and it is the last thing standing between
+this round and the tag.**
+
+### And one item that is not his
+
+`PXX-C12-002`: `PXX-C9-011` is `freeze-blocking`, marked fixed at `25be01d`, and its own row still
+reads *"the fix owes tier 3."* It does. Both its siblings' reviews found something — `REPLACE` once,
+`AMEND` once — and this round has since watched a third fix pass 332 tests while destroying a file.
+**That review is owed by this round and will be run here, not raised with him.** It is listed only so
+the count above is honest about what is still moving.
+
+### The findings
+
+| id | severity | now |
+|---|---|---|
+| `PXX-C12-005` | document-only | §3's `sevenz` row and §2's dependency row name one direction of a two-direction module after `9175a28` — **draft 9 written, not applied** |
+
+**One new ID. Register 163 → 164.** Suite unchanged at **405**.
+
+**The prefix is a stretch and is used deliberately rather than quietly.** `PXX-C12-001` through
+`-004` are about *this* document's record; this one is about CORE's. Class 12 is *the record
+correcting its own record*, and by the shape of the defect this is class 5 — CORE and the code
+disagreeing — arriving from the inverted side. It takes `C12` because it was found the same way the
+other four were, by reading the record against the tree after a commit landed, and because minting a
+`C5` prefix for a single finding would make the register harder to count for no gain. Said out loud
+because an ID that quietly means something other than its prefix is the beginning of exactly the
+drift `PXX-C12-004` is about.
+
+No CORE file was edited to produce this section. `CORE.md`'s newest commit is still `62e5ec5`.
