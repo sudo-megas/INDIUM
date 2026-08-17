@@ -2928,3 +2928,97 @@ Both the reviewer and both earlier confirmers disclosed, unprompted, that `MEMOR
 injected into their context before their first action. **Three for three.** The reviewer added the
 detail the earlier two did not: it stated which entries it had been given and why none bore on the
 files it was judging.
+
+## Phase 3 — the lock that could refuse forever, and a lint that caught its own author
+
+### `PXX-C9-014`: an archive that can never be rebuilt again
+
+`Lock::take` opened the lock file with `.write(true)`. The lock never receives a byte — it
+exists only to have an inode that nothing renames over — and `flock` is granted on a read-only
+handle, which a blind confirmer measured and this round measured again. **So write access is not
+what makes the guard work**, and demanding it cost the one case where it is absent:
+
+> `could not open the lock file: Permission denied (os error 13)`
+
+That is `Lock::take` refusing, which is **every Apply on that archive refusing**, permanently,
+with a message naming nothing the user could act on. Reproduced here before fixing, which closes
+the second of the two `NEEDS-RUN` items a confirmer left open.
+
+**No attacker is required to arrive there.** `CORE.md:657` permits running INDIUM as root, and a
+root-run Apply leaves a root-owned lock in the user's own lock directory. After that the user's
+Applies on that archive are dead, and nothing tells them why or where.
+
+The fix asks for the write bit and then gives it up, rather than skipping it: `create` requires
+it — `std` refuses `read(true).create(true)` outright, which the confirmer warned about before I
+tried it — so the fallback fires on `PermissionDenied` alone and the ordinary path is untouched.
+Both refusal messages now name the path.
+
+`PXX-C9-015`'s class-1 half went with it. The doc comment credited the session's logout wipe with
+clearing crash residue; `lock_path_for` falls back to the **cache** directory when there is no
+runtime directory, and nothing sweeps that one. The accumulation itself stays recorded rather
+than fixed, and the reason is worth keeping: sweeping by age would have to decide a lock is
+unheld, and **the only way to ask is to take it** — after which unlinking it is the same
+unlinked-inode race this whole structure exists to avoid, in a longer sentence.
+
+### `PXX-C9-007`/`008`/`009`: four names, and the reason it is a lint instead
+
+`/tmp` is world-writable, so a name a stranger can predict is a name a stranger can plant. One
+site wrote a completely fixed name — no pid, no clearing — straight into the shared directory,
+and `fs::write` follows a symlink and truncates what it finds. Four sites are fixed.
+
+**But four edits are what class 9 *is*.** This round has watched a sweep read twenty-six write
+sites and walk past a fifth defect a hundred lines from its own fix. `P15.md:75` has the
+sentence: *"A sweep is not a habit."* A rule a test enforces is a habit; a rule four files
+happen to follow is a coincidence waiting for the next hand. So the class is closed by
+`every_name_this_tree_makes_in_the_shared_temp_dir_is_pid_named_and_pre_cleared`, which checks
+**11 sites** under `src/` for both properties, with a floor so a scan that finds nothing cannot
+read as a scan that found nothing wrong.
+
+It taught three things on its way in, and all three are kept.
+
+**It found a site the sweep had missed.** `arch.rs`'s `Scratch::new` — which turned out to be
+the *exemplary* one, tag + pid + counter + pre-clean, and only looked wrong because `rustfmt`
+had spread its `format!` over six lines and the scanner read a two-line window. The scanner now
+reads to the end of the statement. **The sweep's coverage was incomplete in both directions**:
+it missed a site, and the site it missed was the one it should have been quoting as the standard.
+
+**Its first draft was wrong in the way this round is named for.** It demanded a `remove_file`
+beside the `remove_dir_all`, on the argument that `remove_dir_all` will not follow a symlink and
+would leave a planted one standing. Measured:
+
+| planted at the scratch name | `remove_dir_all` | name after | target after |
+|---|---|---|---|
+| symlink → directory | `Ok(())` | **gone** | contents intact |
+| symlink → regular file | `Ok(())` | **gone** | contents intact |
+| squatting regular file | `Err(NotADirectory)` | present | intact; `create_dir_all` then fails `AlreadyExists` |
+
+**One call covers every plant shape**, and the third row fails loudly rather than writing
+through. The draft would have welded *"a premise that did not survive contact"* into a gate that
+every future site was obliged to obey — the worst place in a repository to put a false premise,
+because a lint makes it compulsory. It was caught by running a probe. **It would not have been
+caught by reading the patch**, and I had already written and reviewed the patch.
+
+**And it reported itself, three times.** As a bare token, then quoted, then escaped — because it
+lives inside the tree it scans, and each attempt to exclude its own text put the text back in.
+The token is now assembled at run time so the scanner's source does not contain it. Excluding
+the file would have been easier and would have blinded the scan to any real site that ever
+appeared in it.
+
+A false positive on the new lock test was fixed **in the test rather than in the tool**: that
+path is never created and never wanted to be, so it no longer asks for a temp name at all. Same
+rule as the citation lint two sections ago — a false positive is how a lint like this gets
+switched off.
+
+### The findings
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-C9-017` | `theme.rs`, first draft | the lint's own justification did not support the rule it enforced; `remove_dir_all` handles every plant shape alone | *(pre-commit)* | **caught and corrected before landing** |
+| `PXX-C9-018` | `arch.rs` `Scratch::new` | a `temp_dir()` site the class-9 sweep never enumerated — correct as written, and the standard the other four should have been measured against | no-action | recorded |
+
+**The register stands at 146.** Suite **393 → 395**.
+
+Two of the round's own instruments have now produced findings against the hand that wrote them:
+the doc-citation lint flagged its own doc comment, and the temp-name lint flagged its own
+justification and then its own source. **That is the instrument working.** A gate that only ever
+agrees with its author is the class-4 defect wearing a lab coat.
