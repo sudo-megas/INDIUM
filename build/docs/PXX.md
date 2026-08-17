@@ -2309,3 +2309,162 @@ and 002 is designed and recorded here so the design is on the record before the 
   One root, two call sites; the second is noted here so it is not found third.
 
 Tier 3 applies to that diff when it exists, exactly as it did to `401c5d5`.
+
+## Phase 3 — tier 3 returned REPLACE, and the round's most expensive lesson is now paid for
+
+The plan that commissioned this round wrote tier 3 for one stated reason: **"The fix is the riskiest
+artifact in this round, not the finding — a correct diagnosis with a wrong patch is the failure mode a
+frozen repo cannot survive."** That was written before any agent ran. It has now been earned.
+
+`401c5d5` closed `PXX-2-001`. The tier-3 review of it returned **REPLACE**, and it was right.
+
+### The verdict, and what it turned on
+
+The diagnosis was right and the guard's core function works — the reviewer proved that independently,
+end to end, on a case no committed test covers: a header-encrypted 7z naming `d/inner.txt` with
+`dest/d` planted as a symlink is refused, and the same archive into a clean destination gives `Ok(1)`.
+
+But the patch shipped **a freeze-blocking functional regression on the exact branch it touched**, and
+this is the part that matters:
+
+> `create_dir_under` refuses `Component::CurDir`, so a header-encrypted 7z whose stored names carry a
+> leading `./` cannot be extracted at all, and the user is told the archive tried to escape the
+> destination. **Both new tests pass with the defect present.**
+
+Every link of the proof chain was measured, not argued:
+
+- `path_escapes` **permits** `"./"` — it neither starts with `/` nor splits to any `".."`.
+- Rust keeps a *leading* `.` as a component and folds an interior one away:
+  `"./alpha.txt"` → `[CurDir, Normal("alpha.txt")]`, `parent = Some(".")`; `"a/./b"` →
+  `[Normal("a"), Normal("b")]`.
+- `tasks::out_path_for` is explicit that *"An unrenamed member keeps its **stored** name byte for
+  byte"*.
+
+So the live route is INDIUM breaking an archive **it wrote itself**: encrypt a `./`-named 7z, and the
+headers are now encrypted, and the name is kept byte for byte, and extraction of the result gives
+`Err(UnsafePath("."))` — rendered to the reader as *"Refused: an entry would be written outside the
+destination (.)."* A false accusation about an archive that escapes nothing.
+
+**And the round had already paid for `./` once.** `tests/read_path.rs:139` is
+`a_dot_slash_rooted_tar_lists_and_extracts_like_any_other`, whose own doc records that *"until this
+round INDIUM could neither list nor extract any archive shaped that way"*, and `rooted.tar` exists
+precisely because no fixture had been rooted that way for twenty-two rounds. **That test passes with
+this defect present**, because `rooted.tar` is a tar and goes through libarchive; the new guard is in
+the `sevenz` branch, which no `./` test could reach. A class already found, already fixed, already
+regression-tested — re-broken one branch over, behind a green test that names the exact behaviour.
+That is class 9 for the third time in this round, and the first time it was the round's own fix that
+committed it.
+
+### The sabotage, run both ways, before the replacement was trusted
+
+| what was tried | `a_dot_component_…` | `a_dot_slash_name_…` | `re_extracting_over_a_tightened_…` | the two gates that shipped with `401c5d5` | the existing `rooted.tar` gate |
+|---|---|---|---|---|---|
+| `CurDir` refused (the rejected draft) | **FAILED** | **FAILED** `Err(UnsafePath("."))` | pass | **both pass** | **pass** |
+| mode carry-over removed | pass | pass | **FAILED** — `got 644` | both pass | pass |
+| the replacement | pass | pass | pass | both pass | pass |
+
+The middle row is the reproduction of the reviewer's own measurement — `0600` before, `0644` after —
+and the third column of the first row is what makes the point: **no single one of these tests is the
+gate.** Each new gate fails only for its own defect, and the two that shipped with the original fix
+fail for neither.
+
+### The ten findings tier 3 produced
+
+**Every `arch.rs` line number in this table is as-of `401c5d5`, the commit under review, and several
+have moved in `5b2c19f`.** Stating it beats a tier-0 pass that fails for the right reason on the wrong
+tree — a finding against a remembered line number is the class this round hunts, and a finding against
+a *superseded* one is the same error wearing a date.
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-T3-001` | `arch.rs:1010-1015` | `Component::CurDir` refused; a `./`-named entry unextractable and reported as an escape | **freeze-blocking** | **fixed, `5b2c19f`** |
+| `PXX-T3-002` | `arch.rs:1001-1004` | the comment claimed the libarchive path *"creates it the same way"*; measured, libarchive **refuses** a destination reached through the user's own symlink while this branch permits it | fix-in-v2.5 | comment corrected; the behavioural divergence is the maker's |
+| `PXX-T3-003` | `arch.rs:1141-1154` | unlink-then-`create_new` discarded an existing file's mode — `0600` widened to `0644` on re-extract | fix-in-v2.5 | **fixed, `5b2c19f`** |
+| `PXX-T3-004` | `arch.rs:1141-1154` | after a successful unlink, a failing `create_new` leaves neither the old file nor a new one, where the old `std::fs::write` failed at the open and the file survived | document-only | recorded |
+| `PXX-T3-005` | `arch.rs:1005` | `create_dir_all(root)` runs per entry, so an N-entry archive walks the destination prefix N times | no-action | recorded, deliberately not fixed |
+| `PXX-T3-006` | `arch.rs:1020-1023` | a genuine on-disk-link refusal returns `Other` (a generic error) while a benign name got `UnsafePath` (the security sentence) — the two were exactly inverted | document-only | half closed by `PXX-T3-001`; the variant question deferred |
+| `PXX-T3-007` | `arch.rs:1037-1040` | *"traversal is refused outright … and leaves no partial output behind"* — an on-disk-link refusal is raised **mid-loop**, so earlier entries are on the disk when it returns | document-only | recorded; a disk condition genuinely cannot be pre-flighted here |
+| `PXX-T3-008` | `ui/mod.rs:880-886` | the `Failed` arm says nothing about the destination, where `Cancelled` deliberately says *"what came out is still in the destination"* — so a mid-loop refusal shows "Refused" with files sitting unmentioned | fix-in-v2.5 | owner 1; §4 status text is the maker's |
+| `PXX-T3-009` | `arch.rs` libarchive branch | for a symlinked **intermediate** component libarchive silently *deletes the user's symlink* and puts a real directory there, where the sevenz branch refuses | fix-in-v2.5 | second face of `PXX-T3-002` |
+| `PXX-T3-010` | `tasks.rs` `verify_against` | **found in passing, pre-existing, and not this commit's:** `apply` on a `./`-rooted tar fails with `"alpha.txt was written at 20 bytes instead of 21"` — `rooted.tar` stores beta (20) first and alpha (21) second, so sizes are attributed to the wrong members | fix-in-v2.5 | untouched by any commit this round |
+
+`PXX-T3-010` deserves its own sentence, because it is the only one here that is nobody's regression: a
+`./`-rooted tar **cannot be rebuilt** today, and the failure names a byte count for the wrong member.
+It was found only because the reviewer went looking for a reachability route and hit a wall that was
+already there. It owes tier 2 like any other finding.
+
+### What this section corrects about an earlier one, by addendum
+
+Rule 4: a P-document is append-only, and corrections go in addenda rather than rewrites. So the
+earlier heading *"`PXX-2-001` closed, and draft 3's condition met"* is not edited. It is corrected
+here:
+
+**`PXX-2-001`'s fix was `401c5d5`, and `401c5d5` did not survive tier 3.** The defect it closed stayed
+closed throughout — the reviewer verified that independently — but the artifact that closed it carried
+two new defects, one of them freeze-blocking. The finding is closed by `5b2c19f`, not by `401c5d5`.
+
+**And the process criticism is recorded rather than argued with.** The reviewer noted that
+`60d9f16`, titled *"PXX-2-001 recorded as closed"*, landed **before** the tier-3 review returned. That
+is a fair hit. The section it committed did say, verbatim, *"That review is commissioned and its
+outcome is not recorded here, because it has not returned"* — so the text was honest — but the commit
+**subject** announced a closure that had not cleared its own gate, and a subject line is what anyone
+reading `git log` sees. Tier 3 is not advisory; a finding whose fix is under review is not closed. The
+correct title would have said the fix had landed and was under review.
+
+### Draft 3c is unaffected, and one CORE draft is now owed a word
+
+Draft 3c bounded the guarantee as *real against the archive, not against a concurrent local process*.
+Tier 3 confirms that framing independently and narrows it usefully: *"Within one call on this branch
+the archive genuinely cannot exploit it — 7z carries no symlinks and this loop writes only regular
+files and directories."* The residual window is also **wider** than the code's own comment admits — it
+named the `symlink_metadata`→`create_dir` gap, but it extends to the open of `target`, which
+re-resolves the whole path. Draft 3c's wording survives; the code comment's does not, and correcting
+it is a `document-only` item for the same hand that writes the fix.
+
+---
+
+## Phase 3 — `PXX-C9-001` and `PXX-3-009`: the same six lines, and why that is DIVERGENT and not a duplicate
+
+The class-9 sweep filed `PXX-C9-001` at `tasks.rs:1518-1526`. **Agent 3 had already filed
+`PXX-3-009` at `tasks.rs:1521-1526`** — the same gate, in the same round, by a file owner who owned
+it. This is the exact collision the deduplication pass exists to catch, and flattening it into a
+duplicate would have been the wrong call. Both are recorded, and the relation is the finding.
+
+**What agent 3 filed**, verbatim from the register:
+
+> Between the temp unlink and the writer's open, a planted symlink redirects the build. Needs a second
+> principal writable in the archive's directory
+
+**That is a race**, and it was dispositioned **`document-only`** — one of the sixty-two, an accepted
+limitation, no diff owed. For a TOCTOU window needing an attacker to win a timing gap, that
+disposition is defensible and was defensibly reached.
+
+**What the sweep found at the same lines** is that for the case that matters there is **no race to
+win**. `Path::exists()` traverses, so a dangling symlink makes it answer `false`, the `&&`
+short-circuits, and **the unlink never runs at all.** Nothing has to be timed. And on a non-UTF-8
+archive name the entire block is skipped, because `is_our_temp` takes `&str`.
+
+So the two findings are not the same claim at different confidence. They are **two mechanisms at one
+site**, and the round's own rule for that is explicit: DIVERGENT is *"the outcome that must never be
+flattened into a pass."* Agent 3 was not wrong — the race is real, and it survives the fix as the
+residual, exactly as it does at `arch.rs`. It is simply not the whole of what is there, and the part
+it missed needs no luck.
+
+**The consequence is a disposition, not an argument.** A `document-only` verdict was reached on a
+characterisation that understated the site. Severity in this round is set by mechanism; when the
+mechanism is under-derived, the disposition inherits the error silently, and there is no gate that
+catches it — the quote checks out, the reasoning is sound, and the finding is simply about less than
+what is present. That is class 12 in a form the round had not yet seen: **not the record contradicting
+itself, but the record being correct and incomplete at once.**
+
+**What is *not* done here.** `PXX-3-009` is not reclassified, not rewritten, and not annotated in its
+own row. Editing another agent's severity is the shape this document exists to prevent, and under rule
+7 the disposition is the maker's. The two findings sit side by side with this section naming the
+relation, and the maker decides whether `PXX-3-009` keeps its `document-only` row.
+
+**Three sites, one pattern, and it is now three-for-three.** `arch.rs`'s 7z branch, `tasks.rs`'s Apply
+temp, and `store.rs`'s `.broken` copy-aside all reach a write through a name they did not fully
+choose. Two of the three gate their protection on `exists()`. The one that gets it right —
+`estimate.rs:562` — is unconditional, and got there for a reason that has nothing to do with security.
+
+**The register stands at 130.**
