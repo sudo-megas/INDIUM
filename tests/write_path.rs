@@ -615,6 +615,16 @@ fn an_aes256_7z_indium_wrote_needs_its_password_to_open() {
 
 /// A plain 7z INDIUM writes must carry its metadata back, and be readable by the other
 /// reader too — libarchive, a genuinely independent implementation.
+///
+/// **`PXX-T3-023`. For its whole life this compared one reader with itself.** The second list came
+/// from `arch::list_all`, and `arch::list_all` calls `list_7z` first for any 7z and only falls
+/// through to libarchive on `None` — so both sides were `sevenz`, and the assertion below could not
+/// fail on the only thing it claims to check. Class 4 in textbook form, and the claim it was
+/// protecting is the exact routing decision at the heart of `PXX-2-002` and `9175a28`.
+///
+/// It now walks `arch::Reader`, which is libarchive and nothing else. The two readers do agree —
+/// that was measured when the defect was found, and this is the gate that will notice if they ever
+/// stop.
 #[test]
 fn a_plain_7z_round_trips_through_both_readers() {
     let dir = TempDir::new("sevenz");
@@ -642,10 +652,25 @@ fn a_plain_7z_round_trips_through_both_readers() {
     }
 
     let ours = indium::sevenz::list_all(&path, None).expect("our own reader must read it");
-    let theirs = arch::list_all(&path, None).expect("libarchive must read it too");
+
+    // `Reader` and not `arch::list_all`: the latter routes any 7z to `sevenz` and would compare
+    // `ours` with itself, which is what this gate did until v2.5.
+    let mut theirs: Vec<String> = Vec::new();
+    {
+        let mut reader = arch::Reader::open(&path, None).expect("libarchive must open it too");
+        while let Some(entry) = reader.next_entry().expect("libarchive must walk it") {
+            theirs.push(entry.path.clone());
+            reader.skip_data();
+        }
+    }
+    assert!(
+        !theirs.is_empty(),
+        "libarchive returned no entries at all — the walk is the check, and an empty walk \
+         would pass the comparison below while measuring nothing"
+    );
 
     let mut a: Vec<&str> = ours.iter().map(|e| e.path.as_str()).collect();
-    let mut b: Vec<&str> = theirs.iter().map(|e| e.path.as_str()).collect();
+    let mut b: Vec<&str> = theirs.iter().map(|s| s.as_str()).collect();
     a.sort_unstable();
     b.sort_unstable();
     assert_eq!(
@@ -1719,5 +1744,81 @@ fn a_destination_that_cannot_be_written_fails_rather_than_counts() {
         e.to_string().to_lowercase().contains("create")
             || e.to_string().to_lowercase().contains("write"),
         "the sentence must name the writing as what failed, not something else: {e}"
+    );
+}
+
+/// **`PXX-T3-021`, the sentence half.** Apply on an encrypted 7z INDIUM wrote must not blame the
+/// password.
+///
+/// `sevenz.rs`'s writer ties `set_encrypt_header` to the same flag that turns AES on, so every
+/// archive the Encrypted preset produces has ciphertext headers. The rebuild streams its source
+/// through `arch::Reader` — libarchive — which cannot read one at all. **So Apply fails on the
+/// program's own archives, for every rename, removal and addition**, and it used to fail with
+/// `EncryptedHeaders`'s own sentence, *"A password is needed to list it"*, shown to someone who had
+/// supplied the right password and whose listing had just succeeded through the `sevenz` fallback.
+/// It sent people to re-type a password that was correct.
+///
+/// The capability gap is recorded unfixed — repairing it means a `sevenz`-backed rebuild path,
+/// which is a feature rather than a fix. This gate holds the sentence, in both directions: it must
+/// not ask for a password, and it must say what is actually wrong.
+#[test]
+fn apply_on_an_encrypted_7z_does_not_blame_the_password() {
+    let dir = TempDir::new("hdr-apply");
+    let path = dir.join("secret.7z");
+    let plan = Recipe {
+        path: path.clone(),
+        method: Method::Lzma2,
+        level: 6,
+        encrypt: true,
+    };
+    let secret = indium::secret::Secret::from_text("indium");
+
+    {
+        let mut writer = indium::sevenz::Writer::create(&path, &plan, Some(&secret))
+            .expect("could not open the 7z writer");
+        for (meta, data) in payload() {
+            match data {
+                Some(bytes) => {
+                    let mut cursor = Cursor::new(bytes);
+                    writer.put(&meta, Some(&mut cursor)).expect("could not put");
+                }
+                None => writer.put(&meta, None).expect("could not put"),
+            }
+        }
+        writer.finish().expect("could not finish the 7z");
+    }
+
+    // The premise, pinned: this password reads the archive perfectly well. Without this the gate
+    // below could pass on an archive that was simply broken.
+    let listed =
+        arch::list_all(&path, Some(&secret)).expect("the archive must list with this password");
+    assert!(
+        !listed.is_empty(),
+        "the fixture must list some members, or there is nothing for Apply to fail at"
+    );
+
+    let input = ApplyInput {
+        target: path.clone(),
+        recipe: plan,
+        tasks: Vec::new(),
+        adds: Vec::new(),
+        staged_against: Vec::new(),
+        source_password: Some(secret.clone()),
+        target_password: Some(secret.clone()),
+    };
+    let (result, _) = run_apply(&input, &no_cancel());
+    let message = result.expect_err(
+        "Apply cannot rebuild an encrypted-header 7z yet — if this starts succeeding, the \
+         capability landed and this gate should be replaced by one that checks the bytes",
+    );
+
+    assert!(
+        !message.contains("password is needed"),
+        "the refusal must not ask for a password the user already supplied and which the listing \
+         above proved correct: {message}"
+    );
+    assert!(
+        message.contains("cannot rebuild"),
+        "and it must name what is actually wrong, or the user is left guessing: {message}"
     );
 }

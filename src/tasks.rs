@@ -1706,6 +1706,37 @@ pub fn apply(
     }
 }
 
+/// Say what actually went wrong when the rebuild cannot read its own source.
+///
+/// **`PXX-T3-021`.** The rebuild streams the source through `arch::Reader`, which is libarchive,
+/// and libarchive cannot read an encrypted 7z header at all. `sevenz.rs`'s writer ties
+/// `set_encrypt_header` to the same flag that turns AES on, so **every encrypted 7z INDIUM writes
+/// has ciphertext headers** — and Apply therefore fails on the program's own archives, for every
+/// rename, removal and addition.
+///
+/// The message it failed with was `EncryptedHeaders`'s own sentence: *"A password is needed to list
+/// it."* Shown to a user who supplied the password, and whose listing succeeded a moment earlier
+/// through the `sevenz` fallback, that names the wrong cause and asks for an action already taken.
+/// It sent people to re-type a password that was right.
+///
+/// **The capability gap is recorded and not closed here.** Repairing it means a `sevenz`-backed
+/// rebuild path — both halves exist, `sevenz::Writer` and `sevenz::read_entry` — which is a feature
+/// rather than a fix and not a change a freeze round should carry. What is corrected is the
+/// sentence, because a refusal the user understands beats one that blames them.
+///
+/// Only when a password was actually supplied. Without one the original sentence is exactly right:
+/// the headers are encrypted and a password *is* needed.
+fn rebuild_read_error(e: crate::arch::ArchiveError, had_password: bool) -> String {
+    match e {
+        crate::arch::ArchiveError::EncryptedHeaders if had_password => {
+            "This archive's file names are encrypted, and INDIUM cannot rebuild one of those yet — \
+             your password is not the problem. Extract what you need and create a new archive."
+                .to_string()
+        }
+        other => other.to_string(),
+    }
+}
+
 /// Build the replacement and prove it. `Ok(None)` means cancelled.
 fn build_and_verify(
     input: &ApplyInput,
@@ -1731,12 +1762,16 @@ fn build_and_verify(
 
         // The kept members, streamed one pass over the source.
         if !source.is_empty() {
+            let had_password = input.source_password.is_some();
             let mut reader =
                 crate::arch::Reader::open(&input.target, input.source_password.as_ref())
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| rebuild_read_error(e, had_password))?;
             let mut index = 0usize;
 
-            while let Some(entry) = reader.next_entry().map_err(|e| e.to_string())? {
+            while let Some(entry) = reader
+                .next_entry()
+                .map_err(|e| rebuild_read_error(e, had_password))?
+            {
                 if cancel.load(Ordering::Relaxed) {
                     sink.abandon();
                     return Ok(None);
