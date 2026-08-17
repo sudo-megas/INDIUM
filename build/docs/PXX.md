@@ -1715,3 +1715,43 @@ Rule 4 makes this document append-only, and a count is corrected by a later coun
 includes, not by an edit that makes the earlier one appear never to have been wrong. `PXX-9-008` is
 not among the 95: it is a numbering gap, and the only place that string appears is the clerk's own
 sentence saying so.
+
+### The verification tier verified: tier 0 over its own eleven
+
+A tier that demands a quote check of every fleet finding and exempts its own is not a gate, it is a
+privilege. So the eleven `PXX-T2-` findings were put through the same mechanical pass agent 11 ran on
+the ninety-six: each cited file re-opened, each quote confirmed present at the cited range, each line
+number checked for drift.
+
+| ID | Cited | Quote present at range? | Note |
+| --- | --- | --- | --- |
+| `PXX-T2-001` | `theme.rs:156` → `CORE.md:368` | **yes, and worse than filed** | `CORE.md:368` is the palette table's `\| --- \| --- \|` separator row — it contains no prose at all. The quoted sentence *"It is not an accent and never decorates"* is the `Warning` row at **`:374`**, six rows down. The citation does not merely point at the wrong line; it points at a line that could never have held a sentence |
+| `PXX-T2-002` | `README.md:87` | yes | Under blind tier 2 as this was written |
+| `PXX-T2-003` | `extract.rs:109` | yes | `let path = app.extract_path.trim().to_string();` — and `expand_tilde` is **defined in this same file** at `:201` and applied on the Go path at `:176`. The pin site is the one place in the file that handles a typed path without it |
+| `PXX-T2-004` | `extract.rs:115-126` | yes | `:115` opens `if !app.settings.bookmarks.iter().any(…)` and the status at `:125` sits **inside** it, so the already-pinned case falls out of the block having set nothing |
+| `PXX-T2-005` | `arch.rs:573` | yes | `archive_read_add_passphrase(a, c.as_ptr());` with no comparison against `ARCHIVE_OK` — eleven lines above `archive_read_open_filename`, whose return **is** checked at `:584` |
+| `PXX-T2-006` | `arch.rs:756-771` | **yes, and worse than filed** | The file *states the rule it breaks*: `arch.rs:850` reads *"The archive's own root is not one of its members. See `is_archive_root`."* Both filtering sites — `:811` and `:851` — are in the libarchive path. The 7z branch is the only listing route that admits the root |
+| `PXX-T2-007` | `tasks.rs:1654` | yes | And it is `PXX-3-001`'s immediate neighbour, not a duplicate of it: the comment is at `:1654`, and the swallowed open (`if let Ok(handle)`) and swallowed sync (`let _ = handle.sync_all()`) that `PXX-3-001` files are at `:1658-1659`. One site, two findings — a wrong reason above two dropped errors |
+| `PXX-T2-008` | `lib.rs:41-43` | yes | `include_str!("lib.rs")` / `.lines()` / `.filter_map(\|l\| l.trim().strip_prefix("pub mod "))`, exactly as cited |
+| `PXX-T2-009` | `ui/mod.rs:2141-2144` | yes | `self.cancel.store` appears at exactly `:620` and `:1862` and nowhere else; the three `Arc::clone(&self.cancel)` sites are `:740`, `:1893`, `:2155` |
+| `PXX-T2-010` | `ui/mod.rs:1023-1027` vs `:736` | yes | `open_archive` sets the status at `:736` with no guard of any kind |
+| `PXX-T2-011` | `copy.rs:988` | yes | In the vendored crate, verbatim |
+
+**Eleven of eleven clear tier 0.** Two came out of the check *stronger* than they were filed, which
+is the argument for running it: `PXX-T2-001`'s citation turns out to name a table separator, and
+`PXX-T2-006` turns out to break a rule its own file writes down eighty lines later. Neither
+strengthening was available to the pass that filed them, because both were found by re-opening the
+file rather than by re-reading the finding.
+
+**Eight of the eleven are `document-only` and therefore complete** — tier 1, by the plan's own rule
+that a finding changing no code is settled by tier 0. The three that are `fix-in-v2.5` —
+`PXX-T2-002`, `-009`, `-010` — went out to blind confirmers of their own, because the tier assigns by
+**severity, not by origin**, and a finding produced by the verification pass owes exactly what a
+finding produced by the fleet owes.
+
+**And the recursion stops there, stated rather than left to be discovered.** A confirmation may itself
+produce a finding, which would owe a confirmation, without end. The rule this round adopts: **a
+finding produced by a tier-2 confirmation is filed and tier-0'd, and enters tier 2 only if it is
+`fix-in-v2.5` or above; a finding produced by *that* pass is filed, tier-0'd, and carried to v2.6 as
+an open item rather than confirmed here.** The round is not permitted to chase its own tail into the
+freeze. What it *is* required to do is say where it stopped, which is this sentence.
