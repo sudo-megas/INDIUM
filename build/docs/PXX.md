@@ -1315,3 +1315,162 @@ re-verified here against the source before being written down.
    `fix-in-v2.5` and therefore owes a tier 2 of its own, from someone who did not file it.
 
 Nothing in this tier was pushed. No file in `src/` was modified. The working tree is clean.
+
+---
+
+## Phase 3 — the CORE drafts, written out and not applied
+
+**`CORE.md` is edited by the maker's hand only** (`CORE.md:3-5`, `:630`): *"Items enter and leave
+only by his hand."* Everything below is a draft awaiting that hand. **None of it has been applied,
+and no commit in this round touches `CORE.md`.**
+
+They are written out here because of rule 3 — *"an ordered CORE edit is written out in full,
+committed alone"*, since *"a rule being changed deserves its successor written down rather than
+described"* — and because a draft that exists only in a scratch register is a draft that will have
+to be reconstructed from a transcript, which this round has already paid for once.
+
+Suggested commit form throughout, per the P7 convention:
+`CORE: §<n> <what changed> (ordered by PXX)`. **Each is committed alone.**
+
+### Draft 1 — §2, the typeface. Closes `PXX-10-006` (freeze-blocking)
+
+Replaces `CORE.md:87-92`. The current text names Fira Mono Nerd Font Mono and rests its no-ligature
+argument on it, while `CORE.md:392` and `assets/fonts/` both say CaskaydiaMono. **The paragraph
+cannot be repaired by swapping the name**: a direct GSUB parse of both shipped faces returns `calt`
+and `rlig` present, `liga` absent — so *"carries no ligatures at all"* would be false of the face
+that actually ships.
+
+> Bundled assets, not dependencies: CaskaydiaMono Nerd Font Mono, regular and bold, embedded in
+> the binary, with the SIL Open Font Licence 1.1 alongside the GPL in `LICENSES/`. A filename
+> holding `->` must render as the two characters the archive stores, and the **`Mono` cut** is what
+> makes that true — Cascadia's programming ligatures live in the Code cut, not in this one. The
+> guarantee is deliberately not stated as *"the face carries no ligatures"*: both shipped faces do
+> carry `calt` and `rlig` in GSUB, and egui shapes through harfrust with `calt` on by default, so
+> the claim that matters is the narrower one — this cut defines no substitution for the sequences a
+> filename can hold, and `a_filename_is_the_characters_it_holds` holds it across twenty-nine of them
+> in both weights rather than leaving it asserted in a comment. `Mono` is also the single-cell icon
+> cut, so a glyph in a name never widens a table column.
+
+**The adjacent trap: `CORE.md:494` also says "Fira Mono" and must NOT be touched.** It is the road
+table's P12 row — a record of what P12 did, and correct as history. `README.md:243` is the third
+site and is known-deferred to v2.5.
+
+### Draft 2 — §3, threading. Closes `PXX-1-006`
+
+Replaces `CORE.md:114-115`, which reads *"the UI thread and one worker."* Agent 1 returned verdict
+(ii), *the document must be reworded*: five independent reachable concurrencies falsify "one
+worker", two of them defended in code comments. The invariant the code genuinely enforces is **at
+most one task**, and that one holds everywhere.
+
+> Threading: the UI thread, and at most one **task** at a time. A task is an extraction or a rebuild
+> — the thing that carries the progress row, the proportion bar and Cancel — and it runs on a worker
+> thread that reports over a channel and honours a cancellation flag; nothing may start a second task
+> while one runs. Around the task, short-lived readers come and go on threads of their own: the
+> listing streams entries while the table fills, a Preview reads one member's head, the estimator
+> measures — and the estimator alone is preempted rather than waited for when a task starts, because
+> advisory work does not get to hold up real work. Every blocking wait on another program — the
+> portal's picker, the clipboard's owner, the file manager being handed a folder, a child window
+> being reaped — happens on a thread of its own, never the UI's.
+
+Four in-code comments quote the old clause (`ui/mod.rs:1638-1641`, `:2107-2108`; `estimate.rs:55-56`,
+`:662-663`). All four use it to justify *sequencing the eight estimator candidates*, which the reword
+preserves — **none is falsified by this edit**, and all four may stand.
+
+### Draft 3 — §3's `arch` row, and why it is *conditional*
+
+`CORE.md:102` currently promises: *"extraction runs with libarchive's secure flags
+(`SECURE_SYMLINKS`, `SECURE_NODOTDOT`) so a hostile archive cannot write outside its target."*
+`PXX-2-001` falsifies it — the header-encrypted 7z branch does not call libarchive at all.
+
+**This draft must not be applied yet, and the reason is the point.** CORE describes what the program
+*is*. The replacement fix is designed and measured but **not in the tree**, so applying a sentence
+that describes the fixed program would be CORE describing behaviour the code lacks — class 5, the
+exact class the ten doc-as-tests exist to catch, committed deliberately. So there are two artifacts
+here and their order is fixed:
+
+**Now — a Deviations entry, because the honest record of an unfixed hole is a deviation:**
+
+> **Deviation.** §3's `arch` row states that extraction runs under libarchive's secure flags. That
+> is true of every path libarchive reads. It is not true of the header-encrypted 7z branch, which
+> libarchive cannot open and which therefore writes through `std::fs` — no flag of libarchive's is
+> in force on it, and a symlink or hardlink already on disk at the destination redirects the write
+> outside it. Recorded rather than quietly repaired: the sentence was believed when written, and the
+> branch that falsifies it was added later without anyone re-reading it.
+
+**When the fix lands — the row's replacement clause:**
+
+> …extraction through libarchive runs under its secure flags (`SECURE_SYMLINKS`, `SECURE_NODOTDOT`)
+> so a hostile archive cannot write outside its target; and the header-encrypted 7z branch, which
+> libarchive cannot read and which therefore writes through `std`, earns the same guarantee in its
+> own code rather than inheriting it — every directory component proven a real directory beneath the
+> destination before it is created, and every member written to a name that has just been unlinked
+> and is then created exclusively, so that neither a symlink nor a second name for an inode
+> elsewhere can stand where the write is about to land.
+
+**One error in the originating draft is recorded rather than silently fixed:** the tier-3 reviewer's
+own version carried a comment reading *"CORE §6's sentence"* where line 102 is the **§3** module
+table. It caught this itself and said so. The wording above says §3.
+
+### Draft 4 — §3's `tasks` row. Covers `PXX-3-002` and `PXX-3-003`
+
+Two sentences appended to `CORE.md:105`. Agent 3's, and both are corrections to claims the code
+makes about itself rather than claims CORE makes:
+
+> The lock a rebuild takes is named from the target's canonical path, and where that path cannot be
+> canonicalised — which is every creation, since `apply` refuses a creation whose target already
+> exists and `realpath` cannot resolve what is not there — the name falls back to the path as typed,
+> so two spellings of one destination take two different locks and both proceed. The temp file
+> beside the target is checked for and then created in two steps rather than one; the atomic
+> `create_new` the code's own comment names is not there, and between the check and the create is a
+> window a second writer can stand in.
+
+Both sentences describe **what is true today**, not what should be, so they are applicable now.
+
+### Draft 5 — §3's `cli` row, the exit codes. Agent 5's
+
+`CORE.md:109` says the `cli` module owns *"their exit codes"* and never says what they are. All three
+are behaviourally pinned by `tests/cli_path.rs` and named once in code at `cli.rs:45-47`
+(`OK = 0`, `FAILED = 1`, `MISUSE = 2`) — so this is a number the tests can already check and the
+document simply does not carry.
+
+> …their output and their exit codes, which are three and mean three things: **0** the command did
+> what it was asked, **1** it was asked correctly and could not — a missing archive, a wrong
+> password, a full disk — and **2** it was asked wrongly, which is the only code that prints the
+> usage text.
+
+### Draft 6 — a Deviations entry for the transcribed C constants. Agent 5's
+
+Not a §-row edit. `PXX-5-001` established that the gate guarding the hand-transcribed `termios` ABI
+proves less than it appears to, and the only real fix — a build-time C probe, bindgen, or a `-sys`
+crate — is already rejected by project convention, which makes this the maker's by rule 7.
+
+> **Deviation.** `cli`'s terminal handling declares `struct termios` and three C constants by hand
+> rather than binding them, because a `-sys` crate is not wanted in this tree. Six compile-time
+> assertions guard the layout, and they are honest about less than they look: they catch a field
+> reorder, which is what they were added for, but `NCCS` at 32, 33, 34 and 35 all produce the same
+> sixty-byte layout and the assertions cannot tell those four apart; and `ECHO` and `TCSAFLUSH` are
+> preprocessor values transcribed as ordinary integers, which nothing in the build ever reads a
+> header to check. The transcription is correct against the installed glibc, verified by compiling a
+> C program against those headers rather than by reading them. What holds it is the ship platform:
+> `PKGBUILD` pins `x86_64`, both release containers are glibc, and the binary links
+> `tcgetattr@GLIBC_2.2.5`. On a libc whose struct is larger than sixty bytes the failure would be
+> silent and memory-unsafe, and nothing here would catch it.
+
+### What is owed, and to whom
+
+| Draft | Target | Applicable |
+| --- | --- | --- |
+| 1 — §2 typeface | `CORE.md:87-92` | **Now.** Closes the round's second freeze-blocker |
+| 2 — §3 threading | `CORE.md:114-115` | **Now.** No doc-as-test reads §3's prose; zero code change |
+| 3a — Deviations, the 7z write path | Deviations section | **Now**, and it is the honest record until 3b |
+| 3b — §3 `arch` row | `CORE.md:102` | **Only after `PXX-2-001`'s fix is in the tree.** Applied earlier it makes CORE describe a program that does not exist |
+| 4 — §3 `tasks` row | `CORE.md:105` | **Now.** Describes today's behaviour |
+| 5 — §3 `cli` row | `CORE.md:109` | **Now.** The codes are already pinned by tests |
+| 6 — Deviations, transcribed constants | Deviations section | **Now** |
+
+Agent 9 drafted nothing and was right to: it grepped `CORE.md` for every defective figure it found
+— 1.37, 1.87, 1.88, 1.95, 2.24, 2.45, 318, 328, 27.4, 4.42 — and **all ten are absent**. Every wrong
+number it found is `theme.rs`-comment-local: the file disagreeing with its own arithmetic or its own
+git history, never with the maker's text. Agent 6 also drafted nothing, on the grounds that a draft
+for `PXX-6-010` would mean guessing which side of the Password/Measure asymmetry is the anomaly —
+which is the settling rule 8 forbids. Both are correct calls and are recorded as such.
