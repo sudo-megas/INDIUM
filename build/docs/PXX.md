@@ -1173,3 +1173,145 @@ two sentences); and agent 5's two drafts, one recording what the exit codes mean
 the constant-transcription ritual and the precise reach of the gate that guards it.
 
 Nothing in this phase was pushed. No fixture was committed. The working tree is clean.
+
+---
+
+## Phase 3 — tier 2, the blind re-derivation
+
+Twenty-one findings were filed `fix-in-v2.5`, and tier 2 is what they owe: *"independent
+confirmation by a non-originating agent of equal or higher tier … a concurring static argument
+written **without reading the original finding's reasoning** — only its `file` and `line_range`.
+Blind re-derivation is the point: a confirmer who reads the argument confirms the argument, not the
+bug."*
+
+### How blindness was actually enforced, and where it leaked
+
+Each confirmer received the file, the line range, and a one-word category. Nothing else. No claim,
+no severity, no mechanism, not even a question. They were told to read the site cold and report what
+they independently concluded was or was not wrong there — and told plainly that answering `NO` was a
+wanted result, because a false positive here becomes a permanent unnecessary change to a repository
+about to freeze.
+
+They were barred from reading this document, barred from anything under the job's scratch directory,
+and barred from running anything that writes to `target/` — the one-build-lane rule survives the
+agent cap, because `target/` locking does not care how many agents there are. A confirmation needing
+a run was to be filed `NEEDS-RUN:` and executed serially. None was needed.
+
+**The blindness leaked once, and the confirmer disclosed it unprompted.** An unscoped
+`grep -rn "unsafe_code" .` — run from the repository root rather than against `src/` — matched two
+lines of this very document, one of them the `PXX-7-004` row it was assigned to confirm. It stopped,
+said so, rescoped every subsequent search, and flagged its own verdict as degraded so the merge
+could discount it. That is the disclosure rule working exactly as written: **a disclosed slip is
+recoverable and a hidden one poisons the record.** The verdict was set aside anyway and the site
+re-run blind by a different agent, because a confirmer that has seen the claim confirms the claim.
+
+The instruction that would have prevented it — *never `grep -r` from the repository root; scope every
+search to `src/` and `tests/`* — was **not** in the first briefs. It was added to the re-runs. The
+brief was the defect, not the agent.
+
+### Verdicts, and the three ways one can land
+
+A blind pass has three outcomes and only the first is a pass. **CONFIRMED**: the confirmer said
+`YES` and described the same mechanism — not the same words, the same failure. **REFUTED**: `NO`,
+with a reason, which does not kill the finding but forces a reconcile, because one of the two passes
+is then wrong. **DIVERGENT**: `YES`, but about a *different* mechanism at the same lines — the
+outcome that must never be flattened into a pass, because it means the site is wrong in a way
+neither pass has fully described.
+
+| Finding | Site | Verdict | Confidence |
+| --- | --- | --- | --- |
+| `PXX-2-002` | `arch.rs:1030-1041` | **DIVERGENT** — see below | probable |
+| `PXX-3-001` | `tasks.rs:1654-1660` | CONFIRMED | probable |
+| `PXX-4-001` | `apps.rs:513-515` | CONFIRMED | certain |
+| `PXX-4-003` | `platform/mod.rs` | CONFIRMED | certain |
+| `PXX-4-004` | `platform/open.rs` | CONFIRMED | certain |
+| `PXX-5-008` | `cli.rs`, `EchoOff`/`ask_for_password` | CONFIRMED | certain |
+| `PXX-6-006` | `extract.rs:115-126` | CONFIRMED | certain |
+| `PXX-6-007` | `table.rs:739-743` | CONFIRMED | certain |
+| `PXX-8-003` | `pending.rs:108`, `:129-132` | CONFIRMED | certain |
+| `PXX-10-001` | `theme.rs:153` | CONFIRMED, **and a second stale citation found** | certain |
+| `PXX-10-002` | `README.md:9` | CONFIRMED | certain |
+| `PXX-10-003` | `README.md:10` | CONFIRMED, **and sharper than filed** | certain |
+| `PXX-10-005` | `README.md:65-76` | CONFIRMED, **and a sibling site found** | certain |
+
+Thirteen settled. `PXX-7-004` was voided by the contamination above and re-run. The seven
+`ui/mod.rs` findings — `PXX-1-001`, `-1-002`, `-1-003`, `-1-004`, `-1-005`, `-1-011` and
+`PXX-4-002` — were assigned to a confirmer that **died on a session limit before reporting**, and
+were re-run rather than assumed. A tier that reports on findings nobody re-derived is worth less
+than no tier at all.
+
+### The divergence — `PXX-2-002`, and why it must not be recorded as a pass
+
+The original filed this as *a correct password refused*: the 7z fallback is keyed on
+`EncryptedHeaders`, and the condition that actually matters is that libarchive cannot decrypt 7z
+content at all, so a `7z a -p` archive lists fine and then refuses every read.
+
+The blind confirmer, given only `arch.rs:1027-1046`, reached the opposite face of the same decision.
+It observed that `extract` is the **only one of four read paths** that keys the fallback on *any*
+error rather than on `EncryptedHeaders` — verified independently here:
+
+- `arch.rs:1031` — `looks_like_7z(path) && Reader::open(path, passphrase)?.next_entry().is_err()`
+- `arch.rs:1204`, `:1273`, `:1345` — all three read
+  `Err(ArchiveError::EncryptedHeaders) if looks_like_7z(path)`
+
+Four read paths, and one of them keyed differently from the other three. And the same flag does a
+second job: `arch.rs:1041` reads `if !headers_need_sevenz && !verify_passphrase(path, secret)?`, so
+the flag that routes extraction away from libarchive **also switches off password verification**.
+The confirmer's failure path is therefore a 7z that `sevenz-rust2` can parse but whose first
+libarchive header read fails for a reason that is not encryption — truncation, or a codec libarchive
+lacks: it lists successfully, sets the flag, skips verification entirely, and reaches a decoder that
+`arch.rs:877-880` itself says carries no bzip2, ppmd, deflate or zstd. The first thing to touch the
+password is then the per-entry `?`, *after* `create_dir_all` has already put directories into the
+destination — contradicting `extract`'s own doc at `:979-982`, which promises that a wrong password
+"costs nothing and leaves no partial output behind."
+
+Both passes are looking at `headers_need_sevenz`. One says it is *too narrow*; the other says it is
+*too broad and load-bearing twice over*. **Both can be true, and the fact that two independent reads
+of the same six lines produced two different defects is itself the finding.** Recorded as
+`DIVERGENT`. It owes a third look before any fix is designed, and under this round's own rule the
+fix is the riskiest artifact — a patch aimed at one face of this could deepen the other.
+
+### Three findings the blind pass sharpened
+
+- **`PXX-10-003` was filed too gently.** The badge reads `2026-08-12`; the filing compared it to
+  v2.3.0's changelog stamp. The confirmer compared it to the version *the badge beside it claims* —
+  and `2.1.0-1` is stamped `Thu, 13 Aug 2026`, while `2026-08-12` is `2.0.0-1`'s date
+  (`Wed, 12 Aug 2026`). Verified here against the changelog trailers. **The two badges did not agree
+  with each other even before either went stale.** One drifted claim, two independent errors.
+- **`PXX-10-005` has a sibling one door over.** `README.md:87` carries
+  `indium-2.1.0-1-x86_64.tar.gz`, outside the `:65-76` range the finding cited. Class 9 in the round
+  that names class 9 — a sweep is not a habit.
+- **`PXX-10-001` was one dangling citation; there are two.** See `PXX-T2-001` below.
+
+### What the blind pass found that nobody had filed
+
+Seven. They carry a `PXX-T2-` prefix because they came from the verification tier rather than from a
+numbered agent, and saying so is cheaper than pretending the register was complete. Each was
+re-verified here against the source before being written down.
+
+| ID | Site | What it is | Severity |
+| --- | --- | --- | --- |
+| `PXX-T2-001` | `theme.rs:156` | Cites `CORE.md:368` for the sentence *"It is not an accent and never decorates."* Line 368 is the table separator `\| --- \| --- \|`; the sentence is at `CORE.md:374`. A **second** stale citation in the same doc comment as `PXX-10-001`, and of a class agent 10 did not sweep for — a line-number citation into CORE, not a `///`-cited identifier | document-only |
+| `PXX-T2-002` | `README.md:87` | `indium-2.1.0-1-x86_64.tar.gz` — the same stale version as `PXX-10-005`, outside the range that finding cited | fix-in-v2.5 |
+| `PXX-T2-003` | `extract.rs:109` | The pin stores `app.extract_path.trim()` with **no `expand_tilde`**, while the Extract button 67 lines below expands it at `:176`. A pinned `~/Downloads` is stored literally, and `table.rs:682`'s `Path::new(&b.path).is_dir()` then renders that chip permanently dimmed and "missing" — though clicking it works, because the *other* site expands on the way out. One string, two readings, in one popup | document-only |
+| `PXX-T2-004` | `extract.rs:115-126` | When the typed path is already bookmarked, the whole block is skipped and **no status is set at all** — the `+` button silently does nothing, and the user cannot tell success from no-op | document-only |
+| `PXX-T2-005` | `arch.rs:573` | `archive_read_add_passphrase(a, c.as_ptr());` discards its return. libarchive rejects an empty passphrase, so an empty password yields a reader with **no passphrase registered** and a downstream error that explains nothing. Every read path in the file routes through here | document-only |
+| `PXX-T2-006` | `arch.rs:756-771` | The streaming `list()`'s 7z branch applies no `is_archive_root` filter, where `:811` and `:851` both do — and `:810`'s comment states the promise unconditionally: *"the table never grows a nameless row and Select-all never picks one up."* Latent rather than live, since 7z stores no `./` root, but the guarantee is format-specific where its comment is not | document-only |
+| `PXX-T2-007` | `tasks.rs:1654` | The comment's stated rationale — *"so what is verified is what is on the disk"* — is not what `fsync` achieves: the verify at `:1678`/`:1680` reads back through the page cache whether or not the sync ran. The line's real value is crash durability, not verification. A correct line defended by a wrong reason | document-only |
+
+`PXX-T2-002` is the only one of the seven that changes code, and it changes a filename in a README.
+
+### What tier 2 does not settle, even at 21 of 21
+
+1. **`PXX-2-001`'s replacement fix is still not in the tree.** It is designed and measured. When it
+   lands it is a **new artifact** owing its own tier 3, reviewed by an agent that did not write it.
+   Nothing in this pass touches it.
+2. **`PXX-10-006` owes the maker's hand, not a re-derivation.** It is a CORE self-contradiction, and
+   tier 0 was the right and only mechanical gate for it.
+3. **Rule 8 still holds.** Nothing here touches the 100/125/150% window check. That verdict is the
+   maker's eye and no agent may claim it.
+4. **The seven `PXX-T2-` findings have had tier 0 only** — each quote re-verified at its cited line
+   by this merge point. Six are `document-only` and clear at tier 1. `PXX-T2-002` is
+   `fix-in-v2.5` and therefore owes a tier 2 of its own, from someone who did not file it.
+
+Nothing in this tier was pushed. No file in `src/` was modified. The working tree is clean.
