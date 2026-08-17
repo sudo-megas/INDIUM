@@ -5473,3 +5473,154 @@ round has already recorded two instances of exactly that. It is named in the rev
 1, alongside the measured error shapes, so it is an assigned question rather than a loose end.
 
 No new IDs. Register unchanged at **186**; suite unchanged at **410**.
+
+## Phase 3 — the third review died too, and its instrument answered four questions before it went
+
+The tier-3 review `fa73bf8` owes (`PXX-C12-009`) was commissioned and **died on a session limit** —
+not a `529`, a quota wall, and therefore an outage of a different kind but the same consequence. Its
+last line was *"Now let me write the probe harness."*
+
+**It had already written it.** 393 lines under `tests/zz_probe.rs`, six probes, aimed squarely at the
+brief's attacks. They were run here before the file was removed, and they answer four of the six
+questions the brief asked — including the one this record deliberately routed to it rather than
+settling in-house.
+
+Preserved outside the repository at `$CLAUDE_JOB_DIR/tmp/zz_probe-dead-reviewer.rs`. `git status` is
+empty; nothing of it was committed. **This is the second time this round a dead reviewer's instrument
+has outlived its operator**, and the second time the salvage produced findings the author had not
+thought to look for. The rule that made it possible both times is the per-commit path-staging one.
+
+**It is salvage, not the review.** `PXX-C12-009` stays open. The probes are a third party's design and
+that is worth something, but the hand that ran them wrote the code under test, which is precisely the
+gap tier 3 exists to cover.
+
+### The question this record had routed out, answered
+
+`PXX-C12-008`'s addendum named one untraced consequence: `extract`'s `else if` arm now returns
+`Ok(false)` for a damaged 7z where it used to propagate a structural error, so a corrupt file might
+be reported as *"Wrong password."* Measured across three kinds of damage:
+
+```
+[stub64]   list_all -> Err(WrongPassword)   extract(all) -> Err(WrongPassword)   extract(emptyonly) -> Err(WrongPassword)
+[half]     list_all -> Err(WrongPassword)   extract(all) -> Err(WrongPassword)   extract(emptyonly) -> Err(WrongPassword)
+[tailflip] list_all -> Err(WrongPassword)   extract(all) -> Err(WrongPassword)   extract(emptyonly) -> Err(WrongPassword)
+```
+
+**The conflation is real and it is older and wider than `fa73bf8`.** `list_all` itself answers
+`WrongPassword` for structural damage, so every shipped path — the CLI lists before it extracts, the
+window lists before it offers anything — reports a corrupt archive as a wrong password *at the
+listing*, one layer above anything this round touched. `fa73bf8` propagated an existing conflation
+into one more function rather than creating one.
+
+That is the honest disposal, and it is smaller than the addendum feared. Filed `document-only`.
+
+### The finding the brief did not ask for, which is the valuable one
+
+Probe 4 built an archive with **two members whose names normalise to the same string**: a directory
+named `a`, and an AES-encrypted 21-byte file named `./a`.
+
+```
+list_all -> Ok, 2 entries
+    raw="a"   path="a" dir=true  size=0  enc=false
+    raw="./a" path="a" dir=false size=21 enc=true  method="LZMA2+AES-256"
+verify_passphrase(pw="indium")           -> Ok(true)
+verify_passphrase(pw="not-the-password") -> Ok(true)      <-- a wrong password, accepted
+sevenz::read_entry("a", pw="indium")            -> Ok((0, false))
+sevenz::read_entry("a", pw="not-the-password")  -> Ok((0, false))
+```
+
+The mechanism, confirmed by reading rather than inferred. `read_entry` resolves its target with
+
+```rust
+.position(|f| normalize_archive_path(&f.name) == entry_path)
+```
+
+— **first match by normalised name.** `verification_target` correctly picks the encrypted file and
+hands on its *normalised* path, `"a"`; `position` then finds the **directory**, which has no data
+stream, so `read_entry` takes its early return and answers `Ok((Vec::new(), false))` **without
+decrypting anything at all.** Both verification sites pass `entry.path`, so both are affected.
+
+Three things make this worth its own ID rather than a paragraph:
+
+- **It defeats the entire pre-flight**, not a residual of it. This is not the 1 MiB bound admitting a
+  prefix (`PXX-T3-030`); it is the check reading a different member than the one it chose.
+- **The early return that makes it possible is the same one behind `PXX-T3-029`** — a member with no
+  data stream answering `Ok` to any key. That early return has now produced two separate defects, and
+  it is beginning to look like the actual root rather than two coincidences.
+- **It is pre-existing from `9175a28`, not introduced by `fa73bf8`.** The hoist inherited the call
+  shape. Recorded that way rather than as a regression, because the distinction is what tells the
+  next reader where to look.
+
+Extraction fails loudly on such an archive — `Err(Other("could not clear … Is a directory"))` for
+right and wrong passwords alike — so nothing is lost and nothing is disclosed. What is wrong is that
+the popup unlocks. **Not fixed here**: the shape of the fix is to resolve by identity rather than by
+normalised name, that touches every `read_entry` caller, and a fix at this position owes a review
+that cannot currently be commissioned. Filed `fix-in-v2.5` with the direction recorded.
+
+### And an inconsistency the same probe exposed
+
+```
+[dir-only]   extract(sel=["emptydir"], pw=WRONG) -> Ok(1)                 dest holds ["emptydir"]
+[empty-only] extract(sel=["empty.txt"], pw=WRONG) -> Err(WrongPassword)
+```
+
+Both selections carry no ciphertext. They are treated oppositely, and the reason is one line:
+
+```rust
+if selected.iter().any(|e| e.encrypted) {
+```
+
+An empty **file** inside an AES block lists as `encrypted`, so the pre-flight runs and the fallback
+refuses. A **directory** lists as `enc=false`, so the whole pre-flight is skipped and extraction
+proceeds with any password at all.
+
+The project's own stated rule — *"An archive whose every encrypted member is empty still passes, and
+that is right rather than lax: there is no ciphertext in it to get wrong"* — defends the directory
+case. It equally defends the empty-file case, which is refused. **One rule, two answers.** Filed
+`document-only`: the behaviours are each defensible and the pair is not, and which way to reconcile
+them is a judgement about what "extracted successfully" should mean, which is rule 7's territory.
+
+### Four clean negatives, recorded so they are not re-run
+
+- **1200 wrong passwords against two encrypted-header archives** — one preserved fixture, one written
+  by INDIUM — `listed_ok=0 verified_true=0 other_err=[]` on both. This is the direct evidence for the
+  hoisted block's `None`-arm claim that a successful listing is itself a discriminator: no wrong
+  password produced a successful listing in twelve hundred attempts.
+- **Attack 2 refuted.** Five foreign 7z variants built by `bsdtar` — lzma2, bzip2, deflate, ppmd,
+  copy — all list, all verify `Ok(true)` against a needless password, all extract `Ok(1)`. There is no
+  7z class the hoist lost by taking libarchive out of this function. (Listing is header parsing only,
+  so a codec this build cannot *decode* still lists — which is why the hoist is safe and is now
+  measured rather than argued.)
+- **Misnamed archives, both directions.** `looks_like_7z(really-a-7z.zip) = true` and
+  `looks_like_7z(really-a-zip.7z) = false`: the guard sniffs magic bytes, and a 7z wearing `.zip`
+  verifies and extracts correctly while a zip wearing `.7z` routes to libarchive and answers both
+  ways. Plain `.zip`, `.7z` and `.tar.gz` all accept a needless password.
+- **No single-byte corruption reaches a destination.** Every byte from offset 32 to the end of a
+  169-byte AES+LZMA2 archive was flipped in turn and the member extracted: **137 of 137 refused,
+  0 delivered correct bytes, 0 delivered wrong bytes.** Stated at its true scope — one archive, one
+  member, single-byte flips — but within that scope there is no silent corruption at all. The
+  reviewer's own `dataflip40 -> Ok(2)` line, on a different two-member layout, is consistent with the
+  flip landing outside any member's data rather than with a bypassed check.
+
+### The findings
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-T3-037` | `sevenz.rs` `read_entry`'s `.position(…)`; both callers passing `entry.path` | two members normalising to one name let a directory shadow an encrypted file, so the pre-flight reads a member with no data stream and **accepts a wrong password** | fix-in-v2.5 | **confirmed by measurement and by reading; pre-existing from `9175a28`, unfixed** |
+| `PXX-T3-038` | `arch.rs`'s `if selected.iter().any(\|e\| e.encrypted)` | a directory-only selection skips the pre-flight and extracts `Ok` with any password, while an empty-file-only selection is refused — one rule, two answers | document-only | confirmed, unfixed — **which way to reconcile is rule 7's** |
+| `PXX-T3-039` | `arch.rs` `list_all` and `extract` | a stub, a truncation and a bit-flipped tail all report as *"Wrong password."* — but `list_all` already did, so every shipped path reports it a layer above `fa73bf8` | document-only | confirmed; **resolves the item `C12-008`'s addendum routed out** |
+
+**Three new IDs. Register 186 → 189.** Suite unchanged at **410** — every probe was reverted, and
+turning `PXX-T3-037` into a gate belongs with its fix.
+
+### The deviation, restated because it has changed shape
+
+`PXX-C12-006` closed on two discharged reviews. `PXX-C12-009` replaces it for one commit rather than
+two, and the reason it is still open is no longer an API outage but a **quota wall**, which is a
+different thing and is recorded as one: it is predictable, it resets, and it does not warrant the
+"five failures in a row is an outage, not a verdict" argument that the earlier deviation rested on.
+
+**The recommendation is unchanged and is now cheaper to follow: wait.** The review is commissionable
+later at no cost but time, `fa73bf8` is gated four ways and sabotage-checked 4 of 4, and this
+section's salvage has already found the class of thing an independent reader finds — twice over,
+neither of which the author's own matrices were pointed at.
