@@ -5710,3 +5710,103 @@ tiers 1 through 3 are for, and what the three commissioned reviews were for.
 No new IDs. Register unchanged at **189**; suite unchanged at **410**. The scripts are preserved
 outside the repo at `$CLAUDE_JOB_DIR/tmp/clerk.py` and `clerk_idents.py` so the pass is repeatable
 against a moved tree rather than being a one-time assertion.
+
+## Phase 3 — the v2.5 scope decision, taken, and the root that four findings share
+
+The maker delegated this call. It is taken here rather than handed back, and every line of it is
+reversible by him — nothing below touches `CORE.md`, which stays his by hand.
+
+### First, the thing that decides it: four findings are one defect
+
+Read as a list, thirteen `fix-in-v2.5` findings look like thirteen decisions. They are not.
+
+| finding | symptom |
+|---|---|
+| `PXX-T2-016` | `Expected.sizes` is path-keyed, so two members normalising to one name collapse into one entry — in the file whose own comment rejects path-keyed lookups for that exact reason |
+| `PXX-T2-018` | a rename staged against the **second** of two identically-named members is applied to the **first**, and `F2` opens an editor on both rows at once |
+| `PXX-T3-037` | `read_entry` resolves by `.position()` on the normalised name, so a directory shadows an encrypted file and a **wrong password is accepted** |
+| `PXX-T3-022` | a 7z member whose stored name normalises to *empty* reaches `plan.source` but is skipped by the rebuild, so Apply always fails on such an archive |
+
+**All four are "a normalised path is used as member identity."** Normalisation exists to make
+`a\b` from a Windows archive read as `a/b`, and it necessarily discards information — `./a` and `a`
+become one string, and `\` becomes nothing at all. Every site that then uses the *result* as a key,
+an index or a lookup inherits a collision it cannot see.
+
+That is not four fixes. It is one design change — give an entry an identity independent of its
+display path — touching `Expected`, the rename lookup, `read_entry`'s resolution, `is_archive_root`
+and the rebuild's pairing. **It is exactly the change a freeze round must not make**, and it is the
+strongest single argument for the scope decision below.
+
+Recorded as `PXX-C9-012`, a class-9 finding about the register rather than the code: four findings
+were filed separately across three sittings, each traced to its own site, and none of them named the
+other three. **The sweep found four doors and not the corridor.**
+
+### And one finding was closed at one site and left open at its sibling
+
+`PXX-T3-013` reads *"an all-directory / all-empty encrypted selection makes the `find` yield `None`,
+so a wrong password extracts as a success."* `9175a28` closed the **all-empty** half with the
+`else if !verify_passphrase(…)` fallback and a gate.
+
+The **all-directory** half was never closed, and today's measurement found it again from scratch:
+the pre-flight is gated on `if selected.iter().any(|e| e.encrypted)`, and a directory lists
+`enc=false`, so a directory-only selection skips verification entirely and extracts `Ok` with any
+password. It was re-filed as `PXX-T3-038` before anyone noticed it was `-013`'s other half.
+
+**A finding naming two sites was marked closed on the strength of one.** That is class 9 for the
+third time in this round, and the second time inside a fix written to close class 9. `PXX-T3-013` is
+therefore **re-opened for its directory half** and `PXX-T3-038` is marked its duplicate rather than
+its own defect.
+
+### The decision
+
+**Fix in v2.5 — three, all small, none touching the shared root.**
+
+| id | what is fixed | why it qualifies for a freeze round |
+|---|---|---|
+| `PXX-T3-023` | the gate at `tests/write_path.rs:619` compares `sevenz` with `sevenz` and cannot fail on the only thing it claims to check | test-only. Zero shipping-code risk, and it is the gate underwriting the routing decision at the heart of `PXX-2-002` |
+| `PXX-T3-021` (message half) | Apply on an encrypted-header 7z says *"A password is needed to list it"* to a user who supplied the password and whose listing succeeded | a sentence, not a capability. It names the wrong cause and suggests an action already taken |
+| `PXX-T3-037` | a wrong password is **accepted** when a streamless member shadows an encrypted one | prefer a stream-carrying match in the resolution, falling back to the first. Small, local, and it closes a wrong-password acceptance — the only one left in the tree |
+
+**Recorded as CORE Deviations — nine, drafted for the maker's hand, not applied.**
+
+| id | why it is recorded rather than patched |
+|---|---|
+| `PXX-T2-016`, `PXX-T2-018` | the shared root. A freeze round may not re-key member identity |
+| `PXX-T3-022` | same root; and it fails **loudly and safely** — Apply refuses, the original is untouched |
+| `PXX-T3-020` | narrowing `is_archive_root` is delicate: this round's own sketch was wrong three ways and would have failed an existing gate |
+| `PXX-T3-030`, `PXX-T3-014` | closing the cap/COPY residual means an unbounded read of an untrusted member — the OOM hazard the plan already flags for `arch.rs` |
+| `PXX-T3-021` (capability half) | a `sevenz`-backed rebuild path is a feature, not a repair |
+| `PXX-T3-013` (directory half) / `PXX-T3-038` | the fix is to ask the archive rather than the selection, which is the same pre-flight-gating question `-030` sits behind |
+| `PXX-T3-033` | unreachable through anything INDIUM or 7-Zip writes; needs a hand-patched header to trigger |
+
+**Closed, already fixed, listed so the register is not read as owing them:** `PXX-T3-018` (the
+arbitrary-target sabotage survivor — closed when `verification_target` was extracted and gated) and
+`PXX-T3-013`'s empty-file half.
+
+**Needs an agent, and is the only item on this list that does:** `PXX-C12-002` — `25be01d` is a
+`freeze-blocking` fix marked fixed while *"the fix owes tier 3"* was still true, and **both its
+siblings' reviews found something.** That is not a scope decision; it is an unpaid debt of the same
+kind `PXX-C12-006` was, and it is queued behind the review now running.
+
+### Why this split and not a braver one
+
+The escape valve was written for exactly this moment, and it is quoted rather than paraphrased:
+
+> Any agent may file a real, confirmed defect with `severity: document-only` and `proposed_fix: none`.
+> For a repo about to freeze, *"this is a known limitation, recorded in CORE Deviations"* is
+> frequently the **correct** engineering answer … otherwise every agent optimises for producing a
+> patch, and patches are what break v2.5.
+
+This round has now produced its own evidence for that sentence twice. `da6c821` was a confident fix
+for a correctly-diagnosed defect and it destroyed a file. `9175a28` was its replacement, carried a
+five-of-five sabotage matrix, and shipped a `freeze-blocking` defect that a reader found in an
+afternoon. **Both were fixes nobody had to make in a freeze round**, and both were made anyway
+because a diagnosis in hand feels like a patch owed.
+
+The three kept above are kept because none of them changes a shape: a test that tests nothing, a
+sentence that names the wrong cause, and a lookup that prefers the member with the data. The nine
+recorded are recorded because every one of them either shares a root that must be re-cut properly or
+fails loudly already.
+
+**No new IDs beyond `PXX-C9-012`. Register 189 → 190.** Suite unchanged at **410** — the three fixes
+land with their gates when the review holding `arch.rs` and `sevenz.rs` reports.
