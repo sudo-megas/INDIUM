@@ -6108,3 +6108,180 @@ severity triggers it, and stretching it to every commit would make it a ritual r
 The outstanding process debt is therefore **`PXX-C12-002` alone**: `25be01d`, a `freeze-blocking` fix
 marked fixed while *"the fix owes tier 3"* was still true. Given three reviews and three
 non-ACCEPT verdicts, it is the last one worth commissioning before the freeze.
+
+## Phase 3 — the tier-3 verdict on `25be01d`: **AMEND**, and the class it closed had moved rather than gone
+
+`PXX-C12-002` is discharged, and with it **the round's last unreviewed `freeze-blocking` fix.**
+
+Four tier-3 reviews have now reported on four commits: **REPLACE, AMEND, AMEND, AMEND.** Not one
+returned ACCEPT at first reading. Every one found something the author's own sabotage matrix was not
+pointed at, and this one found the most: **four mutations of shipping code, four survivals at
+412 of 412.**
+
+| mutation | suite |
+|---|---|
+| delete the **entire** temp-unlink block in `atomic_write` | **412 pass** |
+| `from_mode(mode)` → `from_mode(0o600)` at **both** sites | **412 pass** |
+| move `set_permissions` to **after** the rename at both sites | **412 pass** |
+| `symlink_metadata` → `metadata`, `.filter(is_file)` dropped, both sites | **412 pass** |
+
+The three gates `25be01d` shipped do bite — each was sabotaged and each failed alone. **They were the
+easy set.**
+
+### The class was not closed. It moved to the scratch name.
+
+`25be01d` set the mode on the temp *after* the bytes were written, at both sites, and its comment
+claimed parity with the sibling it named:
+
+> The same mechanism, and the same fix, as `arch.rs`'s extraction write and `tasks::apply`'s commit.
+
+**Measured, that parity is false.** `arch.rs` opens at the target mode —
+`create_new(true) … .mode(prior_mode.unwrap_or(0o666))` — so the bytes are never on disk behind laxer
+permissions than the file had. Neither of the two sites the commit touched does that. The review's
+external observer, on a 64 MiB source with the archive at `0600`:
+
+```
+PROBE3 temp was group/other-readable for 647 ms; max bytes visible while wide = 65324
+distinct temp modes observed = [("644", 0), ("600", 65324)]
+```
+
+**647 milliseconds holding the complete rebuilt archive at `0644`, at a predictable name beside the
+original.** For an AES-256 7z that is the ciphertext. And it is not bounded by the run: cancellation
+and error both remove the temp, but a `SIGKILL` mid-rebuild leaves the `0644` file there, cleared
+only by the next Apply *of that same archive*.
+
+So the finding the commit closed at the archive's own name was still open one name over, for the
+entire duration of the work, in the code that closed it. **A fix that moves an exposure from a
+moment to a duration is not a fix**, and nothing in the suite could see the difference because every
+gate checked the mode *after* the rename, where both versions agree.
+
+**Fixed in `5ccdfcb`, using the reviewer's own measured patches.** `apply` pre-creates the temp at
+the prior mode before `build_and_verify`; `atomic_write` sets the mode on the **descriptor**
+(`fchmod`) between `File::create` and `write_all`, so neither the umask default nor a re-planted name
+can intervene. Both were verified green by the reviewer before they reached here, which makes them
+the only fixes this round that were measured by a non-author before landing.
+
+### The commit made one sentence lie, in the line that fixed another
+
+`25be01d` changed the `.broken` occupied-name check from `exists()` to `symlink_metadata()` — correct,
+and it closed a real write-through. **`symlink_metadata` is `Ok` for a dangling link**, so `kept`
+became `true` and the user was told *"A copy is at …"* about a path resolving to nothing.
+
+Whether a copy was **made** and whether one is **there to read** are different questions, and the
+sentence promises the second. This is P6's own recorded warning — *guards that "created two new
+reachable hazards rather than closing one"* — occurring inside the line that closed the first one,
+one milestone after the warning was written down. Fixed and gated.
+
+### The other five
+
+- **`PXX-T3-050`, and it is the one worth the maker's eye.** Only the *mode* is carried, never the
+  group. In a setgid shared directory an archive at `megas:megas 0640` comes back **`megas:wheel
+  0640`** — identical bits, readable by every member of `wheel` who could not read it before. And the
+  reverse is measured too: outside a setgid directory a `megas:wheel 0640` archive comes back
+  `megas:megas 0640`, **silently revoking sharing the user set up.** Recorded, not fixed: carrying
+  the gid means `fchown`, which has its own failure modes, and widening-by-inheritance versus
+  narrowing-by-default is a policy question rather than a bug.
+- **`PXX-T3-051`** — a POSIX ACL and a user xattr on `settings.toml` or an archive do **not** survive
+  a save or an Apply. Measured: `user:nobody:r--` and `user.indium_probe` both gone, mode intact.
+  Fail-safe in direction (grants are lost, never gained) and unrecorded anywhere until now. The mode
+  survives; the rest of the user's stated access intent does not.
+- **`PXX-T3-052`** — *"permissions could not be set to 100600"*. `PermissionsExt::mode` returns the
+  whole `st_mode`, `S_IFREG` included, so the sentence named a mode no user has ever typed. Fixed.
+- **`PXX-T3-047`** — the temp unlink was the **fourth** behaviour the commit changed and its message
+  counted three gates. `tasks.rs` had a gate for the identical hazard; `store.rs` had none, so the
+  sibling was protected and the original was not. Gated now, and the comment gained the *"what this
+  does not close"* paragraph its sibling already carried — a name re-planted between the unlink and
+  the create is still followed, which is `PXX-3-009` and keeps its own row.
+- **`PXX-T3-053`** — `symlink_metadata` → `metadata` still passes the strengthened suite.
+  **Deliberately not gated**, and the reason is the finding below: that discrimination only matters
+  on a symlinked archive, and Apply on one is broken far more fundamentally than a mode detail.
+  Pinning it would be polishing a path that does not do its job.
+
+### The finding that is worse than the row it was retired under
+
+`PXX-C9-010` was marked **superseded** by `25be01d`. It was filed as *"Apply's rename replaces a
+symlink at the archive name"*. The commit fixed the mode discard at the same line and the row was
+retired with it — **two different defects at one line, and only the second was fixed.**
+
+Measured, the first is worse than its own filing said:
+
+```
+PROBE5 apply result = Ok(2)
+PROBE5 link is still a symlink = false
+PROBE5 real archive entries before=3 after=Ok(3)
+PROBE5 real ino before=44774 now=44774
+PROBE5 link mode now = 644     real mode now = 600
+```
+
+Apply **reports success**. The real archive is byte-identical, the same inode, **completely
+unmodified**. The link is gone, replaced by a divergent `0644` regular file holding the rebuild. So
+the user removed a member, INDIUM said it removed two entries, and **the archive they were working on
+never changed at all** — a silent failure to write, class 6, in a path the register had marked closed.
+
+It also explains a comment `25be01d` wrote and believed: *"a mode is carried only from a real file …
+which is the umask default and correct."* The `None` is correct, but only because the whole path is
+broken in a larger way the comment does not mention.
+
+**`PXX-C9-010` is un-superseded and restated at `certain`.** No behaviour change here: whether Apply
+should refuse a symlinked target or resolve and write through it is a decision about what a symlink
+to an archive *means*, which is the maker's under rule 7.
+
+### What it refuted
+
+- **Mode fidelity is exact**, both sites, across `600 / 640 / 664 / 666 / 604` — every one `MATCH=true`.
+  The mutation that survived was a *gate* gap, not a code defect. `set_permissions` with the full
+  `st_mode` works because Linux masks with `S_IALLUGO`.
+- **The three original gates are not vacuous** — each fails alone under sabotage.
+- **`prior_mode` is read after the lock is taken** (`Lock::take` at `:1500`, the read at `:1534`).
+- **`atomic_write` leaks no scratch file on success.**
+- **The first save is not wider than intended** — no prior file means `prior_mode = None` means
+  `0644`, which the code already defers to the maker as policy.
+- **The unconditional unlink creates no new permanent-refusal hazard**, and a pid collision across
+  namespaces corrupts a save equally before and after the change. Pre-existing, and P8 §3's stated
+  assumption.
+- **A `SIGKILL` between `set_permissions` and `rename` cannot leave the archive at its own name with
+  a wrong mode** — the temp is narrowed by then and the rename is atomic. The whole exposure was at
+  the temp name, which is what makes the fix above the right shape.
+
+### One thing this round is not gating, said plainly
+
+`atomic_write`'s ordering — `fchmod` before `write_all` — **is pinned by construction, not by a
+test.** There is no path lookup and no byte written between `File::create` and `set_permissions`, so
+there is nothing for a watcher to observe; the settings file is small enough that a polling gate would
+miss the window and pass while measuring nothing, which is the failure this round has just spent four
+findings on. The property is an argument, it is labelled as an argument in the code, and it is not
+counted among the gates.
+
+`apply`'s ordering **is** gated, because a real rebuild is long enough to watch —
+`the_rebuilds_scratch_file_is_never_wider_than_the_archive`, which asserts it observed the file at
+least once before asserting anything about its mode.
+
+### The findings
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-T3-049` | `tasks.rs`; `store.rs` | the rebuilt archive sat world-readable at a predictable scratch name for the whole rebuild — 647 ms on 64 MiB — and the commit's claim of parity with `arch.rs` was false | freeze-blocking | **fixed in `5ccdfcb`, gated, sabotage-checked** |
+| `PXX-T3-048` | `store.rs`'s `.broken` notice | the fix for a write-through made the notice promise a copy at a dangling link | document-only | **fixed in `5ccdfcb`, gated** |
+| `PXX-T3-047` | `store::atomic_write`'s temp unlink | the fourth behaviour changed, never gated; deleting the whole block passed 412 tests | fix-in-v2.5 (test-only) | **fixed in `5ccdfcb`, gated** |
+| `PXX-T3-052` | `tasks.rs`'s permission-failure message | printed the full `st_mode` — "could not be set to 100600" | document-only | **fixed in `5ccdfcb`** |
+| `PXX-T3-050` | `tasks.rs` `prior_mode` | group ownership is not carried: a setgid directory widens the readership, and a plain directory silently revokes it | fix-in-v2.5 | **confirmed both directions, unfixed — the policy is the maker's** |
+| `PXX-T3-051` | both write paths | POSIX ACLs and xattrs do not survive a save or an Apply | document-only | confirmed, unfixed, fail-safe |
+| `PXX-T3-053` | both `prior_mode` reads | `symlink_metadata` → `metadata` still passes the strengthened suite | fix-in-v2.5 (test-only) | **deliberately ungated — the path it guards is `PXX-C9-010`** |
+| `PXX-T3-054` | `store::atomic_write` | the `fchmod`-before-write ordering is pinned by construction and by no test, and cannot be | document-only | **stated in the code as an argument, not counted as a gate** |
+| `PXX-C9-010` | `tasks.rs`'s rename | **un-superseded.** Apply on a symlinked archive reports success, replaces the link with a divergent file, and leaves the real archive byte-identical — the user's edit never arrives | fix-in-v2.5 | **re-opened at `certain`; the behaviour question is the maker's** |
+| `PXX-C12-002` | this round's process | `25be01d`'s owed review | freeze-blocking (process) | **discharged — AMEND, amendments applied** |
+
+**Eight new IDs. Register 199 → 207.** Suite **412 → 415**.
+
+### The process ledger is now empty
+
+`PXX-C12-006` (two reviews), `PXX-C12-009` (one) and `PXX-C12-002` (one) are all discharged. **Every
+`freeze-blocking` fix in this round has been read by an agent that did not write it**, which is what
+the rule asked for and what the round has been carrying open since the first one landed.
+
+Four reviews, four non-ACCEPT verdicts, and between them one wrong patch caught before it shipped
+(`da6c821`, REPLACE) and three fixes that were correct and incomplete. The rule's own justification —
+*"a correct diagnosis with a wrong patch is the failure mode a frozen repo cannot survive"* — turned
+out to understate it. **The more common failure was a correct diagnosis with a patch that closed the
+door it was pointed at and left the one beside it open**, three times out of four, each time invisible
+to a suite the author had just extended on purpose.
