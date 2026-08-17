@@ -979,13 +979,13 @@ has already lost once.
 | `PXX-3-001` | `tasks.rs:1654-1660` | Apply's sole durability barrier discards both the open failure and the sync failure |
 | `PXX-4-001` | `platform/window.rs` | `Child` never reaped — zombie viewers accumulate |
 | `PXX-4-002` | `clipboard.rs` | `clipboard::offer` runs synchronous I/O on the UI thread |
-| `PXX-4-003` / `-004` | `platform/mod.rs`, `open.rs` | Zero test coverage, both extractable offline |
+| `PXX-4-003`, `PXX-4-004` | `platform/mod.rs`, `open.rs` | Zero test coverage, both extractable offline |
 | `PXX-5-008` | `cli.rs:700-863` | The five termios `unsafe` blocks are entirely untested by CI |
-| `PXX-6-006` / `-007` | `extract.rs:117`, `table.rs:741` | Status written before the write it announces |
+| `PXX-6-006`, `PXX-6-007` | `extract.rs:117`, `table.rs:741` | Status written before the write it announces |
 | `PXX-7-004` | crate-wide | A nine-line `#[forbid(unsafe_code)]` patch covering 30 of 34 files |
 | `PXX-8-003` | `pending.rs:108,129-132` | "Discard all" reachable via the always-live `W` keybind with no guard |
 | `PXX-10-001` | `theme.rs:153` | The dangling `///` citation |
-| `PXX-10-002` / `-003` / `-005` | `README.md` | Version and date drift |
+| `PXX-10-002`, `PXX-10-003`, `PXX-10-005` | `README.md` | Version and date drift |
 
 **The status-order class was swept to completion rather than sampled.** Eleven production call sites
 of `change_settings`/`change_recents`: three correct and each carrying the rule as a comment, three
@@ -994,6 +994,105 @@ the rule and its violation in adjacent arms of one `match` — the `Recents` arm
 first and carries the comment explaining why, and the `Bookmarks` arm eight lines below does the
 opposite. That is class 9 in its purest recorded form: not a defect recurring over time, but a
 sibling site missed in the same sweep, in the same `match`.
+
+### The seventy-two that clear at tier 1
+
+The ledger above counts these. Counting them is not recording them.
+
+**For a `document-only` finding the disposition *is* the deliverable.** There is no diff to point at
+later, no test that goes green; the whole artifact is the sentence saying what was found and that it
+was decided not to act. So a finding filed `document-only` whose text lives only in a working
+register is indistinguishable, a week later, from a finding nobody made. That is class 12 — the
+record failing to record itself — and this round has no gate against it except writing the thing
+down. Sixty-two document-only and ten no-action findings follow, one line each, with the site that
+carries them.
+
+Nine of these were reached by an agent refuting its own hypothesis rather than filing it, and they
+are here at the same weight as the hits. A round that only records what it confirmed teaches the
+next round to stop looking.
+
+**Document-only — sixty-two.**
+
+| ID | Site | What it is |
+| --- | --- | --- |
+| `PXX-1-006` | `CORE.md:114-115` | Verdict (ii), the document must reword: five reachable concurrencies falsify *"one worker"*; the invariant the code holds is *at most one **task*** |
+| `PXX-1-007` | `ui/mod.rs:1857-1861` | Estimator preemption is flag, not join — estimator and task provably overlap for a bounded window; shared state benign by construction |
+| `PXX-1-009` | `ui/mod.rs:3440-3442` | `MIN_W`'s doc comment opens by explaining `SB_HEIGHT`'s arithmetic; *"that sum"* has no antecedent in its own text |
+| `PXX-1-010` | `ui/mod.rs:1844-1848` | `begin_apply` re-implements `work_running()`'s predicate pair privately, so any widening of "work" must be made twice |
+| `PXX-2-003` | `arch.rs:969-975` | `path_escapes` judges the stored *name* only; nothing anywhere inspects `Entry::symlink` or `Entry::hardlink`. The enabler for `PXX-2-001` |
+| `PXX-2-004` | `arch.rs:1425-1434` | `verify_passphrase` accepts `ARCHIVE_EOF` as proof the password is right — EOF on the first block means zero bytes were produced |
+| `PXX-2-005` | `arch.rs:1365-1387` | The CRC loop folds an `ARCHIVE_WARN` block in indistinguishably and labels the result *computed*; its only exit is EOF |
+| `PXX-2-006` | `arch.rs:584-588` | The only comparison in the file treating `ARCHIVE_WARN` as fatal; five siblings pair it with OK. The *warning* text is shown as the error |
+| `PXX-2-007` | `arch.rs:1272-1282` | Measured, not modelled: 30,795 bytes → 288.2 MiB peak RSS, 9,810:1. The OOM threshold was computed and deliberately **not** run |
+| `PXX-2-008` | `arch.rs:62-65` | No `AE_IFCHR`/`IFBLK`/`IFIFO`/`IFSOCK`, so a special file cannot be named: a FIFO lands inside dest in silence, a chardev aborts mid-loop |
+| `PXX-2-010` | `read_path.rs:409-410` | `every_traversal_shape_is_refused_end_to_end_and_writes_nothing` covers four *pathname* shapes and no link shape at all — why `PXX-2-001` was reachable |
+| `PXX-2-011` | `secret.rs:47-49` | Live plaintext copies bound at five instantaneously, unbounded cumulatively. §9's *"wiped after"* is true of INDIUM's memory, false of the process's |
+| `PXX-3-002` | `tasks.rs:1450-1452` | The comment names an atomic `create_new`/`O_EXCL` check that exists nowhere in `src/` — one repo-wide hit, and it is this comment |
+| `PXX-3-003` | `tasks.rs:1370-1375` | The canonicalize fallback is not an edge case but 100% of creations; `/home/x/a.7z` and `/home/x//a.7z` take two different locks, both proceed |
+| `PXX-3-004` | `scratch.rs:190-192` | `locks/` under the cache fallback sits outside the sweep by nobody's decision — one zero-byte file per archive ever applied to, permanently |
+| `PXX-3-005` | `tasks.rs:1535-1540` | `apply` returns `Ok(0)` for both a cancellation and a legitimate zero-entry rebuild — the class-6 shape `build_and_verify` was given `Option` to avoid |
+| `PXX-3-006` | `tasks.rs:2385-2390` | The assertion states a propagation property *in its own failure message* that it never tests; nothing cancels mid-member through a real sink |
+| `PXX-3-007` | `cancel_path.rs:208-211` | Seed settled, not a defect: P7's pre-cancellation behaviour travelled into the merged test and survives both sabotages |
+| `PXX-3-008` | `tasks.rs:1528-1534` | Answers `PXX-1-001` from the disk side — a worker panicking mid-Apply leaves no unrecoverable state. Agent 1's wedge is a UI defect, not a data one |
+| `PXX-3-009` | `tasks.rs:1521-1526` | Between the temp unlink and the writer's open, a planted symlink redirects the build. Needs a second principal writable in the archive's directory |
+| `PXX-3-010` | `write_path.rs:1160-1165` | Under root — which CORE §9 permits — the test `return`s as a **pass** having asserted nothing, and the skip is invisible in the tally |
+| `PXX-4-005` | `window.rs:105-130` | The ninth spawn site: one thread per argv entry, one call path, all before `run_native`, self-terminating. No accumulation path exists |
+| `PXX-4-006` | `store.rs:328-341` | Cleanup guards only the *rename* failing; an `ENOSPC` at write leaves `settings.toml.tmp.<pid>` permanently, and no sweep covers `config_home()` |
+| `PXX-4-007` | `ui/mod.rs:504-506` | If both config files break at one startup, `.or_else` drops `recents.notice` from the status line. The `was_broken` latches are still correct |
+| `PXX-5-001` | `cli.rs:671-683` | The six const-asserts cannot separate `NCCS` 32–35 — four values, one layout — and cannot check `ECHO` or `TCSAFLUSH` at all. False confidence, not a live hazard |
+| `PXX-5-002` | `cli.rs:564` | `must_exist` tests `is_file()` and prints *"does not exist"*. The directory plainly exists; it is the wrong kind of path |
+| `PXX-5-003` | `main.rs:116` vs `cli.rs:564` | One program, two entry paths, two different answers to "does this archive path exist". Class 9. Filed `owner_agent: unidentified` rather than guessed; routed to agent 8 |
+| `PXX-5-005` | `arch.rs:631` vs `:584` | `next_entry` exempts `ARCHIVE_WARN`; `Reader::open` does not — so `failure()` prints the raw libarchive warning verbatim, against its own doc comment |
+| `PXX-5-006` | `cli_path.rs:148`,`:169`,`:443`,`:683` | All three exit codes are behaviourally pinned. What is missing is documentation, not coverage — the finding was narrowed to match |
+| `PXX-5-007` | `cli.rs:508` vs `:403` | `cat` exempts a literal `-` from flag rejection; `extract` does not. `cli.rs:497` records this gap biting the file before, *in the opposite direction* |
+| `PXX-5-009` | `cli.rs:118-129` | Hypothesis tested and refuted: `run()`'s centralized `out.flush()` catches the deferred `/dev/full` error in all five cases. Reframed as a test-gap |
+| `PXX-5-010` | `util.rs:270-284` | The doc comment enumerates three behaviours; the function's **first line** is an undocumented fourth |
+| `PXX-5-011` | `ui/mod.rs:843`, `:867` | The identical singular/plural ternary duplicated 24 lines apart, where `cli.rs` factors it into one helper and says why. Routed to agent 1 |
+| `PXX-6-001` | `table.rs:356-367`, `:1147-1189` | The cursor-ring test validates the ring's *arithmetic* and never reads the shipped `CornerRadius::ZERO`; reverting line 363 to the P23 bug leaves it green |
+| `PXX-6-002` | `inspector.rs:71-72`, `:827-830` | Production computes the pane's chrome dynamically at **36**; the test hardcodes **24** and the doc comment repeats it. Production is the correct half |
+| `PXX-6-003` | `table.rs:1050-1051`, `:1078-1082` | Two doc comments claim 238 from an Inspector floor of 260. With the real floor (272) it is **226**; the assertions' literals are unaffected |
+| `PXX-6-004` | `table.rs:16`, `:147` | `ROW_HEIGHT` and the header's `22.0` are literal, undocumented and untested — nothing pins that they still clear `BODY` in the shipped face |
+| `PXX-6-005` | `table.rs:234-241` | Seed settled — doc-drift, code correct. The *"18% larger"* justification is two-face-era and the condition can no longer arise; the call itself stands |
+| `PXX-6-008` | `extract.rs:242-270`, `newarchive.rs:85` | `complete_path` runs a synchronous `read_dir` on the UI thread, every frame, from two popups, with no cache |
+| `PXX-6-009` | `table.rs:551`, `:682` | One filesystem stat per visible row per frame in a **non-virtualized** `ScrollArea`. Recents cap at 15; no bookmarks cap was found |
+| `PXX-6-010` | `measure.rs:53` | Password and Measure are the only two `egui::Modal` popups, but CORE tags only Password `(modal)`. Recorded, **not settled** — rule 8 |
+| `PXX-7-002` | `Cargo.toml:23` | `sevenz-rust2` one patch behind; both changelogs read, and the gap is non-security |
+| `PXX-7-003` | `Cargo.lock:2513` | Sibling-crate advisory context for `PXX-1-005` |
+| `PXX-7-005` | `ci.yml:63-68` | Adding `cargo audit` as a push gate is a genuine policy tension — an advisory-db update can redden an unchanged tree, the exact red the no-cache policy exists to prevent. Both sides presented, not decided |
+| `PXX-7-010` | `PXX.md:855` | The 385-vs-384 seed does not reproduce: 384 anchored attributes, no `#[cfg]`-gated test, no `harness = false` |
+| `PXX-7-011` | `make-deb.sh:158-164` | Names a test that does not exist; the real one is `core_and_the_deb_name_the_same_dlopened_libraries`. A second dangling citation, in `build/` rather than `src/` |
+| `PXX-8-001` | `model.rs:33-40` | `Row::entry_index()` has zero references repo-wide. Flagged as *possibly deliberate API completeness* rather than recommended for deletion |
+| `PXX-8-004` | `password.rs:167-171`, `:263-270` | The header's *"until submit or cancel clears them"* assumes those are the only exits. A compositor-driven close reaches neither, so the fields are not even length-zeroed |
+| `PXX-8-005` | `main.rs:42`, `:151-156` | No `catch_unwind`, no `panic::set_hook`, no `Drop for Indium`. One process, N windows — a panic in the update loop takes them all, at exit 101 |
+| `PXX-8-006` | `keys.rs:25-49`, `:132-172` | `the_popup_and_core_agree_about_the_keys` cannot fail for the five chords it lists: dispatch `continue`s on `ctrl` before `match key`. All five could break and stay green |
+| `PXX-8-007` | `settings.rs:247-302` | The panel test extracts only the string after each `theme::section(ui, "` and never inspects what is drawn *within* a section |
+| `PXX-8-008` | `about.rs:81`, `:197-267` | Neither test exercises `show()`; replacing `field(ui, "Date", RELEASE_DATE)` with a literal leaves both green |
+| `PXX-9-001` | `theme.rs:17` | **WRONG.** The five-rung ladder measures 1.518–1.953, not *"1.37 and 1.87"* — P18 changed "Six" to "Five" in this sentence and left the range untouched |
+| `PXX-9-002` | `theme.rs:207-210` | **WRONG.** `EDGE` measures 1.886–2.031, not 1.88–1.95. Hue, not luminance: `composite()` mixes in gamma bytes, and green carries 0.7152 of WCAG luminance |
+| `PXX-9-003` | `theme.rs:220-224` | **WRONG.** Ten pairing interpretations tried, none lands in 2.24–2.45; the one reproducible cleanly gives **1.397** — the very figure the comment disowns |
+| `PXX-9-004` | `theme.rs:17-18`, `:164-165` | **WRONG.** The 318°/328° narrative mixes CIELAB and HSV; no single convention makes both halves true, and the real gap is 20–48°, not ~10° |
+| `PXX-9-005` | `theme.rs:1456` | **WRONG, and backwards.** True linear blending gives 2.637 — *lower* than the gamma-byte 3.72 the code uses. The code is right; only the justifying sentence is not |
+| `PXX-9-006` | `theme.rs:183` | ΔE 27.4 modelled; actual 27.78–27.98, and an alpha sweep found no byte value producing 27.4. The rhetorical point survives either way |
+| `PXX-9-007` | `theme.rs:2366-2385` | `only_three_corner_radii_exist` scans seven `Visuals` fields, not the program — a name promising whole-program coverage over a struct-field census |
+| `PXX-9-009` | `theme.rs:1102` | *"The two must stay the same number"* is asserted by nothing; it holds by shared identifier. Named as a third category — **self-pinned** — between pinned and unpinned |
+| `PXX-9-010` | `theme.rs:3476`, `:3486` | The repo-wide lints are the sabotage-resistant runtime-read kind but key on **lexical** matches; a `use egui::Window;` alias would not match. A family characteristic, not a defect |
+| `PXX-10-004` | `README.md:243` | Names Fira; Caskaydia ships. Known-deferred — it moves at v2.5 with the badge and the install filenames |
+
+**No-action — ten.** Filed, verified, and deliberately not acted on. Four of them exist so that a
+later hand does not "fix" something that is already correct.
+
+| ID | Site | What it is |
+| --- | --- | --- |
+| `PXX-1-008` | `ui/mod.rs:3530-3534` | The second `R_ZONE` leaning site **does not lean**: `sb_progress_geometry` reads the constant parametrically, degrades to old behaviour at 0, and has no cursor-ring-style ceiling |
+| `PXX-2-009` | `arch.rs:53-56` | **Recorded so it is never "fixed":** `EXTRACT_PERM` drops s-bits by design, and `SECURE_NOABSOLUTEPATHS` *cannot* be added — `set_pathname` writes the absolute join before extract, so the flag would refuse every extraction |
+| `PXX-5-004` | `cli.rs:594-609` | Agent 5 rejected its own candidate fix as worse than the status quo — adding `Other` to the retry allowlist would re-prompt on every unrelated I/O error. The correct fix is upstream. Rule 7 and the escape valve, working |
+| `PXX-7-001` | `Cargo.lock:1562` | `memoffset` clears both advisories **and** never enters the Linux build: `cargo tree --target x86_64-unknown-linux-gnu -i memoffset` prints nothing |
+| `PXX-7-006` | `release.yml:385-429` | The draft gate behaves exactly as the ritual assumes: no draft → `gh release view` fails → `exit 1` |
+| `PXX-7-007` | `verify.sh:649-698` | All three font/copyright checks pass against the Caskaydia files — traced by hand against real bytes rather than by running the script |
+| `PXX-7-008` | `verify.sh:256-318` | The glibc floor computes 2.43 against target 2.36 and FAILs. That is the proof the gate works. **No relaxation proposed** — rule 6 |
+| `PXX-7-009` | `package_path.rs` | A naive grep returns 14 `#[ignore]`; eight are real attributes and six are backtick prose. The repo-wide real total is **10**, matching cargo exactly |
+| `PXX-8-002` | `settings.rs:123`,`:163`,`:188`,`:204-205` | The four routed status-order sites, closed on the record as clean — three set no status at all, and the fourth is status-first-save-last with its own correct comment |
+| `PXX-8-009` | `tray.rs:89-91` | Corroborates `PXX-1-004` without re-filing it; `PXX-8-003`'s patch covers both sites |
 
 ### Three convergences — the same line, reached from two directions
 
