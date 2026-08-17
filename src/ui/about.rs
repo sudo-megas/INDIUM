@@ -25,7 +25,7 @@ const SOURCE: &str = "https://github.com/sudo-megas/INDIUM";
 /// The test is named in prose rather than linked: it lives in this file's `#[cfg(test)]`
 /// module, which `cargo doc` does not compile, so an intra-doc link to it resolves to
 /// nothing the first time a docs job is added.
-const RELEASE_DATE: &str = "2026-08-14";
+const RELEASE_DATE: &str = "2026-08-18";
 const LICENCE: &str = include_str!("../../LICENSE");
 
 pub fn show(app: &mut Indium, ctx: &egui::Context) {

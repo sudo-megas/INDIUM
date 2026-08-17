@@ -1,3 +1,65 @@
+indium (2.5.0-1) unstable; urgency=medium
+
+  * A correct password is accepted on an encrypted 7z that INDIUM made. Every encrypted 7z
+    it writes hides the file names as well as the contents, and the check that decides
+    whether a password is right asked a reader that cannot see past those names. It
+    answered "the headers are encrypted", the check read that as "wrong password", and it
+    did so for every archive of the kind this program produces. The check now asks the
+    reader that can answer, before the one that cannot.
+  * Removing a member from an archive rooted at `./` no longer destroys the rest of it.
+    That is the shape `tar -cf x.tar -C dir .` makes, which is the commonest way a tar gets
+    written. The root has no name once normalised, so the list INDIUM planned against had
+    one fewer element than the list it walked, and it paired them by position: every
+    payload was written under its neighbour's name and the last member fell off the end and
+    was not written at all. Apply reported success, and the check that should have caught
+    it compares sizes only for regular files -- so the one member destroyed outright was
+    the one member the check skipped. Both halves are gated now, and the rebuilt archive
+    comes out unrooted deliberately rather than by accident.
+  * Extraction cannot write outside the folder that was chosen. The guard against it was a
+    check on the member's stored name, plus two protections the archive reader applies --
+    and the reader that handles 7z archives with encrypted names is a different one, which
+    applies neither. The stored name did not have to escape anything: extracting an
+    ordinary tar that carries a symlink plants that symlink on disk, which is normal and
+    succeeds, and extracting into the same folder afterwards followed it. Extraction now
+    walks down to each file one directory at a time, refusing a link where a directory
+    should be, and writes by removing the name first and creating it exclusively -- which
+    also refuses a hard link, where refusing to follow a symlink would not have.
+  * INDIUM no longer refuses to extract an archive it wrote itself. A member stored as
+    `./alpha.txt` was read as an attempt to climb out of the destination, because the check
+    rejected every part of a path that was not a plain name, and `.` is the way a path says
+    "here". A name climbing out with `..`, and an absolute name, are still refused.
+  * Extracting over a file whose permissions you had tightened keeps them tightened. It had
+    been resetting them to the default, which the previous way of writing the file happened
+    to preserve and the new one did not.
+  * A rebuild keeps the archive's permissions, and never widens them while it works. An
+    archive readable only by its owner was rebuilt into a working copy that anyone on the
+    machine could read, sitting beside the original under a name that could be guessed, for
+    as long as the rebuild took -- measured at two thirds of a second on a 64 MiB archive,
+    and for an encrypted one that working copy is the ciphertext. The permissions are now
+    set before the first byte is written rather than after the last. The settings file is
+    saved the same way, and for the same reason.
+  * Removing a member from an archive whose file names are encrypted says what is wrong.
+    INDIUM cannot rebuild one of those yet, and the message it gave asked for a password
+    that had already been given and was already correct.
+  * The temporary names this program makes in the shared temporary directory are its own.
+    Four were predictable enough that another account on the same machine could occupy the
+    name first. Rather than four separate corrections, a check now reads the whole tree and
+    refuses a fifth.
+  * A lock file this account cannot write is still a lock file. It had been read as an
+    absent one, so a second window could open on an archive the first was already
+    rebuilding.
+  * The notice that appears when the settings file cannot be read no longer promises a copy
+    that is not there. It said "a copy is at" whenever the name was occupied, including
+    when what occupied it was a link pointing at nothing.
+  * No feature and no redesign. The window is v2.3's, the formats are the same eight, and
+    the estimator returns the same figures. This is the round that reads the code rather
+    than adding to it: 416 tests pass and ten more wait on a published package, every fix
+    that could have blocked the release was read by a party that did not write it, and the
+    faults judged too large to repair safely this close to a freeze are written down in the
+    round's document rather than left for the next reader to find.
+
+ -- sudo-megas <sudo-megas@users.noreply.github.com>  Tue, 18 Aug 2026 21:00:00 +0300
+
 indium (2.3.0-1) unstable; urgency=medium
 
   * The window is drawn in Cascadia Mono rather than Fira Mono. Both are monospaced and

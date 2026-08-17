@@ -1,7 +1,7 @@
 # Maintainer: sudo-megas <sudo-megas@users.noreply.github.com>
 
 pkgname=indium
-pkgver=2.3.0
+pkgver=2.5.0
 # The one place the package revision is written. make-deb.sh reads its Debian revision
 # out of this line, verify.sh builds both default artefact paths from it, and the release
 # workflow derives the tag it will accept from it — so the two packages cannot disagree
