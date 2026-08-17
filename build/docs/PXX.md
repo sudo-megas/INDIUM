@@ -1592,3 +1592,126 @@ number it found is `theme.rs`-comment-local: the file disagreeing with its own a
 git history, never with the maker's text. Agent 6 also drafted nothing, on the grounds that a draft
 for `PXX-6-010` would mean guessing which side of the Password/Measure asymmetry is the anomaly —
 which is the settling rule 8 forbids. Both are correct calls and are recorded as such.
+
+---
+
+## Phase 3 — tier 2 completed: the seven that were re-run, and the second refutation
+
+The `ui/mod.rs` set was assigned to a confirmer that **died on a session limit before reporting a
+single verdict**. Its only output was an observation that `HEAD` had moved beneath it. The seven were
+re-run rather than assumed, because a tier that reports on findings nobody re-derived is worth less
+than no tier at all — and the re-run returned **six confirmations and one refutation**, which is not
+what a rubber stamp returns.
+
+The brief carried `file` + `line_range` + a one-word category and nothing else, plus the scoping rule
+the earlier leak taught: **never `grep -r` from the repository root.** It reported no slips, and its
+`git status --porcelain` came back empty.
+
+### The verdicts
+
+| key | ID | site | verdict | what the blind pass said |
+| --- | --- | --- | --- | --- |
+| A1 | `PXX-1-001` | `ui/mod.rs:756-759`, `:1115-1117` | **CONFIRMED** | *"The drain observes only messages, never channel state"* — `try_iter()` yields identically on `Empty` and `Disconnected`, so a worker that dies without sending its terminal message is indistinguishable from a slow one. Located the reason precisely: in both spawn closures the terminal send lives **inside** the match on the call's return value (`:2162-2182`, `:1896-1898`), so an unwinding thread sends nothing at all. `progress.is_some()` then holds line 1115 true and the UI busy-repaints at full frame rate for the life of the process |
+| A2 | `PXX-1-002` | `ui/mod.rs:1432-1434` | **CONFIRMED** | *"`self.entries` is not the archive — during a listing it is a growing prefix of it."* Confirmed the refusal is permanent for that queue and that `staging_refusal()` (`:1395-1424`) checks creation, format and encryption and **says nothing about `self.listing`** |
+| A3 | `PXX-1-003` | `ui/mod.rs:1861-1863` | **CONFIRMED, and extended** | Same mechanism, then further than the original: on `Failed` or `Cancelled` there is no re-open, so the truncated table **persists indefinitely with nothing on screen saying so** — and `E` with an empty selection builds `wanted` from `self.entries` (`:2200-2204`), extracting only the partial set and reporting *"Extracted N entries"* as if that were the archive |
+| A4 | `PXX-1-004` | `ui/mod.rs:1038-1041` | **CONFIRMED, and the fix located** | Named the value the handler should have read: **`self.apply_target`**, recorded at `:1891` with a comment stating exactly why it exists — *"so `on_exit` cannot be told a target this Apply never had"* — and set to `None` at `:1022`, sixteen lines before `:1038` re-derives the same fact from mutable state |
+| A5 | `PXX-1-005` | `ui/mod.rs:2241-2258` | **CONFIRMED** (`certain` on the buffering) | Found the doctrine the fallback contradicts, four lines above the neighbouring function: *"`io::copy` and not `read_to_end`: the whole point is that no member is ever held whole"* (`arch.rs:1312`). And the contrast that proves the shape was already known here — `request_preview` (`:1362-1375`) caps at `PREVIEW_CAP` **and** runs on a worker with a channel |
+| A6 | `PXX-1-011` | `ui/mod.rs:3423-3429` | **CONFIRMED, and worsened** | Added the second-order effect: because `change_settings` leaves `self.settings` untouched on `Err`, **the bookmark is still in the sidebar list on the very next frame** — the window shows the row while the status bar claims it was removed |
+| A7 | `PXX-4-002` | `ui/mod.rs:2478` | **REFUTED** | See below |
+
+**Two negatives it recorded rather than dropped**, and they are worth as much as the confirmations,
+because they mark where the next round need not look:
+
+- The `wake` computation (`:786-793`) omits `picker_msgs` and `reveal_msgs` — and this is **harmless**:
+  both workers `tx.send(...)` then `ctx.request_repaint()` in that order and deliver exactly one
+  terminal message (`:2002-2005`, `:2021-2024`), so a single frame suffices. This is adjacent to A1
+  and is *not* A1: A1 is about a thread that sends nothing, and that claim stands untouched.
+- `work_running()` inside `open_archive` cannot silently skip A4's re-open, because `apply_rx` is
+  cleared at `:1021` before the call and `extract_rx` is set only at `:2146`. The confirmer suspected
+  this first, checked it, and reported the negative — the target's *provenance* is the defect, not a
+  missed gate.
+
+### `PXX-4-002` refuted — the asymmetry was the design, not the defect
+
+The original filed `clipboard::offer()` as a UI-thread hazard on the grounds that its two siblings,
+`open_directory()` and `paste_paths()`, are both `thread::spawn`-wrapped and it is not. Every fact
+holds. The blind pass answered **`NO`** anyway, and the reason is that the asymmetry is load-bearing:
+
+| | blocks on | timeout available? | threaded? |
+| --- | --- | --- | --- |
+| `request_paste` | *"whichever program owns the selection"* — an untrusted peer, writing into a pipe | **no** (stated at `:2027-2031`) | **yes** |
+| `clipboard::offer` | the compositor: one connect-and-round-trip | bounded by the compositor | **no** |
+
+And the fork hazard that would have made it serious is absent. **Verified here, in the vendored
+crate:** `wl-clipboard-rs` 0.9.3's `copy_internal` takes the non-foreground branch, which is
+`thread::spawn` at `copy.rs:975` — the only two appearances of the word *fork* in that file are doc
+comments at `:706` and `:754` describing how `wl-copy` uses the API, not what this crate does. So the
+multithreaded GUI process is never forked, and the module header's claim at
+`platform/clipboard.rs:57-61` — *"serves requests from a thread inside this process"* — is accurate.
+The serving thread is not a leak either: `Event::Cancelled => source.destroy()` (`copy.rs:346`) plus
+the serve loop's `all_destroyed` exit (`:526-536`) retires a replaced offer's thread. Failure returns
+`Err` and is handled: `Err(e) => self.status = Status::bad(e)` at `mod.rs:2492`.
+
+**REFUTED. Recorded as the second refutation of this tier, and not reclassified** — for the same
+reason `PXX-7-004` was not. The severity a fleet agent filed is that agent's; editing it to agree
+with a later argument is the class-12 shape this document exists to prevent. The disposition is the
+maker's under rule 7, and both refutations are put in front of him with their reasoning intact.
+
+That two of twenty-one came back refuted, both with the facts conceded and the *inference* denied, is
+the strongest single argument for the tier existing. Neither would have been caught by a confirmer
+that read the original's reasoning first.
+
+### Three more findings, and the first is a comment promising what the code omits
+
+| ID | Site | What it is | Severity |
+| --- | --- | --- | --- |
+| `PXX-T2-009` | `ui/mod.rs:2141-2144` | `spawn_extract` installs a fresh cancellation flag **without** the `self.cancel.store(true, …)` that `reset_view:620` and `begin_apply:1862` both perform — and the two lines immediately above it read *"Same preemption Apply makes, for the same reason."* **The comment asserts the parity the code does not have.** A listing in flight when an extraction starts is left holding an `Arc` no code path can ever raise, so P7 §7's rug-pull guard cannot stop that walk; it self-heals only because the replaced `list_rx` makes the worker's sends fail. The exact inverse of `PXX-1-003`, at the third of the three `Arc::clone(&self.cancel)` sites | fix-in-v2.5 |
+| `PXX-T2-010` | `ui/mod.rs:1023-1027` vs `:736` | `ApplyMsg::Done` sets *"Applied. The archive now holds N entries."*, then calls `open_archive` at `:1055`, which sets `self.status = "Reading …"` unconditionally at `:736` before a single frame is painted; `ListMsg::Done` then replaces that with the archive's name. **The only confirmation that a rebuild succeeded is visible for zero frames.** Unlike a discarding open, it has no `discarded_on_open`-style carrier (`:728`) to ride on | fix-in-v2.5 |
+| `PXX-T2-011` | `wl-clipboard-rs-0.9.3/src/copy.rs:988` | `copy_internal` ends `if let Some(err) = rx.recv().unwrap()`. A panic inside the library's own prepare thread drops `tx`, `recv()` returns `Err`, and the `unwrap()` **panics INDIUM's main thread and kills the process.** Dependency-internal and requiring a prior panic — but explicitly *outside* the standing fact that `src/` carries no `unwrap` beyond `#[cfg(test)]`, which is why it is written down rather than assumed covered | document-only |
+
+All three verified here against source: the three `Arc::clone(&self.cancel)` sites are `:740`, `:1893`
+and `:2155`, and `self.cancel.store` appears at exactly `:620` and `:1862` and nowhere else;
+`open_archive:736` sets the status with no guard; `copy.rs:988` is as quoted.
+
+`PXX-T2-009` is the round's cleanest class-9 specimen — **the same defect one door over, in the
+opposite direction**, with a comment above it claiming the parity is already there. `PXX-9-008`'s
+absence and `P15:75`'s *"a sweep is not a habit"* both said to look for this; it was found by giving
+one confirmer the neighbouring lines and no story about them.
+
+### One prose figure checked, and it was right
+
+The original `PXX-1-011` says the `Recents` arm sits *"eight lines above"*; the blind pass wrote
+*"four lines above"*. Both are true of different anchors — the two **writes** are at `:3419` and
+`:3427`, eight apart, and the comment stating the rule ends four lines before the `Bookmarks` arm
+opens at `:3423`. **No correction is owed, and this is recorded because it looks like a drift and is
+not.** In a round that hunts numbers nothing can check, a figure that survives checking is worth the
+sentence.
+
+### Tier 2, closed
+
+| Outcome | Count | Findings |
+| --- | --- | --- |
+| **CONFIRMED** | **18** | The mechanism re-derived independently, from the lines alone |
+| **DIVERGENT** | **1** | `PXX-2-002` — the same six lines, two different defects. Owes a third look before any patch |
+| **REFUTED** | **2** | `PXX-7-004` (severity; facts conceded), `PXX-4-002` (mechanism; facts conceded) |
+| **Total** | **21** | Every `fix-in-v2.5` finding has met tier 2 |
+
+**Tier 2 is complete at 21 of 21.** Eleven findings were produced *by* the verification tier that the
+eleven-agent fleet did not file — `PXX-T2-001` through `-011` — which is the measurement that matters
+most about it: the tier is not a formality bolted onto the audit, it found roughly a tenth again as
+much as the audit did, by the single expedient of not showing anyone the answer first.
+
+### The register's total, stated once so nothing has to infer it
+
+| Source | Count |
+| --- | --- |
+| Numbered fleet findings (`PXX-<agent>-<nnn>`) | **95** |
+| Closed seed, never severity-tagged (`PXX-385`) | **1** |
+| Filed by the verification tier (`PXX-T2-001` … `-011`) | **11** |
+| **Total findings in this round** | **107** |
+
+The fleet ledger above is **left exactly as the clerk wrote it at 96** and is not restated to 107.
+Rule 4 makes this document append-only, and a count is corrected by a later count that says what it
+includes, not by an edit that makes the earlier one appear never to have been wrong. `PXX-9-008` is
+not among the 95: it is a numbering gap, and the only place that string appears is the clerk's own
+sentence saying so.
