@@ -1100,21 +1100,52 @@ pub fn extract(
         }
     }
 
-    // Does libarchive refuse this archive's headers outright? If so the 7z reader owns
-    // both the verification and the data, and asking libarchive to check the password
-    // would fail for a reason that has nothing to do with the password being wrong.
-    let headers_need_sevenz =
-        looks_like_7z(path) && Reader::open(path, passphrase)?.next_entry().is_err();
+    // Who owns the **data**? This used to ask whether libarchive could read the archive's
+    // *headers* and route the bytes on the answer, and for a 7z those are two different
+    // questions. **PXX-2-002.**
+    //
+    // `7z a -p` — the 7-Zip command line's default, since `-mhe=on` is what adds header
+    // encryption — writes AES-256 content behind headers in the clear. libarchive parses those
+    // headers happily, so the old flag came back `false`, extraction stayed with libarchive, and
+    // libarchive cannot decrypt 7z AES content at all. Measured: its passphrase check returns
+    // "wrong" for the **right** password and for a wrong one alike, so it was never verifying,
+    // only failing. INDIUM listed the archive, showed its members, and then refused every read
+    // with `Wrong password.` — for the commonest encrypted 7z there is.
+    //
+    // So the question asked is now the one that matters: for a 7z, any encrypted member means the
+    // 7z reader owns the data, whatever libarchive can make of the headers. Encrypted headers
+    // still route here too, by the second arm, which is what this flag was originally for.
+    let sevenz_owns_the_data = looks_like_7z(path)
+        && (selected.iter().any(|e| e.encrypted)
+            || Reader::open(path, passphrase)?.next_entry().is_err());
 
     if selected.iter().any(|e| e.encrypted) {
         match passphrase {
             None => return Err(ArchiveError::NeedPassword),
             Some(secret) => {
-                // The listing above already succeeded, and an encrypted-header archive
-                // cannot be parsed at all without the right password — so reaching this
-                // line *is* the verification, and a second one through a reader that
-                // cannot open the file would only ever report a false failure.
-                if !headers_need_sevenz && !verify_passphrase(path, secret)? {
+                if sevenz_owns_the_data {
+                    // Routing the data is only half of it, and the other half is why this is not
+                    // simply a one-line change. With the headers in the clear the listing above
+                    // succeeds **whatever the password is**, so it verifies nothing — and the
+                    // first thing that would notice is the per-entry decode, by which time
+                    // `create_dir_under` has already put directories into the destination and
+                    // this function's own promise that a wrong password "costs nothing and leaves
+                    // no partial output behind" is broken. A blind confirmer reached that face of
+                    // the same six lines independently.
+                    //
+                    // So the check is made by the reader that can actually make it, here, while
+                    // the filesystem is still untouched. One byte is enough: a wrong key survives
+                    // AES — there is nothing in it to check a key against — but the LZMA2 stream
+                    // behind it does not survive being handed noise, and the cap stops a
+                    // verification from decoding a gigabyte to learn something the first block
+                    // already said.
+                    if let Some(entry) = selected
+                        .iter()
+                        .find(|e| e.encrypted && !e.is_dir && e.size > 0)
+                    {
+                        crate::sevenz::read_entry(path, &entry.path, 1, Some(secret))?;
+                    }
+                } else if !verify_passphrase(path, secret)? {
                     return Err(ArchiveError::WrongPassword);
                 }
             }
@@ -1127,7 +1158,7 @@ pub fn extract(
     // leaving an archive that opens and then refuses to give anything up. The guards
     // above are untouched — the decoder changes where the bytes come from, never what is
     // allowed to be written.
-    if headers_need_sevenz {
+    if sevenz_owns_the_data {
         // The trait for `write_all`, brought in here as the two `Read` uses in this file are.
         use std::io::Write as _;
         // `.mode()` on `OpenOptions`, and `from_mode`/`mode` on `Permissions`. Local for the same

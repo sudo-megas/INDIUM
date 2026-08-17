@@ -580,3 +580,142 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod content_only_encryption {
+    use super::*;
+
+    /// Build a `7z a -p` archive: AES-256 on the content, headers in the clear.
+    ///
+    /// This is the **default** for the 7-Zip command line — `-mhe=on` is what adds header
+    /// encryption — so it is the ordinary shape of an encrypted 7z rather than an exotic one.
+    /// It is built here rather than committed because a fixture is not something this repo
+    /// puts in its history, and because `Writer::create` cannot make one: it ties
+    /// `set_encrypt_header` to the same flag that turns AES on, so every 7z INDIUM encrypts
+    /// has ciphertext headers. That is exactly why this case had no coverage.
+    fn write_content_encrypted(path: &Path, password: &str, members: &[(&str, &[u8])]) {
+        let mut inner = ArchiveWriter::create(path).expect("could not open the 7z for writing");
+        inner.set_content_methods(vec![
+            AesEncoderOptions::new(password.into()).into(),
+            Lzma2Options::from_level(6).into(),
+        ]);
+        inner.set_encrypt_header(false);
+        for (name, body) in members {
+            let meta = Meta {
+                out_path: (*name).to_string(),
+                size: body.len() as u64,
+                is_dir: false,
+                mode: 0o644,
+                mtime: Some(1_704_164_645),
+                atime: None,
+                ctime: None,
+                uid: 0,
+                gid: 0,
+                uname: None,
+                gname: None,
+                symlink: None,
+                hardlink: None,
+            };
+            inner
+                .push_archive_entry(seven_z_entry(&meta), Some(&mut &body[..]))
+                .unwrap_or_else(|e| panic!("could not write {name}: {e}"));
+        }
+        inner.finish().expect("could not finish the archive");
+    }
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("indium-7z-content-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        dir
+    }
+
+    /// **`PXX-2-002`.** A correct password was refused on the commonest encrypted 7z there is.
+    ///
+    /// The routing flag asked *"can libarchive read this archive's headers?"* and used the answer
+    /// to decide who owns the **data**. For a 7z those are different questions: headers in the
+    /// clear parse fine, so the flag came back false, extraction stayed with libarchive — and
+    /// libarchive cannot decrypt 7z AES content at all. Measured: its passphrase check returns
+    /// "wrong" for the right password and for a wrong one alike, so it was not verifying
+    /// anything, it was failing. The reader that *can* decrypt this was sitting one branch away.
+    #[test]
+    fn a_content_encrypted_7z_extracts_with_the_right_password() {
+        let dir = scratch("good");
+        let path = dir.join("content-only.7z");
+        write_content_encrypted(
+            &path,
+            "indium",
+            &[
+                ("alpha.txt", b"INDIUM fixture alpha\n"),
+                ("sub/beta.txt", b"beta\n"),
+            ],
+        );
+
+        let secret = Secret::from_text("indium");
+        let listing = crate::arch::list_all(&path, Some(&secret)).expect("it must list");
+        assert!(
+            listing.iter().any(|e| e.encrypted),
+            "the fixture is only the case if its members read as encrypted: {listing:?}"
+        );
+
+        let dest = dir.join("out");
+        let wanted: std::collections::HashSet<String> =
+            ["alpha.txt".to_string(), "sub/beta.txt".to_string()]
+                .into_iter()
+                .collect();
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let n = crate::arch::extract(&path, &wanted, &dest, Some(&secret), None, &cancel)
+            .expect("the right password must extract, not be called wrong");
+
+        assert_eq!(n, 2, "both members must come out");
+        assert_eq!(
+            std::fs::read(dest.join("alpha.txt")).expect("alpha must be on disk"),
+            b"INDIUM fixture alpha\n"
+        );
+        assert_eq!(
+            std::fs::read(dest.join("sub/beta.txt")).expect("beta must be on disk"),
+            b"beta\n"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The other face of `PXX-2-002`, which a blind confirmer reached from the same six lines.
+    ///
+    /// Routing the data to the 7z reader is only half a fix. With the headers in the clear the
+    /// listing succeeds whatever the password is, so nothing before the per-entry decode knows
+    /// the key is wrong — and by then `create_dir_under` has already put directories into the
+    /// destination, contradicting this function's own promise that a wrong password *"costs
+    /// nothing and leaves no partial output behind."* So the verification moves to the reader
+    /// that can actually perform it, and it runs while the filesystem is still untouched.
+    #[test]
+    fn a_wrong_password_on_a_content_encrypted_7z_leaves_the_destination_untouched() {
+        let dir = scratch("bad");
+        let path = dir.join("content-only.7z");
+        write_content_encrypted(&path, "indium", &[("sub/beta.txt", b"beta\n")]);
+
+        let dest = dir.join("out");
+        let wanted: std::collections::HashSet<String> =
+            ["sub/beta.txt".to_string()].into_iter().collect();
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let got = crate::arch::extract(
+            &path,
+            &wanted,
+            &dest,
+            Some(&Secret::from_text("not-the-password")),
+            None,
+            &cancel,
+        );
+
+        assert!(
+            matches!(got, Err(ArchiveError::WrongPassword)),
+            "a wrong password must be reported as one: {got:?}"
+        );
+        assert!(
+            !dest.join("sub").exists(),
+            "a refused extraction must leave no directory behind it"
+        );
+        assert!(!dest.join("sub/beta.txt").exists(), "and certainly no file");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
