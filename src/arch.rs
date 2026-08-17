@@ -886,7 +886,11 @@ pub fn looks_like_7z(path: &Path) -> bool {
 /// against AES+COPY, where there is no compressor at all, so the refusal keys on the AES coder
 /// rather than on what sits behind it. Routing encrypted 7z data here therefore takes away no read
 /// libarchive ever had, and an encrypted member in a codec this crate lacks now reports the codec
-/// instead of a false wrong-password.
+/// instead of a false wrong-password — **through `indium extract`, which propagates the error. Not
+/// at the window**, where `ui/password.rs` flattens every `Err` to `false` with `unwrap_or(false)`
+/// and so still presents a missing codec, and a malformed archive, as three wrong-password
+/// attempts. The refusal to swallow `Err` here is real and is undone one frame up; the sentence
+/// claimed the whole journey when it had only made its own leg of it.
 fn list_7z(path: &Path, passphrase: Option<&Secret>) -> Option<Result<Vec<Entry>, ArchiveError>> {
     if !looks_like_7z(path) {
         return None;
@@ -1066,14 +1070,26 @@ fn create_dir_under(root: &Path, rel: &Path) -> Result<(), ArchiveError> {
 /// "known **before starting**"), so a wrong password costs nothing and leaves no
 /// partial output behind.
 ///
-/// **One exception, measured and left standing rather than asserted away.** For a 7z whose
-/// members are AES-encrypted with no compressor behind them, a wrong key's noise passes through
-/// the COPY coder intact, so the pre-flight cannot tell it from plaintext. That read is refused
-/// later, by the member's own CRC — after `create_dir_under` has already made directories in the
-/// destination. No file's contents are written and nothing existing is overwritten; empty
-/// directories are left behind. Closing it properly means extracting through a temporary
-/// directory and renaming on success, which is a larger change than a freeze round should carry,
-/// so the sentence above is qualified instead of the code being made to fit it.
+/// **One exception, measured and left standing rather than asserted away.** For a 7z whose members
+/// are AES-encrypted with no compressor behind them, a wrong key's noise passes through the COPY
+/// coder intact *and at full length*, so a bounded pre-flight read cannot tell it from plaintext.
+/// The bound is the whole of it — see `verify_cap`: a capped read stops before end of stream, and
+/// end of stream is the only place `sevenz-rust2` compares the member's CRC. Below the bound the
+/// read runs to the end and the key is caught; above it, nothing in the pre-flight can object. The
+/// refusal then arrives later, from the real extraction read, after extraction has begun.
+///
+/// **What survives that refusal, stated as measured rather than as intended.** Directories are
+/// created. A **zero-length member in the selection is written — and therefore replaces any
+/// existing file of that name — before the refusal arrives**, because a member with no data stream
+/// returns `Ok` to any key without decrypting anything at all. Measured: a seeded 100 000-byte
+/// `keep.txt` was 0 bytes after a wrong password had been refused. What holds is the narrower
+/// claim: no *encrypted member's contents* are written.
+///
+/// An earlier version of this paragraph said "nothing existing is overwritten". That was false in
+/// the data-loss direction — the worst direction for a residual to be wrong in — and it was an
+/// independent reader that caught it, not a test. Closing the hole properly means extracting
+/// through a temporary directory and renaming on success, which is a larger change than a freeze
+/// round should carry, so the sentence is corrected rather than the code being made to fit it.
 pub fn extract(
     path: &Path,
     wanted: &HashSet<String>,
@@ -1670,10 +1686,23 @@ fn verification_target<'a>(selected: &[&'a Entry]) -> Option<&'a Entry> {
 /// that on an LZMA2 member, and on an AES+COPY member — AES with no compressor behind it — every
 /// wrong key produces a plausible byte, because noise passes through COPY unchanged.
 ///
-/// The bound is what a wrong password costs in time. A megabyte is imperceptible and covers most
-/// members of most archives; above it, verification is a prefix read and is only as strong as the
-/// codec behind the cipher. `extract` picks the *smallest* encrypted member precisely to stay under
-/// this bound as often as possible.
+/// The bound is what a wrong password costs in time — **in bytes delivered, not in work done.** A
+/// member inside a solid block can only be reached by decoding every member ahead of it in that
+/// block, and the cap does not bound that: picking the *smallest* member maximises the chance it
+/// sits at the end of a block, so the cheapest member to read can be the most expensive to reach.
+/// Measured on a true solid block of 24 MiB + 5 bytes, the right password costs ~66 ms here and the
+/// wrong one ~0.4 ms, because LZMA2 noise fails immediately. Not alarming, and not what a sentence
+/// about a one-megabyte bound would lead a reader to expect.
+///
+/// **Above the bound, and only for AES with no compressor behind it, this check is worth nothing.**
+/// A prefix read never reaches the CRC, and COPY returns a wrong key's noise at exactly the stated
+/// length, so the length test passes too: measured, `verify_passphrase` answers `Ok(true)` to a
+/// wrong password on a 2 MiB AES+COPY member. This is the same argument the 1500-password sweep
+/// made about a one-byte read — one byte of noise is a valid byte — left standing at one mebibyte,
+/// and it is recorded rather than closed because closing it means an unbounded read of an untrusted
+/// member, which is a cost question rather than a routing one. `extract` and `verify_passphrase`
+/// both pick the *smallest* encrypted member precisely to stay under this bound as often as
+/// possible; where they cannot, `extract`'s own doc records what the residual costs.
 fn verify_cap(size: u64) -> usize {
     const BOUND: usize = 1 << 20;
     if size <= BOUND as u64 {

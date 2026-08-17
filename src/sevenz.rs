@@ -416,16 +416,6 @@ impl Sink for Writer {
 // Reading data — P5 §A1b
 // ---------------------------------------------------------------------------
 
-/// Read one entry's bytes out of a 7z.
-///
-/// P4 §4 promised this — *"Data … goes to libarchive first, and to `sevenz` only where
-/// libarchive refuses"* — and did not build it. Nothing noticed, because until P5 the
-/// window could not open an encrypted-header archive at all. Now that it can, an archive
-/// that lists and then refuses every read would be a worse state than not opening.
-///
-/// `cap` bounds the read: an archive is untrusted input, and a caller that wants a
-/// preview must not be handed four gigabytes. The `bool` is true when the entry was
-/// longer than the cap and the read stopped early.
 /// Did a decode that returned `Ok` actually deliver what the member claimed?
 ///
 /// Split out from `read_entry` so it can be gated on its own, and it needs to be: the end-to-end
@@ -440,6 +430,22 @@ fn decode_reached_target(got: usize, cap: usize, stated: u64) -> bool {
     (got as u64) >= std::cmp::min(cap as u64, stated)
 }
 
+/// Read one entry's bytes out of a 7z.
+///
+/// P4 §4 promised this — *"Data … goes to libarchive first, and to `sevenz` only where
+/// libarchive refuses"* — and did not build it. Nothing noticed, because until P5 the
+/// window could not open an encrypted-header archive at all. Now that it can, an archive
+/// that lists and then refuses every read would be a worse state than not opening.
+///
+/// `cap` bounds the read: an archive is untrusted input, and a caller that wants a
+/// preview must not be handed four gigabytes. The `bool` is true when the entry was
+/// longer than the cap and the read stopped early.
+///
+/// This block sat above `decode_reached_target` from `9175a28` until v2.5: the helper was
+/// spliced in between the doc and the function, so rustdoc attached the whole of P4 §4's
+/// paragraph — and a `cap`/`bool` contract naming neither of that helper's arguments — to a
+/// three-line predicate, and left this function undocumented. Caught by a reader; no test can
+/// see which item a doc comment lands on.
 pub fn read_entry(
     path: &Path,
     entry_path: &str,
