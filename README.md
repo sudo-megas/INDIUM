@@ -240,7 +240,7 @@ licence so that whoever receives it has the freedoms you had. It comes with **no
 
 That is a summary and nothing more — the text that actually governs is the full
 [`LICENSE`](LICENSE) file in this repository, and the same full text is readable inside the
-application from the **About** page. The bundled Fira Mono Nerd Font is under the
+application from the **About** page. The bundled CaskaydiaMono Nerd Font Mono is under the
 SIL Open Font Licence 1.1, in [`LICENSES/`](LICENSES).
 
 ![The About popup: the mark, the version and date, the maker, the source address, and the GPL in full.](build/screenshot-about.png)
