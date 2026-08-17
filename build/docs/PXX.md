@@ -5810,3 +5810,121 @@ fails loudly already.
 
 **No new IDs beyond `PXX-C9-012`. Register 189 → 190.** Suite unchanged at **410** — the three fixes
 land with their gates when the review holding `arch.rs` and `sevenz.rs` reports.
+
+## Deviations
+
+*(recorded during implementation; empty is a valid state)*
+
+**Why this section is being opened now, near the end of the document rather than at its start.**
+Every one of the other twenty-two P-documents carries a `## Deviations` section. This one did not.
+Its drafts table routes **draft 3a** (the 7z write path) and **draft 6** (the transcribed `termios`
+constants) to a target written as *"Deviations section"*, and the plan that commissioned this round
+speaks of reclassifying findings *"into CORE Deviations"* — but `CORE.md` has nine sections and
+**none of them is Deviations**; the word appears nowhere in it. So two written drafts, a plan
+instruction, and this round's own recorded limitations were all addressed to a place that exists in
+neither document. Filed `PXX-C12-010`. Whether **CORE** gains such a section is the maker's, under
+`CORE.md:3-5`; this one is PXX's own and is opened here because the convention is unambiguous and
+twenty-two documents deep.
+
+### Process
+
+1. **Phase 3 began without a clean sheet.** `PXX.md:320` reads *"Phase 3 does not begin until the
+   sheet is clean."* The v2.3 sheet had not been walked. The maker said *"move on"*, twice, which
+   waives his own precondition — recorded rather than stepped over, and set out in full where it
+   happened.
+
+2. **Two `freeze-blocking` fixes were committed before the tier-3 reviews they owe.** Seven review
+   runs were commissioned and six died to server-side API errors. The fixes stayed in, on the ground
+   that a known defect is worse than an unreviewed repair of it, and the obligation was carried open
+   rather than marked satisfied. **It has since been discharged in full**: `05aa76a` returned ACCEPT
+   and `9175a28` returned AMEND with a `freeze-blocking` defect that was then fixed. The entry stays
+   because the deviation happened, not because it stands — and because the AMEND is the evidence
+   that carrying it open was the right call rather than a formality.
+
+3. **Stage 3.1's re-walk is waived by the maker; the scaling check is kept.** His instruction: he
+   will run the window at **100 / 125 / 150 %** and nothing else. This drops the plan's 25-row
+   roster and the visual steps of rounds 2–8 against the redesigned build.
+
+   **It is not a CORE breach, and the distinction is worth stating precisely.** `CORE.md:518-522`
+   makes the beta's gate *"a testing round against a released build carrying it"* — met by PXX's
+   158-step walk against the released `v2.1`, 139 approvals — and then reserves the rest by name:
+   *"**What 'real hands' means is deliberately left undefined**: it is a decision the maker has not
+   made."* Choosing what testing suffices is the discretion CORE hands him explicitly.
+
+   **What the waiver costs, stated rather than minimised.** Stage 2 moved every glyph in the window
+   and every zone corner: the typeface changed to Caskaydia Mono, `R_ZONE` went 0 → 6, and the type
+   scale was re-cut. The 25 rows would have re-checked those by eye. What still covers them is the
+   suite at 410 — including `SB_ROW` now pinned in **both** directions, which the plan named as *"the
+   silent one"* — the icon and tofu gates that parse both faces at test time, and the check he kept.
+
+   **And the check he kept is the well-aimed one.** The plan's own risk list names two silent risks
+   for this redesign, `SB_ROW` and a non-`Mono` cut breaking alignment invisibly. Both are metrics
+   risks, and metrics risks are exactly what a scaling sweep surfaces. What remains uncovered is the
+   non-scaling visual work — spacing, the glow's alpha, icon style — and that is accepted here.
+
+   **This does not by itself lift the beta.** Draft 7 asks him a separate question, and it is not
+   answered by an instruction about testing scope. Recorded so that a beta is not lifted on an
+   inference.
+
+4. **The v2.5 scope decision was taken by the round, at the maker's delegation.** Thirteen
+   `fix-in-v2.5` findings; three fixed, nine recorded below, one queued for an agent. Every line of
+   it is reversible by him and none of it touches `CORE.md`.
+
+### Recorded limitations, carried into v2.5 unfixed
+
+5. **A normalised path is used as member identity, in four places.** Normalisation exists so that
+   `a\b` from a Windows archive reads as `a/b`, and it necessarily discards information: `./a` and
+   `a` become one string and `\` becomes nothing. `Expected.sizes` is keyed by it and collapses
+   duplicates (`PXX-T2-016`); the rename lookup uses it, so a rename staged against the second of two
+   identically-named members lands on the first and `F2` opens an editor on both rows
+   (`PXX-T2-018`); and a member normalising to empty is skipped by the rebuild, so Apply on such an
+   archive always fails — loudly, safely, with the original untouched (`PXX-T3-022`).
+
+   **`PXX-T3-037`'s local symptom is fixed and the root is not, deliberately.** Preferring a
+   stream-carrying match stops a wrong password being accepted; it does not give an entry an identity
+   independent of its display path. Re-cutting that touches `Expected`, the rename lookup,
+   `read_entry`'s resolution, `is_archive_root` and the rebuild's pairing, and **a freeze round may
+   not make that change.** It is the largest single piece of work this round is handing forward.
+
+6. **`is_archive_root` is true for any name normalising to empty**, including a member literally named
+   `\`, which is a legal Linux filename (`PXX-T3-020`). Such a member is invisible in the listing —
+   as it has been since long before this round — and is now also dropped from a rebuild. Narrowing the
+   predicate is the only safe direction and is delicate: this round's own sketch for it was wrong
+   three ways and would have failed an existing gate.
+
+7. **A bounded verification read cannot reach a member's CRC, and on AES with no compressor that
+   leaves nothing to check** (`PXX-T3-030`, `PXX-T3-014`). `sevenz-rust2` compares a member's CRC at
+   end of stream and nowhere else; `verify_cap` bounds the read at 1 MiB; a COPY coder returns a
+   wrong key's noise at exactly the stated length. So any AES+COPY member above the bound clears the
+   pre-flight with any password. Closing it means an unbounded read of an untrusted member — the OOM
+   hazard the plan already flags for `arch.rs` — so the bound stays and the residual is stated in
+   `verify_cap`'s own doc comment.
+
+8. **INDIUM cannot Apply any edit to an encrypted 7z it wrote itself** (`PXX-T3-021`). `sevenz.rs:331`
+   ties header encryption to the same flag that turns AES on, so every encrypted archive the program
+   produces has ciphertext headers; Apply's re-list succeeds through the `sevenz` fallback while the
+   rebuild loop opens through libarchive, which has none. **The program creates what it cannot edit,
+   with no warning at creation time.** Pre-existing since P4. The message half is fixed — it named the
+   wrong cause — and the capability half is a `sevenz`-backed rebuild path, which is a feature rather
+   than a repair.
+
+9. **A directory-only selection skips verification entirely and extracts with any password**
+   (`PXX-T3-013`'s directory half, re-filed as `PXX-T3-038`). The pre-flight is gated on
+   `selected.iter().any(|e| e.encrypted)` and a directory lists `enc=false`. No plaintext is disclosed
+   — an empty directory is created — but a wrong password returns success. Its sibling, the
+   empty-*file* selection, is refused, so one rule currently gives two answers.
+
+10. **A member with no stored CRC is verified by nothing, at any size** (`PXX-T3-033`). The whole
+    full-read argument rests on `if file.has_crc`, and a 7z whose `SubStreamsInfo` carries no `kCRC`
+    parses cleanly with that bitset clear. Unreachable through anything INDIUM or 7-Zip writes;
+    producing one needs a hand-patched header.
+
+11. **`cli`'s terminal handling declares `struct termios` and three C constants by hand**, and the
+    six compile-time assertions guarding them prove less than they appear to. Draft 6 above carries
+    the full entry, written for whichever document the maker gives it to.
+
+12. **The 7z write path.** Draft 3a above carries this entry and is the honest record until draft 3b
+    can be applied — which is only after `PXX-2-001`'s fix is in the tree, since applying it earlier
+    would make CORE describe a program that does not exist.
+
+**One new ID. Register 190 → 191.** Suite unchanged at **410**.
