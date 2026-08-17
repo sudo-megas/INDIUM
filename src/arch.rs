@@ -874,10 +874,19 @@ pub fn looks_like_7z(path: &Path) -> bool {
 /// are encrypted. `None` means "not a 7z, or that reader could not parse it" — in which
 /// case libarchive gets its ordinary turn, and nothing is lost.
 ///
-/// Data — extraction, CRC32, passphrase checks — deliberately does **not** route here.
-/// With this crate's default features off it carries no bzip2, ppmd, deflate or zstd
-/// decoder, so making it the sole 7z reader would be a read regression against CORE §5's
-/// promise to read everything libarchive reads.
+/// Data — extraction, CRC32, passphrase checks — routes here **only where libarchive cannot read
+/// it at all**: an encrypted-header 7z, and AES content behind plaintext headers. With this
+/// crate's default features off it carries no bzip2, ppmd, deflate or zstd decoder, so making it
+/// the *sole* 7z reader would be a read regression against CORE §5's promise to read everything
+/// libarchive reads.
+///
+/// This paragraph read "deliberately does **not** route here" until v2.5, and `da6c821` made that
+/// false without correcting it. The narrower claim is also the true one, and it costs CORE §5
+/// nothing: libarchive cannot decrypt 7z AES content at **any** codec — measured with `bsdtar`
+/// against AES+COPY, where there is no compressor at all, so the refusal keys on the AES coder
+/// rather than on what sits behind it. Routing encrypted 7z data here therefore takes away no read
+/// libarchive ever had, and an encrypted member in a codec this crate lacks now reports the codec
+/// instead of a false wrong-password.
 fn list_7z(path: &Path, passphrase: Option<&Secret>) -> Option<Result<Vec<Entry>, ArchiveError>> {
     if !looks_like_7z(path) {
         return None;
@@ -1056,6 +1065,15 @@ fn create_dir_under(root: &Path, rel: &Path) -> Result<(), ArchiveError> {
 /// is refused outright, and encryption is resolved from the entry flags (P2 §5 —
 /// "known **before starting**"), so a wrong password costs nothing and leaves no
 /// partial output behind.
+///
+/// **One exception, measured and left standing rather than asserted away.** For a 7z whose
+/// members are AES-encrypted with no compressor behind them, a wrong key's noise passes through
+/// the COPY coder intact, so the pre-flight cannot tell it from plaintext. That read is refused
+/// later, by the member's own CRC — after `create_dir_under` has already made directories in the
+/// destination. No file's contents are written and nothing existing is overwritten; empty
+/// directories are left behind. Closing it properly means extracting through a temporary
+/// directory and renaming on success, which is a larger change than a freeze round should carry,
+/// so the sentence above is qualified instead of the code being made to fit it.
 pub fn extract(
     path: &Path,
     wanted: &HashSet<String>,
@@ -1134,16 +1152,58 @@ pub fn extract(
                     // the same six lines independently.
                     //
                     // So the check is made by the reader that can actually make it, here, while
-                    // the filesystem is still untouched. One byte is enough: a wrong key survives
-                    // AES — there is nothing in it to check a key against — but the LZMA2 stream
-                    // behind it does not survive being handed noise, and the cap stops a
-                    // verification from decoding a gigabyte to learn something the first block
-                    // already said.
-                    if let Some(entry) = selected
-                        .iter()
-                        .find(|e| e.encrypted && !e.is_dir && e.size > 0)
-                    {
-                        crate::sevenz::read_entry(path, &entry.path, 1, Some(secret))?;
+                    // the filesystem is still untouched.
+                    //
+                    // **One byte is not enough, and this comment used to say it was.** The
+                    // argument ran: a wrong key survives AES, there being nothing inside a CBC
+                    // block to check a key against, but the LZMA2 stream behind it does not
+                    // survive being handed noise. The second half is probabilistic where it was
+                    // written as categorical, and codec-specific where the code is unconditional.
+                    // Tier 3 measured 14 of 1500 wrong passwords surviving one byte of an LZMA2
+                    // member, and on AES+COPY — AES with no compressor behind it — one byte
+                    // discriminates nothing whatsoever.
+                    //
+                    // Refusing a decode shorter than the member's stated size — which `read_entry`
+                    // now does — closes the zero-byte case, and closes it by comparison rather
+                    // than by guess. It does not rescue the one-byte cap: a wrong key that yields
+                    // one plausible byte satisfies a one-byte target, so the check has almost
+                    // nothing to compare against at that cap.
+                    //
+                    // **The member's own CRC is the only thing that actually settles a key, and
+                    // the crate compares it at end of stream and nowhere else.** So the pre-flight
+                    // reads a member *in full* where it fits, because a full read is the only read
+                    // that reaches the comparison. Two consequences fall out, neither accidental:
+                    //
+                    //   - The **smallest** encrypted member is chosen rather than the first. The
+                    //     whole point is to fit under the bound, so the cheapest full read is the
+                    //     best one available.
+                    //   - Above the bound it is a prefix read again, and a prefix is only as good
+                    //     as the codec behind it. That residual is named in this function's doc
+                    //     comment rather than assumed away.
+                    if let Some(entry) = verification_target(&selected) {
+                        let cap = verify_cap(entry.size);
+                        // The `?` hands on whatever came back, and that is deliberate rather than
+                        // incidental: a missing codec is not a verdict on the password and must
+                        // not be flattened into one. `sevenz::classify` maps only key failures and
+                        // structural header failures to `WrongPassword`, so an encrypted member in
+                        // a codec this build lacks reports the codec — from a pre-flight the user
+                        // typed a password into, which is an awkward sentence and a true one.
+                        crate::sevenz::read_entry(path, &entry.path, cap, Some(secret))?;
+                    } else if !verify_passphrase(path, secret)? {
+                        // Nothing in the *selection* can carry a check — every encrypted member
+                        // chosen is a directory or a zero-length file, so the `find` yields
+                        // `None`. This branch is what that used to skip, and tier 3 measured the
+                        // cost: the pre-flight did not run at all, a wrong password came back a
+                        // success, and the destination got its directories.
+                        //
+                        // **"Nothing to verify against" is not "verified."** So the question goes
+                        // to the whole archive, which is what `verify_passphrase` walks. It can
+                        // answer it for a 7z now; before the change further down this file it
+                        // could not, which is the only reason this fallback is worth anything.
+                        //
+                        // An archive whose every encrypted member is empty still passes, and that
+                        // is right rather than lax: there is no ciphertext in it to get wrong.
+                        return Err(ArchiveError::WrongPassword);
                     }
                 } else if !verify_passphrase(path, secret)? {
                     return Err(ArchiveError::WrongPassword);
@@ -1360,8 +1420,21 @@ pub fn head_of(
 ) -> Result<(Vec<u8>, bool), ArchiveError> {
     // Same routing as every other read path: libarchive first, and the 7z reader only
     // where libarchive refuses. See §A1b.
+    //
+    // **`WrongPassword` belongs in that arm, and its absence is why this was dead code.** For a
+    // content-encrypted 7z — AES data behind plaintext headers, which `7z a -p` writes by default
+    // — libarchive parses the headers, gets to the data, cannot decrypt it, and reports a wrong
+    // password. It never says `EncryptedHeaders`, so the fallback never fired on the one archive
+    // class that needs it, and Preview, `indium cat` and CRC32 all refused a correct password.
+    // `stream_entry` and `crc32_of` carry the identical arm for the identical reason: one defect,
+    // three doors, and `da6c821` walked through a fourth.
+    //
+    // A genuinely wrong password costs one extra attempt through the 7z reader and still ends as
+    // `WrongPassword`, so the arm widens what is tried and not what is accepted.
     match head_via_libarchive(path, entry_path, cap, passphrase) {
-        Err(ArchiveError::EncryptedHeaders) if looks_like_7z(path) => {
+        Err(ArchiveError::EncryptedHeaders | ArchiveError::WrongPassword)
+            if looks_like_7z(path) =>
+        {
             crate::sevenz::read_entry(path, entry_path, cap, passphrase)
         }
         other => other,
@@ -1430,7 +1503,9 @@ pub fn stream_entry(
     out: &mut dyn std::io::Write,
 ) -> Result<u64, ArchiveError> {
     match stream_via_libarchive(path, entry_path, passphrase, out) {
-        Err(ArchiveError::EncryptedHeaders) if looks_like_7z(path) => {
+        Err(ArchiveError::EncryptedHeaders | ArchiveError::WrongPassword)
+            if looks_like_7z(path) =>
+        {
             // `usize::MAX` is safe here and was checked rather than assumed: `read_entry`
             // uses `take(cap as u64)` with no `+ 1`, so nothing overflows, and its
             // `out.len() >= cap` can only be true for a member no machine could hold.
@@ -1502,7 +1577,9 @@ pub fn crc32_of(
     // is fine, and it is the first header that libarchive cannot decrypt. So the
     // fallback is keyed on the error the read actually produces.
     match crc32_via_libarchive(path, entry_path, passphrase) {
-        Err(ArchiveError::EncryptedHeaders) if looks_like_7z(path) => {
+        Err(ArchiveError::EncryptedHeaders | ArchiveError::WrongPassword)
+            if looks_like_7z(path) =>
+        {
             let (bytes, _) = crate::sevenz::read_entry(path, entry_path, usize::MAX, passphrase)?;
             Ok(util::crc32(&bytes))
         }
@@ -1554,6 +1631,58 @@ fn crc32_via_libarchive(
 // Password verification (P2 §5)
 // ---------------------------------------------------------------------------
 
+/// Which member a password check should be made against, out of what the user selected.
+///
+/// Two decisions live here, and they are here rather than inline for one reason: tier 3's third
+/// sabotage changed neither the routing nor the verification but only *which member gets tested*,
+/// and both gates of the previous fix passed anyway. A decision that no test can see is a decision
+/// the next hand can undo for free.
+///
+/// - **Only a member with bytes will do.** A directory or a zero-length file carries nothing to
+///   test a key against, and `sevenz::read_entry` returns `Ok` for one without attempting any
+///   decryption at all. Reading that as a verified password is what let a wrong one extract as a
+///   success.
+/// - **The smallest such member, not the first.** Verification reads in full wherever it fits,
+///   because a full read is the only read whose CRC the crate compares — so the smallest member is
+///   the one most likely to get that check rather than a prefix. On an archive holding one large
+///   member and one small one, first-wins would settle for the weaker read with the stronger one
+///   available.
+///
+/// `None` means the selection cannot answer the question, which is emphatically not the same as
+/// answering it. The caller puts the question to the whole archive instead.
+fn verification_target<'a>(selected: &[&'a Entry]) -> Option<&'a Entry> {
+    selected
+        .iter()
+        .copied()
+        .filter(|e| e.encrypted && !e.is_dir && e.size > 0)
+        .min_by_key(|e| e.size)
+}
+
+/// How many bytes a password check should ask for, given the member's stated size.
+///
+/// **A full read is the only read `sevenz-rust2` CRC-checks** — it compares a member's CRC at end
+/// of stream and nowhere else — so verification asks for the whole member wherever that is
+/// affordable, and falls back to a bounded prefix only where a member is too large to read for the
+/// sake of a password check.
+///
+/// This is not `1`, and the reason is measured rather than argued. At a one-byte cap a wrong key
+/// only has to produce one plausible byte: tier 3 found 14 of 1500 wrong passwords doing exactly
+/// that on an LZMA2 member, and on an AES+COPY member — AES with no compressor behind it — every
+/// wrong key produces a plausible byte, because noise passes through COPY unchanged.
+///
+/// The bound is what a wrong password costs in time. A megabyte is imperceptible and covers most
+/// members of most archives; above it, verification is a prefix read and is only as strong as the
+/// codec behind the cipher. `extract` picks the *smallest* encrypted member precisely to stay under
+/// this bound as often as possible.
+fn verify_cap(size: u64) -> usize {
+    const BOUND: usize = 1 << 20;
+    if size <= BOUND as u64 {
+        size as usize
+    } else {
+        BOUND
+    }
+}
+
 /// Try a password against the first encrypted entry, writing nothing.
 ///
 /// P2 §5: "verify by test-reading the first data block of the first encrypted entry
@@ -1580,6 +1709,28 @@ pub fn verify_passphrase(path: &Path, passphrase: &Secret) -> Result<bool, Archi
         if !entry.encrypted || entry.is_dir || entry.size == 0 {
             reader.skip_data();
             continue;
+        }
+
+        // **This is the function the window gates extraction on** — `ui/password.rs` calls it and
+        // nothing else — and for a 7z it was answering a question libarchive cannot answer.
+        // libarchive does not decrypt 7z AES content at any codec: measured, its refusal is
+        // byte-identical for the right password and a wrong one. So the data-block call below
+        // returned an error either way, this returned `Ok(false)` either way, and a user holding
+        // the correct password for the commonest encrypted 7z there is was refused three times and
+        // told the archive was cancelled.
+        //
+        // `da6c821` fixed the routing inside `extract` and left this alone, so the corrected code
+        // was unreachable from the window and the symptom never moved. That is why the check is
+        // made here too, by the reader that can make it.
+        if looks_like_7z(path) {
+            let cap = verify_cap(entry.size);
+            return match crate::sevenz::read_entry(path, &entry.path, cap, Some(passphrase)) {
+                Ok(_) => Ok(true),
+                Err(ArchiveError::WrongPassword) => Ok(false),
+                // A missing codec, a malformed archive: not a verdict on the password, and not
+                // this function's to swallow into `false`.
+                Err(e) => Err(e),
+            };
         }
 
         let mut buf: *const c_void = std::ptr::null();
@@ -1933,6 +2084,92 @@ impl std::io::Read for EntryData<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **`PXX-T3-018`.** The choice tier 3's third sabotage undid without any gate noticing.
+    ///
+    /// It replaced the selection predicate with a plain `next()` — same routing, same verification,
+    /// different member tested — and both of the previous fix's gates passed. The outcome is what
+    /// end-to-end gates can see, and this choice does not change an outcome; it changes how strong
+    /// the check is. So it is pinned here, where it *is* the outcome.
+    #[test]
+    fn a_password_is_checked_against_the_smallest_member_that_has_bytes() {
+        let mut big = entry_named("big.bin", "big.bin");
+        big.encrypted = true;
+        big.size = 5 << 20;
+        let mut small = entry_named("small.txt", "small.txt");
+        small.encrypted = true;
+        small.size = 21;
+        let mut dir = entry_named("sub/", "sub");
+        dir.encrypted = true;
+        dir.is_dir = true;
+        let mut empty = entry_named("empty.txt", "empty.txt");
+        empty.encrypted = true;
+        let plain = entry_named("readme.txt", "readme.txt"); // not encrypted, size 0
+
+        // First in the list is the large one, so first-wins and smallest-wins disagree — which is
+        // the whole point of the fixture.
+        let all = [&big, &dir, &empty, &small, &plain];
+        assert_eq!(
+            verification_target(&all).map(|e| e.path.as_str()),
+            Some("small.txt"),
+            "the smallest member with bytes is the one that fits under the read bound, and \
+             therefore the only one that gets a CRC-checked read"
+        );
+
+        assert_eq!(
+            verification_target(&[&dir, &empty]).map(|e| e.path.as_str()),
+            None,
+            "a directory and an empty file carry nothing to test a key against — and `None` must \
+             mean the selection cannot answer, never that the answer was yes"
+        );
+        assert_eq!(
+            verification_target(&[&plain]).map(|e| e.path.as_str()),
+            None,
+            "an unencrypted member is not a password check either"
+        );
+        assert_eq!(
+            verification_target(&[]).map(|e| e.path.as_str()),
+            None,
+            "and an empty selection has nothing to say"
+        );
+    }
+
+    /// **`PXX-T3-011`.** The arithmetic a password check rests on, pinned as a number rather than
+    /// as an argument — which is this project's own unbeaten defect class.
+    ///
+    /// The rule is: ask for the whole member where it fits, because a full read is the only read
+    /// `sevenz-rust2` compares a CRC against, and a bounded prefix otherwise. The edges are what
+    /// matter. A zero-length member must not ask for a megabyte of a stream that does not exist,
+    /// and a member exactly on the bound must still be read whole rather than falling one byte
+    /// short of the comparison that makes the check worth anything.
+    #[test]
+    fn a_password_check_reads_the_whole_member_wherever_it_fits() {
+        const BOUND: u64 = 1 << 20;
+
+        assert_eq!(
+            verify_cap(0),
+            0,
+            "nothing to read is not a megabyte to read"
+        );
+        assert_eq!(verify_cap(1), 1);
+        assert_eq!(verify_cap(21), 21, "an ordinary small member is read whole");
+        assert_eq!(
+            verify_cap(BOUND),
+            BOUND as usize,
+            "exactly on the bound is still read whole — `<=`, not `<`, or the commonest \
+             just-too-big member loses its CRC check to an off-by-one"
+        );
+        assert_eq!(
+            verify_cap(BOUND + 1),
+            BOUND as usize,
+            "one byte over, and it becomes a prefix read"
+        );
+        assert_eq!(
+            verify_cap(u64::MAX),
+            BOUND as usize,
+            "a member no machine could hold must not be cast into a cap"
+        );
+    }
 
     #[test]
     fn method_labels_prefer_the_filter() {

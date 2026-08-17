@@ -426,6 +426,20 @@ impl Sink for Writer {
 /// `cap` bounds the read: an archive is untrusted input, and a caller that wants a
 /// preview must not be handed four gigabytes. The `bool` is true when the entry was
 /// longer than the cap and the read stopped early.
+/// Did a decode that returned `Ok` actually deliver what the member claimed?
+///
+/// Split out from `read_entry` so it can be gated on its own, and it needs to be: the end-to-end
+/// tests reach this through a wrong AES key, and whether a given wrong key produces a *short*
+/// decode or an outright decode *error* is a property of that key and that archive's random salt.
+/// A gate built on it would pass or fail by luck. The comparison is the part that must be right,
+/// so the comparison is what gets pinned.
+///
+/// `min` and not `stated`, because a capped read is legitimately short: asking for one byte of a
+/// hundred thousand and getting one byte is the check working, not failing.
+fn decode_reached_target(got: usize, cap: usize, stated: u64) -> bool {
+    (got as u64) >= std::cmp::min(cap as u64, stated)
+}
+
 pub fn read_entry(
     path: &Path,
     entry_path: &str,
@@ -458,6 +472,9 @@ pub fn read_entry(
     };
 
     let name = archive.files[wanted].name.clone();
+    // Read out beside the name, and for the same reason: both are needed after the decoder has
+    // finished borrowing the archive. This one is what a short decode is measured against.
+    let stated = archive.files[wanted].size;
     let mut out = Vec::new();
     let mut truncated = false;
     let mut found = false;
@@ -482,6 +499,34 @@ pub fn read_entry(
     if !found {
         return Err(ArchiveError::Other(format!("no such entry: {entry_path}")));
     }
+
+    // A decode that stops short of the member's stated length is never legitimate, and it is the
+    // only signal available here. `sevenz-rust2` compares a member's CRC only at end of stream, so
+    // a stream that ends early is never checked against it; `read_to_end` over a reader that
+    // returns `Ok(0)` is not an error; and `truncated` is `false` for `0 >= 1`. Three chances to
+    // notice, and the value was zero bytes.
+    //
+    // A wrong AES key produces exactly that. There is nothing inside a CBC block to check a key
+    // against, so decryption "succeeds" and hands LZMA2 noise — which usually, and **not always**,
+    // fails part-way through. Tier 3 measured 14 of 1500 wrong passwords surviving a one-byte read
+    // of an LZMA2 member, and `extract` then reported success after truncating a 100 000-byte
+    // destination file to zero. The earlier reasoning here — "one byte is enough" — was true of the
+    // single wrong password it was tested with, which is not the same as true.
+    //
+    // The number that settles it is the stated size, and it was in scope all along.
+    //
+    // One trade, taken deliberately: a genuinely truncated archive read with the **right** password
+    // now reports `WrongPassword` rather than a truncation error. From here the two are
+    // indistinguishable — a short stream is a short stream — and the alternative is reading one as
+    // success, which is what destroyed the file.
+    if !decode_reached_target(out.len(), cap, stated) {
+        return Err(if passphrase.is_some() {
+            ArchiveError::WrongPassword
+        } else {
+            ArchiveError::Other(format!("truncated stream: {entry_path}"))
+        });
+    }
+
     Ok((out, truncated))
 }
 
@@ -716,6 +761,181 @@ mod content_only_encryption {
             "a refused extraction must leave no directory behind it"
         );
         assert!(!dest.join("sub/beta.txt").exists(), "and certainly no file");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **`PXX-T3-011`.** The comparison that turns a short decode from a success into a refusal.
+    ///
+    /// This is the defect that destroyed a file: a wrong AES key produced a zero-byte decode,
+    /// `for_each_entries` returned `Ok`, `read_to_end` over a reader yielding `Ok(0)` is not an
+    /// error, and `truncated = out.len() >= cap` is `false` for `0 >= 1`. Three chances to notice
+    /// and the answer was success, so `extract` truncated a 100 000-byte destination file to zero
+    /// and reported it had written one member.
+    ///
+    /// Gated here rather than end to end, and the reason is the honest one: whether a *particular*
+    /// wrong password yields a short decode or a decode error depends on that archive's random
+    /// salt, so an end-to-end assertion on it would pass by luck. Tier 3 measured the rate — 14 of
+    /// 1500 — which is a rate and not a gate.
+    #[test]
+    fn a_decode_shorter_than_the_member_is_not_a_success() {
+        assert!(
+            !decode_reached_target(0, 1, 100_000),
+            "zero bytes of a hundred thousand is the case that destroyed a file, whatever the \
+             cap asked for"
+        );
+        assert!(
+            !decode_reached_target(5, usize::MAX, 10),
+            "half a member is not a member"
+        );
+        assert!(
+            decode_reached_target(1, 1, 100_000),
+            "a capped read is legitimately short — one byte of a hundred thousand, when one byte \
+             was asked for, is the check working"
+        );
+        assert!(
+            decode_reached_target(100_000, usize::MAX, 100_000),
+            "a full read of a full member must pass, or extraction refuses everything"
+        );
+        assert!(
+            decode_reached_target(0, 0, 0),
+            "a member with no bytes asked for none and delivered none"
+        );
+        assert!(
+            decode_reached_target(21, 4096, 21),
+            "a member shorter than the cap is not truncated, it is finished"
+        );
+    }
+
+    /// **`PXX-T3-012`. The gate the window actually presses, and the reason the first fix was
+    /// invisible.**
+    ///
+    /// `da6c821` corrected the routing inside `extract` and left `verify_passphrase` alone. But
+    /// `ui/password.rs` gates extraction on `verify_passphrase` and on nothing else, so the
+    /// corrected code was unreachable from the window: a user holding the right password was
+    /// refused three times and told the archive was cancelled, while `extract` — which never ran —
+    /// would have accepted it. Two blind readers studied those six lines four times between them
+    /// and neither asked what calls them.
+    ///
+    /// So this test is deliberately shaped as the *user's* question rather than the reader's. It is
+    /// the boundary a fix has to move to count as a fix.
+    #[test]
+    fn the_window_accepts_a_right_password_on_a_content_encrypted_7z() {
+        let dir = scratch("verify");
+        let path = dir.join("content-only.7z");
+        write_content_encrypted(&path, "indium", &[("alpha.txt", b"INDIUM fixture alpha\n")]);
+
+        assert!(
+            crate::arch::verify_passphrase(&path, &Secret::from_text("indium"))
+                .expect("verification must answer, not error"),
+            "the right password must verify — this is what the password popup asks, and it \
+             answered no for every content-encrypted 7z until v2.5"
+        );
+        assert!(
+            !crate::arch::verify_passphrase(&path, &Secret::from_text("not-the-password"))
+                .expect("verification must answer, not error"),
+            "and a wrong password must still be refused, or the fix has bought reachability \
+             by giving up the check"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **`PXX-T3-012`, the class-9 half: the same defect at three more doors.**
+    ///
+    /// All three fallbacks were keyed on `EncryptedHeaders`, and libarchive does not report this
+    /// archive class that way — it reports a wrong password, because it parses the headers, reaches
+    /// the data, and cannot decrypt it. So every arm was dead on exactly the archives it existed
+    /// for, and Preview, `indium cat` and CRC32 each refused a correct password while `extract`
+    /// accepted it.
+    ///
+    /// Asserted through the three public entry points rather than through the arm, because the arm
+    /// is what was already believed to be right.
+    #[test]
+    fn preview_cat_and_crc32_all_read_a_content_encrypted_7z() {
+        let dir = scratch("siblings");
+        let path = dir.join("content-only.7z");
+        let body: &[u8] = b"INDIUM fixture alpha\n";
+        write_content_encrypted(&path, "indium", &[("alpha.txt", body)]);
+        let secret = Secret::from_text("indium");
+
+        let (head, more) = crate::arch::head_of(&path, "alpha.txt", 4096, Some(&secret))
+            .expect("Preview must read");
+        assert_eq!(head, body, "Preview must see the plaintext");
+        assert!(!more, "the member is shorter than the cap");
+
+        let mut sunk: Vec<u8> = Vec::new();
+        let n = crate::arch::stream_entry(&path, "alpha.txt", Some(&secret), &mut sunk)
+            .expect("`indium cat` must read");
+        assert_eq!(n, body.len() as u64, "the whole member must be streamed");
+        assert_eq!(
+            sunk, body,
+            "and it must be the plaintext, not the ciphertext"
+        );
+
+        assert_eq!(
+            crate::arch::crc32_of(&path, "alpha.txt", Some(&secret)).expect("CRC32 must read"),
+            crate::util::crc32(body),
+            "the CRC must be of the decrypted bytes"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **`PXX-T3-013` and `PXX-T3-018`. "Nothing to verify against" is not "verified."**
+    ///
+    /// The pre-flight looks for an encrypted member with a data stream to test the key on. Select
+    /// only members that have none — a directory, or a zero-length file — and the search came back
+    /// empty, the pre-flight was skipped entirely, and a wrong password extracted as a success.
+    ///
+    /// This gate is also the one the reviewer's third sabotage would have failed. It replaced the
+    /// selection predicate with a plain `next()` — changing neither the routing nor the
+    /// verification, only *which member gets tested* — and both of the gates above passed anyway.
+    /// A pair that gates two halves of a fix does not thereby gate the line between them.
+    #[test]
+    fn an_encrypted_selection_with_no_bytes_in_it_still_refuses_a_wrong_password() {
+        let dir = scratch("nobytes");
+        let path = dir.join("content-only.7z");
+        write_content_encrypted(
+            &path,
+            "indium",
+            &[("empty.txt", b""), ("alpha.txt", b"INDIUM fixture alpha\n")],
+        );
+
+        // The premise, pinned rather than assumed: an empty member inside an AES block still reads
+        // as encrypted, which is why it survives the `encrypted` filter and fails the `size > 0`
+        // one.
+        let listing =
+            crate::arch::list_all(&path, Some(&Secret::from_text("indium"))).expect("it must list");
+        let empty = listing
+            .iter()
+            .find(|e| e.path == "empty.txt")
+            .expect("the empty member must be listed");
+        assert!(
+            empty.encrypted,
+            "an empty member in an AES block is encrypted"
+        );
+        assert_eq!(empty.size, 0, "and it has no bytes to verify a key against");
+
+        let dest = dir.join("out");
+        let wanted: std::collections::HashSet<String> =
+            ["empty.txt".to_string()].into_iter().collect();
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let got = crate::arch::extract(
+            &path,
+            &wanted,
+            &dest,
+            Some(&Secret::from_text("not-the-password")),
+            None,
+            &cancel,
+        );
+
+        assert!(
+            matches!(got, Err(ArchiveError::WrongPassword)),
+            "a wrong password must be refused even when the selection carries nothing to test \
+             it on — the question goes to the archive instead: {got:?}"
+        );
+        assert!(
+            !dest.join("empty.txt").exists(),
+            "and nothing may be written on the way to finding out"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
