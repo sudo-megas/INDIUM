@@ -150,10 +150,12 @@ pub const WARNING: Color32 = Color32::from_rgb(0xFF, 0xD8, 0x00);
 /// **CORE §6 permits this since P23's draft B**, in a sentence that binds it by measurement
 /// rather than by hex: a cast *"is measured rather than eyeballed, at ΔE 8–12 against the
 /// gutter it falls on. Under that floor it is invisible and merely costs; over it, it is a
-/// glow, and a glow is decoration."* `the_cast_lands_in_the_band_core_gives_it` is that
+/// glow, and a glow is decoration."* `the_cast_lands_in_the_band_core_six_gives_it` is that
 /// sentence as a test.
 ///
-/// **Why not [`WARNING`], which is the palette's existing gold.** `CORE.md:368` forbids it in
+/// **Why not [`WARNING`], which is the palette's existing gold.** CORE §6's **Warning** row
+/// (`CORE.md:374` — named as well as numbered, because the number moves and the row does not)
+/// forbids it in
 /// its own words — *"It is not an accent and never decorates"* — and a cast that borrowed it
 /// would put the wrong-password colour under every zone in the window. The cast needs its own
 /// token and this is it. It is **not a ground**: the five-rung ladder and
@@ -2027,6 +2029,123 @@ mod tests {
             worst > 1.0,
             "nothing behind the scrim measured above 1.0:1, which is not suppression but an \
              arithmetic fault — 1.0 is two identical colours"
+        );
+    }
+
+    /// **Every long snake_case name a doc comment backticks must resolve to a real `fn`.**
+    ///
+    /// `PXX-10-001`. This file cited the cast's band test under a name missing its *six* — the
+    /// real one is `the_cast_lands_in_the_band_core_six_gives_it`. The wrong name is deliberately
+    /// **not** quoted in this paragraph, because this test reads doc comments and would flag its
+    /// own explanation; finding that out took one run. A citation is a claim that something
+    /// exists, and nothing checked it — so the name was wrong for as long as it had been
+    /// written, and it was found by a hand rather than by a gate. That is class 2, *a number
+    /// nothing can check*, in its non-numeric form: a **name** nothing can check.
+    ///
+    /// The threshold — four underscores and twenty-five characters — is what separates this
+    /// project's test names from ordinary identifiers, and it is deliberately conservative. A
+    /// citation it lets through is one nobody was going to mistype.
+    ///
+    /// It scans `tests/` as well as `src/`, because most of what `src/` cites lives there: eight
+    /// of the names this test resolves are integration tests, and a scan of `src/` alone would
+    /// have reported all eight as dangling and been switched off for crying wolf.
+    #[test]
+    fn every_test_name_a_doc_comment_cites_resolves_to_a_real_one() {
+        // egui's own `pub(crate) fn constrain_window_rect_to_area`, cited twice in this file
+        // where it explains what egui still does for a popup whose anchor was removed. Named one
+        // by one rather than excluded by pattern, so that a second upstream name has to be
+        // argued for instead of absorbed — the same reason `FORBIDDEN` is a list and not a rule.
+        const UPSTREAM: [&str; 1] = ["constrain_window_rect_to_area"];
+
+        // A name this project would give a test: long, and joined out of many words.
+        fn cited(word: &str) -> bool {
+            word.len() >= 25
+                && word.matches('_').count() >= 4
+                && word
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        }
+
+        let files: Vec<(String, String)> = sources_under("src", 30)
+            .into_iter()
+            .chain(sources_under("tests", 5))
+            .collect();
+
+        let mut defined: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (_, text) in &files {
+            for (at, _) in text.match_indices("fn ") {
+                let rest = &text[at + 3..];
+                let end = rest
+                    .find(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'))
+                    .unwrap_or(rest.len());
+                if end > 0 {
+                    defined.insert(rest[..end].to_string());
+                }
+            }
+        }
+
+        // A backtick run is followed **across line breaks**, and whitespace inside one is
+        // dropped before the name is looked up. `ui/mod.rs:119` wraps a citation mid-identifier,
+        // which rustdoc renders as one code span, and a line-at-a-time scan reported it as
+        // dangling on the first run — a false positive is how a lint like this gets switched off,
+        // so it is handled here rather than by editing the prose to suit the tool.
+        let mut checked = 0usize;
+        let mut dangling: Vec<String> = Vec::new();
+        for (name, text) in &files {
+            let mut inside = false;
+            let mut buf = String::new();
+            let mut opened_at = 0usize;
+            for (n, line) in text.lines().enumerate() {
+                let line = line.trim_start();
+                let Some(body) = line
+                    .strip_prefix("///")
+                    .or_else(|| line.strip_prefix("//!"))
+                else {
+                    // A doc block ended. An unclosed run does not carry into the next one.
+                    inside = false;
+                    buf.clear();
+                    continue;
+                };
+                for ch in body.chars() {
+                    match (ch, inside) {
+                        ('`', true) => {
+                            let word: String = buf.chars().filter(|c| !c.is_whitespace()).collect();
+                            if cited(&word) {
+                                checked += 1;
+                                if !defined.contains(&word) && !UPSTREAM.contains(&word.as_str()) {
+                                    dangling
+                                        .push(format!("{name}:{} cites `{word}`", opened_at + 1));
+                                }
+                            }
+                            inside = false;
+                            buf.clear();
+                        }
+                        ('`', false) => {
+                            inside = true;
+                            opened_at = n;
+                            buf.clear();
+                        }
+                        (c, true) => buf.push(c),
+                        (_, false) => {}
+                    }
+                }
+                // The line break itself is whitespace inside the span, and is stripped above.
+                if inside {
+                    buf.push(' ');
+                }
+            }
+        }
+
+        assert!(
+            checked >= 30,
+            "only {checked} citation(s) matched the shape this test checks, which is too few to \
+             be the whole of them — a scan that found nothing must not read as a scan that found \
+             nothing wrong"
+        );
+        assert!(
+            dangling.is_empty(),
+            "a doc comment cites a test that does not exist:\n  {}",
+            dangling.join("\n  ")
         );
     }
 
