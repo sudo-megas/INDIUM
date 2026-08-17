@@ -2468,3 +2468,190 @@ choose. Two of the three gate their protection on `exists()`. The one that gets 
 `estimate.rs:562` — is unconditional, and got there for a reason that has nothing to do with security.
 
 **The register stands at 130.**
+
+## Phase 3 — tier 2 on the class-9 sweep, and the mode-discard class found three times
+
+Eight of the sweep's ten findings owed tier 2. Two blind confirmers ran them, each given only
+`file` + `line_range` + a one-word category. **Nine of nine site-verdicts came back real** — but two
+came back as something other than what was filed, which is the third time this round that a blind pass
+has returned a *different mechanism at the same lines*.
+
+### The verdicts
+
+| filed | site | verdict | what changed |
+|---|---|---|---|
+| `PXX-C9-003` | `store.rs:271-278` | **CONFIRMED**, mechanism · **boundary REFUTED** | the mechanism is exactly as filed; the *actor* is not. See below |
+| `PXX-C9-004` | `store.rs:329` | **CONFIRMED**, and far worse than filed | the symlink-follow is real but secondary. The primary defect **needs no actor at all** |
+| `PXX-C9-005` | `tasks.rs:1340-1346` | **DIVERGENT** | the mechanism holds and is nearly inert; the real defects there are availability and privacy |
+| `PXX-C9-006` | `write_path.rs:944-972` | **CONFIRMED**, by a different argument | not the missing link-variant I filed — the test cannot fail for the reason its name gives |
+| `PXX-C9-007` | `ui/mod.rs:4064-4066` | **CONFIRMED** | *"the purest instance of the shape in the tree"* — a fixed name, zero entropy, in the shared temp dir |
+| `PXX-C9-008` | `tasks.rs:2323-2327` | **CONFIRMED** | *"the most complete chain of the five"*: the directory name and the derived file name are both computable from public source |
+| `PXX-C9-009` | `estimate.rs:716`, `tasks.rs:2575`, `window.rs:222` | **CONFIRMED** | and the sibling count corrected — see below |
+| `PXX-C9-010` | `tasks.rs:1545` | **superseded** | filed as a silent symlink replacement; the confirmer found the same line discards the archive's **mode**, which is worse and measurable |
+
+### `PXX-C9-003`: the mechanism confirmed, my severity refuted
+
+The confirmer reproduced the `.broken` write-through with a standalone `rustc` probe: `broken.exists()`
+is `false` with a dangling symlink present, `kept` comes back `true`, and the link's target is created
+holding the settings text **at the source file's mode**. Precisely as filed.
+
+Then it went and looked at who could do it, and **refuted the precondition I had written.** I said *"an
+actor with write access to the config directory."* Measured: `/home/megas` is `drwx------`, so no other
+local account can traverse in at all — and in the ordinary single-uid case, an actor who can plant the
+symlink can already write the target file directly. **The primitive grants no capability and crosses no
+boundary.** That half of my filing is wrong and is withdrawn here rather than quietly left standing.
+
+The one boundary it found is real and narrower: **INDIUM run as root over an unprivileged user's config
+directory**, which `CORE.md:657` explicitly permits — *"Allowed, for the record: … running as root"* —
+and which on Wayland in practice means carrying the invoking user's environment. Then uid 1000 chooses
+both the content and the destination and root performs the write. The confirmer declined to claim it
+was live here, because `/etc/sudoers` was unreadable to it and `env_reset` would defeat it.
+
+**And it withdrew an overclaim of its own, unprompted.** It expected the copy to carry setuid bits;
+measured, `4755` came back `755`, because `fs::copy` chmods *before* writing and the kernel strips
+`S_ISUID` on write without `CAP_FSETID`. A confirmer that reports its own failed hypothesis is doing
+the job the escape valve was written for.
+
+### `PXX-C9-004`: the same lines, a defect needing no attacker, and the class found for the third time
+
+I filed the symlink-follow at `store.rs:329`. The confirmer found it, agreed, called it *"strictly
+weaker than the mode finding"* — and then named the mode finding:
+
+> `File::create` mints a **new inode** at `0o666 & ~umask`, and the `rename` makes that new inode *be*
+> the file. Every save therefore discards the permission bits the file had. A `settings.toml` the user
+> had narrowed to `0600` comes back **world-readable `0644`**, silently, with no actor involved and
+> nothing reported.
+
+Measured, and then measured against the live machine: `~/.config/indium/settings.toml` and
+`~/.local/state/indium/recents.toml` are both `-rw-r--r--` on this box right now.
+
+**And it quoted this round's own new code back at it.** `PXX-T3-003` — the mode-widening the tier-3
+review found *inside* the `PXX-2-001` fix, fixed an hour earlier in `5b2c19f` — is the identical
+mechanism. `store::atomic_write` had it unfixed, in a different file, and the comment that now explains
+it in `arch.rs` is what the confirmer cited to prove it. **A fix that lands a lesson in one file does
+not thereby land it anywhere else.** That is class 9 stated as plainly as this round has managed it.
+
+Then it went one further, outside its three assigned sites, and named a third instance: `tasks.rs:1545`,
+where **Apply's commit** renames a fresh inode over the user's archive with no prior mode captured
+anywhere. It filed that `probable` and said in as many words that it had not run it.
+
+**Measured here, it is `certain`:** `an_apply_does_not_widen_the_mode_of_the_archive_it_rebuilds`
+returned `got 644` on a `0600` archive. For an AES-256 7z that puts the ciphertext where any account on
+the machine can read it, after any rebuild, with nothing said. **The archive matters more than the
+settings file, and it was the third place the same mechanism was sitting.**
+
+All three are closed in `25be01d` and `5b2c19f`, by one shape: read the prior mode through
+`symlink_metadata`, and set it on the **temp, before the rename**, so the file is never present at its
+own name under permissions the user did not choose. Apply fails loudly if it cannot, because on that
+path the original is untouched and `let _ =` there would be the silent-failure class this round audits.
+
+### `PXX-C9-005`: DIVERGENT, and the fix I proposed does not compile
+
+I filed the lock file's `create(true)` symlink-follow and proposed `O_NOFOLLOW`, reasoning that it is
+right here and wrong at `PXX-2-001` because no bytes are written. The confirmer agreed the mechanism
+exists, called it *"nearly inert"* for exactly that reason — and found two defects at those lines that
+are not about symlinks at all:
+
+1. **`.write(true)` buys nothing and can refuse Apply for good.** Measured: `try_lock()` is granted on
+   a *read-only* fd, and a second fd in the same process is still refused — so write access is not what
+   makes the guard work. But this option set fails `Permission denied` on a `0444` lock file, and then
+   `Lock::take` refuses Apply **for that archive, permanently, with a message that never names the
+   file.** Reachable with no attacker at all: one root-run Apply leaves a root-owned lock in the user's
+   own lock directory, and the user's Applies on that archive are dead. `CORE.md` permits running as
+   root and the doc comment builds for it, which is what makes this ordinary rather than exotic.
+2. **The locks are never removed, and the name is an injective encoding of the archive path.**
+   Measured live: **238** zero-byte files in `/run/user/1000/indium/locks`. In the runtime directory
+   that is session-scoped as the comment claims — but the comment's claim that *"the session's own
+   logout wipe clears whatever a crash leaves behind"* is **true of only one of the two branches**, and
+   the `~/.cache` fallback it invokes for the root case is swept by nothing. The residue is a
+   permanent, decodable list of every archive ever rebuilt.
+
+It also refuted two things, including one of its own: the 180-byte tail truncation that makes two
+archives share a lock is **deliberate and documented** at `tasks.rs:1395-1400`, so not a finding; and
+its own hypothesis that the scratch sweeper might unlink a held lock is refuted by `cache_root()`
+pointing at `indium/scratch` and by `owner()`'s strict parse.
+
+**And it told me my proposed fix would not build.** `std` rejects `read(true).create(true)` outright —
+*"creating or truncating a file requires write or append access"* — so dropping `.write(true)` is not a
+one-line change. It also warned off the obvious alternative: unlinking the lock on drop *"would break
+something the code is deliberately doing"*, reintroducing the unlinked-inode race the design exists to
+avoid. **Both of those are the escape valve working**: a confirmer that refuses a fix is more valuable
+than one that writes it.
+
+### `PXX-C9-006`: confirmed by an argument I had not made, and a count corrected
+
+I filed the orphan test's gap as *"no link variant exists for the Apply temp."* The confirmer derived
+something sharper without seeing that: the test's assertions check only the **absence of named files**,
+never that the resulting archive is valid — and because every successful Apply renames the temp onto
+the target, `!temp.exists()` is true whatever happened to the orphan's bytes. Its conclusion:
+
+> even if the explicit removal block were deleted entirely — a regression exactly matching the test's
+> own name — this test would very likely still pass, because libarchive's open call truncates the
+> orphan independently of the Rust-level guard.
+
+It also **independently derived `is_our_temp`'s tautology**, at a different site, with no knowledge that
+`PXX-C9-002` had claimed it: *"tautologically true for anything `temp_path_for` produces … it's not a
+live branch."* That is blind corroboration in its intended form.
+
+And it corrected my arithmetic. I wrote *"nine helpers pre-remove."* It enumerated **16** `temp_dir()`
+call sites and found **11** that pre-clean — 8 with tag + pid + counter + pre-clean, 3 more with
+pre-clean but no counter. The corrected figure is **11 of 16**, and `PXX-C9-008` is the weakest of the
+sixteen on both axes at once. My nine stands corrected.
+
+### The six findings these confirmations produced
+
+Per the stopping rule this round wrote, a finding produced by a tier-2 confirmation is filed and
+tier-0'd, and enters tier 2 only if it is `fix-in-v2.5` or above.
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-C9-011` | `tasks.rs:1545` | Apply's commit discards the archive's mode; an encrypted 7z's ciphertext becomes world-readable on any rebuild | **freeze-blocking** | **fixed, `25be01d`** — the fix owes tier 3 |
+| `PXX-C9-012` | `store.rs:322-342` | `atomic_write` discards the file's mode on **every** save, no actor required | fix-in-v2.5 | **fixed, `25be01d`** |
+| `PXX-C9-013` | `store.rs:335` | the rename replaces a symlinked `settings.toml` with a regular file, so a dotfiles-managed config silently stops receiving writes | document-only | recorded |
+| `PXX-C9-014` | `tasks.rs:1340-1346` | `.write(true)` is unnecessary for the lock and turns an unwritable lock file into a permanent, unexplained refusal of Apply | fix-in-v2.5 | not fixed — the fix is not a one-liner |
+| `PXX-C9-015` | `tasks.rs` lock dir | locks accumulate forever under the cache fallback (238 measured live), and the comment's logout-wipe claim is true of only one of its two branches | document-only | recorded; the comment correction is class 1 |
+| `PXX-C9-016` | `write_path.rs:944-972` | the orphan test cannot distinguish INDIUM's orphan policy from libarchive's incidental truncate-on-open | test-gap | recorded, with the confirmer's `NEEDS-RUN` still open |
+
+**The register stands at 136.**
+
+### `PXX-10-001` closed, and the class closed with a gate rather than an edit
+
+`theme.rs` cited the cast's band test under a name missing its *six*. Fixed — and a second defect was
+sitting in the same doc comment: it cited **`CORE.md:368`** for *"It is not an accent and never
+decorates"*, which lives at **`:374`**. `:368` is the palette table's `| --- | --- |` separator and
+could never have held a sentence. That is almost certainly where `PXX-T2-001`'s identical
+mis-citation came from — **the register inherited a wrong line number from the code it was auditing.**
+The citation now names the row as well as the line, because the number moves and the row does not.
+
+The class is closed by a test rather than by the edit:
+`every_test_name_a_doc_comment_cites_resolves_to_a_real_one` scans `src/` **and** `tests/` for
+backticked snake_case names of at least 25 characters and 4 underscores and asserts each resolves to a
+real `fn`. **40 citations checked, with a floor of 30** so a scan that finds nothing cannot read as a
+scan that found nothing wrong.
+
+Two things it taught on its first run, both kept: it flagged **its own doc comment**, because that
+paragraph quoted the wrong name as the example — so the wrong name is now written unquoted, and the
+comment says why. And it flagged `ui/mod.rs:119`, which wraps a citation **mid-identifier** across two
+lines; rustdoc renders that as one code span, and a line-at-a-time scan called it dangling. The lint
+now follows a backtick run across line breaks and strips whitespace before the lookup. **A false
+positive is how a lint like this gets switched off**, so it was fixed in the tool rather than by
+editing prose to suit it.
+
+### Two process notes, both against me
+
+**The memory note's prediction held twice.** Both confirmers disclosed, unprompted and before acting,
+that the harness had injected this project's `MEMORY.md` into their context before their first tool
+call. Neither had requested it; both assessed relevance and both found none bearing on their sites; one
+noted that the leak is itself recorded as structural. Blindness still cannot be briefed — but
+*disclosure* can be, and it worked exactly as designed on two agents independently.
+
+**I broke a confirmer's compliance check.** Its brief required it to finish with an empty
+`git status --porcelain`. It reported ` M src/theme.rs`, identified the file, the mtime, and that the
+change was not its own, and declined to revert it. It was right: I edited `theme.rs` while it was
+running. The instruction was mine and I made it impossible to satisfy, and the correct brief would have
+scoped the check to *files the agent itself touched*. Recorded because the next round will run
+confirmers alongside work again, and this will recur otherwise.
+
+**Both confirmers also reported the advisor tool returning "unavailable" when called.** Recorded
+because it matches what this session observed directly, and because a round that leans on review
+should say when a review channel was not available rather than let its absence be inferred.
