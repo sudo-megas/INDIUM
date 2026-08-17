@@ -859,3 +859,218 @@ The fifth row is the point of the whole round. That figure was computed three ti
 twice, in a project whose entire discipline is built around exactly that failure. The two rows after
 it are the point of the *contract*: both are admitted at less than certainty, and both would have
 been dropped by a fleet that only files what it can already prove.
+
+---
+
+## Phase 3 — what the fleet returned
+
+Eleven agents ran, in the four waves the order above sets out. All eleven reported. **Ninety-six
+findings** entered the register; agent 11 re-opened every cited file and checked every quoted line
+against the tree.
+
+### The tier-0 pass, and what it did not find
+
+**Zero rejections.** Ninety-six citations, and not one quoted a line that does not exist. That is
+the result this section is most obliged to distrust, so it was spot-checked independently at the
+merge point rather than accepted: the file count, the line total, the test count, the working tree,
+and both of the clerk's two non-PASS verdicts were re-derived by hand. All six confirmed.
+
+| Checked | Claimed | Found |
+| --- | --- | --- |
+| `.rs` files in `src/`, each owned exactly once | 34 | **34** |
+| Total lines across those files | 25,917 | **25,917**, exact |
+| `#[test]` attributes against what `cargo test` accounts for | 384 = 384 | **384**. Confirmed |
+| `git status --porcelain` after eleven agents | empty | **empty** |
+
+Two citations were not clean, and neither is a rejection. `PXX-5-006` cites four lines for the exit
+codes it says are behaviourally pinned; three are exact, and the fourth points at
+`tests/cli_path.rs:169` — `let path = fixture(name);` — where the assertion it means is two lines
+down at `:171`. Recorded as **drift**, which is a bookkeeping correction, not a false finding.
+`PXX-2-002` quotes a string that is real but lives at `password.rs:199` rather than where it was
+cited: **paraphrase, not fabrication.** Both were re-read here before being recorded as such.
+
+### The ledger, and it balances
+
+| Severity | Count |
+| --- | --- |
+| freeze-blocking | **2** |
+| fix-in-v2.5 | **21** |
+| document-only | **62** |
+| no-action | **10** |
+| closed seed, never severity-tagged (`PXX-385`) | **1** |
+| **Total** | **96** |
+
+Under standing rule 7, `document-only` and `no-action` need only tier 0 — which this pass supplied.
+**Seventy-two findings are therefore fully cleared and owe nothing further.** Twenty-one
+`fix-in-v2.5` findings still owe **tier 2**: independent blind re-derivation by a non-originating
+agent, working from `file` and `line_range` alone and never from the original's reasoning. That work
+is not done, and this section does not pretend otherwise. **Phase 3 has completed its audit. It has
+not completed its verification.**
+
+The three severities the clerk reported as unassigned — `PXX-5-003`, `PXX-5-007`, `PXX-5-011` — were
+**dropped in transcription into the working register, not omitted by the agent that filed them.**
+Agent 5's own report assigns all three `document-only` explicitly, `PXX-5-003` adding that the call
+belongs to `main.rs`'s owner. They are restored here with that provenance stated, and the clerk's
+verdict table is left as it was written. Editing another agent's table to agree with a later
+correction is precisely the class-12 failure this document exists to record.
+
+### The two freeze-blocking findings
+
+**`PXX-2-001` — `arch.rs:1054-1084`. An arbitrary write outside the destination, and the only
+finding to have completed all three tiers.**
+
+The encrypted-header 7z branch **never calls libarchive.** It writes with `std::fs::create_dir_all`
+and `std::fs::write`, and both follow symlinks. The `path_escapes` pre-flight at `:1020-1024` runs
+before `headers_need_sevenz` is computed at `:1030`, so no entry reaching this loop is lexically
+outside `dest` — the vector is not a hostile path, it is **a link already on the disk**. INDIUM
+plants it itself: an ordinary tar carrying a symlink extracts with exit 0 and the message
+"Extracted 1 entry.", after which any header-encrypted 7z extracted into that directory writes
+straight through it. Reproduced end to end, twice, the second time using the **committed** fixture
+`tests/fixtures/secret-headers.7z`: `verify_dest/` kept only the symlink, and `outside/pwned.txt`
+received the payload.
+
+This falsifies `CORE.md:102`, which states that extraction runs under libarchive's `SECURE_SYMLINKS`
+and `SECURE_NODOTDOT` so a hostile archive cannot write outside its target. On this branch there are
+no flags to run under.
+
+**Tier 3 reviewed the fix and returned REPLACE.** Agent 2's `O_NOFOLLOW` patch closes two variants
+of three. **`O_NOFOLLOW` does not refuse a hardlink** — a hardlink is not a link the kernel resolves,
+it is a second name for one inode — and the reviewer verified it against the kernel rather than
+arguing it:
+
+```
+symlink  + O_CREAT|O_TRUNC|O_NOFOLLOW  ->  refused, errno=40 (ELOOP)
+hardlink + O_CREAT|O_TRUNC|O_NOFOLLOW  ->  OPENED AND WROTE
+```
+
+INDIUM plants the hardlink as readily as the symlink; the reviewer applied agent 2's patch and wrote
+through it anyway. **Agent 2's original patch must not ship.** The replacement descends one path
+component at a time with `symlink_metadata` before each `mkdir` (`create_dir_under(root, dir, raw)`),
+and replaces `std::fs::write` with **unlink-then-`create_new`** — the unlink removes the *name* and
+so severs the hardlink, and `create_new` (`O_CREAT|O_EXCL`) refuses anything that reappears,
+including a dangling symlink, which is why no hand-transcribed `O_NOFOLLOW` is needed at all. Four
+variants closed, eight legitimate cases intact, suite 286→287 and 34→35 with zero failures.
+
+Two things are recorded rather than closed. An intermediate-component race remains, needing a
+concurrent local writer, and it is closable only with `openat2(RESOLVE_BENEATH)`. And **the
+replacement is not in the tree.** When it lands it is a new artifact and owes its own tier-3 review
+by an agent that did not write it — the rule that produced this verdict applies to the thing the
+verdict produced.
+
+**`PXX-10-006` — `CORE.md:87-92`. CORE contradicts itself on the shipped typeface**: §2 names Fira
+Mono where §6:392 and `assets/fonts/` carry CaskaydiaMono. It has tier 0 and nothing else, correctly:
+it is a wording contradiction, not an exploit, so there is no reproduction to re-derive and no patch
+to review. **What it owes is the maker's hand.** A draft replacement is written and not applied.
+
+### The twenty-one that owe tier 2
+
+Recorded here in full, because a list that lives only in a scratch register is a list this project
+has already lost once.
+
+| ID | Site | What it is |
+| --- | --- | --- |
+| `PXX-1-001` | `ui/mod.rs` | A worker's death is unobservable — nothing joins it, nothing reports it |
+| `PXX-1-002` | `ui/mod.rs` | `staged_against` refuses on a false positive |
+| `PXX-1-003` | `ui/mod.rs` | A rug-pulled listing drains as though it completed |
+| `PXX-1-004` | `ui/mod.rs:1038-1040` | `ApplyMsg::Done` reads the live queue, un-gated during a running Apply |
+| `PXX-1-005` | `ui/mod.rs` | Synchronous CRC decompress freezes the window |
+| `PXX-1-011` | `ui/mod.rs:3427` | Bookmark removal writes the status before the write |
+| `PXX-2-002` | `arch.rs` | A correct password refused on encrypted-content, plaintext-header 7z |
+| `PXX-3-001` | `tasks.rs:1654-1660` | Apply's sole durability barrier discards both the open failure and the sync failure |
+| `PXX-4-001` | `platform/window.rs` | `Child` never reaped — zombie viewers accumulate |
+| `PXX-4-002` | `clipboard.rs` | `clipboard::offer` runs synchronous I/O on the UI thread |
+| `PXX-4-003` / `-004` | `platform/mod.rs`, `open.rs` | Zero test coverage, both extractable offline |
+| `PXX-5-008` | `cli.rs:700-863` | The five termios `unsafe` blocks are entirely untested by CI |
+| `PXX-6-006` / `-007` | `extract.rs:117`, `table.rs:741` | Status written before the write it announces |
+| `PXX-7-004` | crate-wide | A nine-line `#[forbid(unsafe_code)]` patch covering 30 of 34 files |
+| `PXX-8-003` | `pending.rs:108,129-132` | "Discard all" reachable via the always-live `W` keybind with no guard |
+| `PXX-10-001` | `theme.rs:153` | The dangling `///` citation |
+| `PXX-10-002` / `-003` / `-005` | `README.md` | Version and date drift |
+
+**The status-order class was swept to completion rather than sampled.** Eleven production call sites
+of `change_settings`/`change_recents`: three correct and each carrying the rule as a comment, three
+inverted, five making no claim. **No test anywhere gates the ordering.** `ui/mod.rs:3413-3428` holds
+the rule and its violation in adjacent arms of one `match` — the `Recents` arm writes the status
+first and carries the comment explaining why, and the `Bookmarks` arm eight lines below does the
+opposite. That is class 9 in its purest recorded form: not a defect recurring over time, but a
+sibling site missed in the same sweep, in the same `match`.
+
+### Three convergences — the same line, reached from two directions
+
+Kept as separate IDs and merged as one fix unit. Neither half was deleted; each was reached blind.
+
+- **`table.rs:363`** — agent 6 found that the cursor-ring test validates the ring's *arithmetic* and
+  never reads the shipped `CornerRadius::ZERO` argument, so reverting that line to the original P23
+  bug leaves every assertion green. Agent 9, from the other end, found that
+  `only_three_corner_radii_exist` guards the radius *vocabulary* by scanning seven `Visuals` fields
+  and cannot reach the call site at all. **Two tests whose names promise coverage, one line neither
+  touches.**
+- **`arch.rs:584`** — agent 2 found it is the only comparison in the file that does not special-case
+  `ARCHIVE_WARN`, where `next_entry` at `:631` does. Agent 5 arrived from the caller's side and
+  confirmed what it costs: the raw libarchive warning string printed verbatim to the user, breaking
+  the "program's own voice, one sentence" contract stated in the doc comment of the very function
+  that prints it.
+- **The discard-races-Apply cluster** — `PXX-1-004`, `PXX-8-003`, `PXX-8-009`. Agent 8 filed the
+  second as *"strictly worse than PXX-1-004"* and the third at `no-action` as *"corroborates
+  PXX-1-004 without re-filing"*, which is the contract's cross-reference discipline used correctly
+  rather than three agents claiming one defect three times.
+
+Two candidates were examined and **deliberately not merged**: `PXX-4-002` and `PXX-6-008` share a
+class — synchronous filesystem I/O on the UI thread — but enter through different doors, and the
+three status-order inversions are three distinct sites. Same class is not same defect.
+
+### The seed findings, closed out
+
+The seven rows above at `:848-856` are answered here rather than edited, per rule 4.
+
+The dangling `///` citation at `theme.rs:153` stands, and is `PXX-10-001`. The two premise errors in
+the v2.5 plan stand as confirmed. The untested-file arithmetic stands. The stale `table.rs:235-237`
+justification stands as hedged.
+
+**The 385 row is closed, twice.** It was first closed at the merge point by diagnosis: the count came
+from a `grep -A2` that scraped a nested helper, `fn rs_files` at `theme.rs:2905`, as a 385th test
+name. The clerk then closed it again by direct count, deliberately running both a clean method and
+the known-flawed one, and got **384 = 384**. There is no dark test. The finding was a defect in the
+instrument that measured it — which is the class the round was hunting, found in the round's own
+tooling, and it is recorded here at full length rather than quietly dropped because the answer turned
+out to be "nothing".
+
+**The `P7.md:719-727` row resolved against the agent that owned it.** The two absent test *names* are
+convention under rule 4 and are not drift. Agent 3 corrected the brief that sent it: P7 applies *"the
+test that is the bug"* to `ok_zero_alone_cannot_tell_a_cancelled_extraction_from_an_empty_selection`,
+not to the pre-cancellation test. The genuinely absent name is
+`a_precancelled_extraction_writes_nothing_and_sends_no_progress`.
+
+### The register's own integrity, including this document's
+
+Four items, recorded because a round that audits a repository and not its own bookkeeping has
+audited half of what it touched.
+
+1. **Three severities were dropped in transcription into the working register** — `PXX-5-003`,
+   `PXX-5-007`, `PXX-5-011`. The agent assigned all three; the register lost them. Restored above,
+   with the provenance stated.
+2. **A numbering gap at `PXX-9-008`**, unexplained. No finding is lost — agent 9's three
+   test-integrity findings are all present under other IDs — but the gap is recorded rather than
+   renumbered away.
+3. **A cross-reference mismatch on `PXX-7-003`**, whose xref target does not line up with the citing
+   agent's own numbering.
+4. **The clerk found a last-write-wins bug in its own extraction script and disclosed it unprompted.**
+   `PXX-1-005` and `PXX-1-008` each appear twice in the working register — once as the real finding
+   and once as a severity-less index row sharing the ID — and a naive linear scan let the empty row
+   overwrite the real one. Caught before it reached the deliverable. It is the clerk's role to catch
+   silent corruption, and the corruption it caught was its own.
+
+### What is not done
+
+Phase 3's audit is complete and its verification is not. **Twenty-one findings owe tier 2.**
+`PXX-2-001`'s replacement fix is designed, measured, and **not in the tree**; when it lands it owes
+its own tier-3 review. `PXX-10-006` and every CORE draft below await the maker's hand.
+
+**CORE drafts written and not applied**, in one place so none is lost: §2 (the typeface
+contradiction, `PXX-10-006`); §3 (one task, not one worker — agent 1); `CORE.md:102` (the module-table
+replacement falsified by `PXX-2-001` — and the tier-3 reviewer flagged an error in its own draft, a
+comment reading "CORE §6's sentence" where line 102 is **§3**); `CORE.md:105`'s `tasks` row (agent 3,
+two sentences); and agent 5's two drafts, one recording what the exit codes mean and one recording
+the constant-transcription ritual and the precise reach of the gate that guards it.
+
+Nothing in this phase was pushed. No fixture was committed. The working tree is clean.
