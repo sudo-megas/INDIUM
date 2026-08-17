@@ -4060,8 +4060,10 @@ mod tests {
     /// not added — that would be a feature — but it is now counted and said out loud.
     #[test]
     fn a_folder_is_left_out_and_said_out_loud() {
-        let dir = std::env::temp_dir();
-        let file = dir.join("indium-6-2-not-a-folder.txt");
+        let dir = std::env::temp_dir().join(format!("indium-ui-folders-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let file = dir.join("not-a-folder.txt");
         std::fs::write(&file, b"x").expect("temp file");
 
         let (files, folders) = split_out_folders(vec![dir.clone(), file.clone(), dir.clone()]);

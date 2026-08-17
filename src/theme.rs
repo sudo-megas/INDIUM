@@ -2161,6 +2161,94 @@ mod tests {
     /// `least` is not a formality. Every caller here is a test that passes by finding nothing,
     /// so a walk that silently returns an empty list turns each of them green for the one
     /// reason none of them is checking.
+    /// `PXX-C9-007`/`008`/`009`: every name this tree makes in the shared temp directory must
+    /// carry the process id and must be cleared before it is used.
+    ///
+    /// `/tmp` is world-writable, so a name a stranger can predict is a name a stranger can plant.
+    /// A fixed name is the strongest form of that — one of these wrote `indium-6-2-not-a-folder.txt`
+    /// straight into `temp_dir()`, and `fs::write` follows a symlink and truncates what it finds.
+    /// The pid narrows the guess; the pre-clear is what closes it.
+    ///
+    /// **One `remove_dir_all` is the whole requirement, and that was measured rather than
+    /// reasoned.** The first draft of this lint demanded a `remove_file` beside it, on the
+    /// argument that `remove_dir_all` would refuse to follow a symlink and so leave a planted
+    /// one standing. It does not: against a symlink pointing at a directory *and* against one
+    /// pointing at a regular file it returns `Ok`, unlinks the **link**, and leaves the target's
+    /// contents untouched. Against a squatting regular file it returns `NotADirectory` and the
+    /// `create_dir_all` behind it then fails `AlreadyExists`, so that case ends in a loud test
+    /// failure rather than a write-through. Every plant shape is covered by the one call.
+    ///
+    /// That draft would have been a gate enforcing a rule its own justification did not support,
+    /// which is this project's *"a premise that did not survive contact"* class welded into a
+    /// test where every future site would have had to obey it. It is recorded here rather than
+    /// quietly dropped, because it was caught by running a probe and would not have been caught
+    /// by reading the patch.
+    ///
+    /// This is a lint rather than four edits **because four edits are what class 9 is**. The
+    /// sweep that found these read twenty-six write sites and walked past a fifth defect a
+    /// hundred lines from its own fix; `P15.md:75` has the sentence for it — *"A sweep is not a
+    /// habit."* A rule a test enforces is a habit; a rule four files happen to follow is a
+    /// coincidence waiting to be broken by the next hand.
+    #[test]
+    fn every_name_this_tree_makes_in_the_shared_temp_dir_is_pid_named_and_pre_cleared() {
+        // Assembled at run time so that this scanner's own source never contains the token it
+        // searches for. The test lives inside the tree it scans, and every attempt to write the
+        // literal here — plain, then quoted, then escaped — made the scan report itself. That is
+        // not a defect in the tree; it is a scanner unable to see past its own text, and the
+        // honest fix is to stop putting the text there rather than to exclude this file, which
+        // would blind the scan to any real site that ever appeared in it.
+        let needle = format!("temp_{}", "dir()");
+
+        let mut checked = 0usize;
+        for (name, text) in sources_under("src", 30) {
+            let lines: Vec<&str> = text.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                if !line.contains(&needle) || line.trim_start().starts_with("//") {
+                    continue;
+                }
+                checked += 1;
+                let at = format!("{name}:{}", i + 1);
+
+                // The naming statement, however `rustfmt` chose to break it: one of these is
+                // spread over six lines, and a fixed two-line window called it a bare name.
+                // Read to the end of the statement instead of guessing how wide it is.
+                let end = (i..(i + 10).min(lines.len()))
+                    .find(|&j| lines[j].trim_end().ends_with(';'))
+                    .unwrap_or(i);
+                let naming = lines[i..=end].join(" ");
+                assert!(
+                    naming.contains("process::id()"),
+                    "{at} makes a temp name with no process id in it, so it is a name any \
+                     other account can predict and plant: {}",
+                    line.trim()
+                );
+
+                // The clearing — required only where the name is actually a destination. A name
+                // built to be handed to something that derives a *second* name from it, and never
+                // created on disk, has nothing to clear; demanding a `remove_dir_all` there would
+                // be a false positive, and a false positive is how a lint like this gets switched
+                // off. The window is ten lines past the end of the naming statement, which is a
+                // stated floor and not a claim of completeness: a name created further from where
+                // it is built than that is not reached by this scan.
+                let after = lines[i..(end + 10).min(lines.len())].join(" ");
+                let is_a_destination = ["create_dir_all", "File::create", "fs::write"]
+                    .iter()
+                    .any(|call| after.contains(call));
+                assert!(
+                    !is_a_destination || after.contains("remove_dir_all"),
+                    "{at} creates something at a temp name without a `remove_dir_all` on it \
+                     first — a planted name must be cleared before it is written through, and \
+                     that one call covers every shape a plant can take"
+                );
+            }
+        }
+        assert!(
+            checked >= 6,
+            "only {checked} temp-directory site(s) found under src/, fewer than the 6 this scan \
+             expects — a scan that found nothing must not read as a scan that found nothing wrong"
+        );
+    }
+
     fn sources_under(rel: &str, least: usize) -> Vec<(String, String)> {
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
             for entry in std::fs::read_dir(dir)

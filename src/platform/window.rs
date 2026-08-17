@@ -220,6 +220,7 @@ mod tests {
     #[test]
     fn the_same_archive_by_two_spellings_is_still_the_same_archive() {
         let dir = std::env::temp_dir().join(format!("indium-window-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let archive = dir.join("photos.7z");
         std::fs::write(&archive, b"not really an archive").unwrap();

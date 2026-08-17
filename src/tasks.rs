@@ -2519,7 +2519,8 @@ mod tests {
     fn removing_a_temp_a_worker_still_holds_open_takes_only_the_name() {
         use std::io::Write;
 
-        let dir = std::env::temp_dir().join("indium-pxx-orphan");
+        let dir = std::env::temp_dir().join(format!("indium-pxx-orphan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("scratch dir");
         let temp = temp_path_for(&dir.join("archive.7z"));
 
@@ -2772,6 +2773,7 @@ mod tests {
     fn a_draft_survives_the_archive_it_was_drawn_from() {
         let dir =
             std::env::temp_dir().join(format!("indium-draft-survives-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
         let pull = dir.join("1").join("docs");
         std::fs::create_dir_all(&pull).unwrap();
 
@@ -3008,8 +3010,13 @@ mod tests {
     fn a_lock_file_this_account_cannot_write_still_takes_the_lock() {
         use std::os::unix::fs::PermissionsExt as _;
 
-        let target = std::env::temp_dir().join(format!(
-            "indium-lock-ro-{}-{}.tar.gz",
+        // Deliberately not under `temp_dir()`: this path is never created, and never wants to
+        // be. It exists only to be folded into a lock name, and `lock_name_for` documents the
+        // fallback for a target that cannot be canonicalised — *"a new archive that does not
+        // exist yet"* — which is exactly this. Naming a real temp file here would ask the
+        // temp-name lint for a pre-clear on a name nothing ever writes to.
+        let target = PathBuf::from(format!(
+            "/nonexistent/indium-lock-ro-{}-{}.tar.gz",
             std::process::id(),
             line!()
         ));
