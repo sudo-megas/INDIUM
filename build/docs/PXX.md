@@ -4636,3 +4636,166 @@ to the right password.
 
 That is a great deal of evidence and it is **not** the thing the rule asks for. The rule asks for a
 reader who did not write the code. The obligation stands.
+
+## Phase 3 — deviation: two freeze-blocking fixes are committed without the tier-3 review they owe
+
+Recorded under rule 2, which this round inherited from `P2.md:24-27` and which says a deviation goes
+in the ledger rather than being stepped over: *"the deviation log is part of the deliverable."*
+
+### The rule, and what is not satisfied
+
+Tier 3 requires that a `freeze-blocking` fix go back through the pipeline **reviewed by an agent that
+did not write it**, on the stated grounds that *"the fix is the riskiest artifact in this round, not
+the finding — a correct diagnosis with a wrong patch is the failure mode a frozen repo cannot
+survive."*
+
+Two such fixes are committed. **Neither has an independent verdict.**
+
+| commit | closes | independent verdict |
+|---|---|---|
+| `9175a28` | `PXX-2-002`, `PXX-T3-011`, `-012`, `-013`, `-018` | **none** |
+| `05aa76a` | `PXX-T2-015`, `PXX-T2-017` | **none** |
+
+### What happened, in order
+
+Seven review runs were commissioned. **One succeeded and six died to server-side API errors** — one
+server error mid-response, five `529 Overloaded` — none of them caused by anything in the repository
+or the briefs.
+
+| run | target | outcome |
+|---|---|---|
+| 1 | `da6c821` | **succeeded** — returned `REPLACE`, nine findings, and the preserved proof-of-concept archive. This is the review that caught the data loss |
+| 2 | `9175a28` | died, server error mid-response. Nothing returned |
+| 3 | `9175a28` | died, `529`. Nothing returned |
+| 4 | `05aa76a` | died, `529`, having written *"Rich results. Let me now probe the 7z asymmetry — the remaining structural question."* **Its findings were lost; its probes were not** |
+| 5 | `9175a28` | died, `529`. Nothing returned |
+| 6 | `05aa76a` | died, `529`. Nothing returned |
+| 7 | `9175a28` | died, `529`, on a brief cut down to three attacks specifically to be cheap to retry. Nothing returned |
+
+Run 4 is the one worth recording in detail. It left 316 lines of labelled temporary probes in
+`tests/write_path.rs` — *"reverted before the report. Not for commit."* Those probes were run here
+before the file was reverted, and they produced `PXX-T3-020` plus measurements of three claims
+`05aa76a` had argued and never run. **The instrument survived its operator.** The patch is preserved
+outside the repo at `$CLAUDE_JOB_DIR/tmp/tier3-probes-05aa76a.patch`.
+
+Every run left the tree clean or was cleaned here; `git status --porcelain` is empty and every source
+file matches HEAD. Nothing of any dead reviewer's was committed — which the per-commit path staging
+rule is why: run 4's probes and run 6's edits were both in the working tree while `build/docs/PXX.md`
+was being committed, and `git add -A` would have swept a reviewer's sabotage into history.
+
+### What evidence exists instead, and why it is not the same thing
+
+Stated plainly, because the temptation is to let the volume of it stand in for the missing verdict.
+
+- **A 5-of-5 orthogonal sabotage matrix on `9175a28`**, each of five reverted halves caught by exactly
+  one gate — including tier 3's own sabotage C, whose gate exists only because the matrix reported it
+  surviving the fix's first draft.
+- **A 3-of-3 matrix on `05aa76a`** after this section's own gate was added.
+- **The preserved proof-of-concept run against the fixed build**: the exact wrong password that once
+  truncated a 100 000-byte destination file to zero now returns `Err(WrongPassword)` with the
+  destination byte-identical, and `verify_passphrase` finally answers `Ok(true)` to the right password.
+- **Run 4's probes**, giving multiple roots, mid-stream roots, byte-identical idempotence, and external
+  `tar -x` validity.
+- **The 1500-password rate sweep** below, `0/3000` clearing the pre-flight across two codecs.
+
+**None of it is independent.** The artifact in the third item is — its AES salt is per-archive random,
+so a fixture where that password survives could not have been manufactured here — but the hand that
+ran it wrote the code under test, and every matrix above was designed by the same hand. A sabotage
+matrix tests what its author thought to break. That is precisely the gap tier 3 exists to cover, and
+`da6c821` is the proof it is a real gap: it passed 332 tests, carried a five-of-five-style argument in
+its own commit message, and destroyed a file.
+
+### The rate, run here because a rate does not need a reviewer to be true
+
+The highest-value item on every dead brief was the same one: the wrong-password **rate** against the
+fixed build. The record says *"a rate needs a run"* about this exact claim, and after six failures it
+was run here. A rate is a measurement, not a judgement — its being taken by the author costs its
+independence but not its truth, and no number at all was the worse option.
+
+1500 wrong passwords, `wrong-0` through `wrong-1499`, against both preserved fixtures. That scheme is
+the previous review's own: the password it found surviving was `wrong-202`.
+
+| fixture | member | cleared a **one-byte** read | cleared the **pre-flight** | reached a **completed extract** |
+|---|---|---|---|---|
+| `probe-p3` AES + **COPY** | 4 096 bytes | **1500 / 1500** | **0 / 1500** | **0 / 1500** |
+| `probe-p2` AES + LZMA2 (the PoC) | 100 000 bytes | **5 / 1500** | **0 / 1500** | **0 / 1500** |
+
+**The first column is the finding, and it settles a design question the review did not ask.** Tier 3
+said a one-byte check *"discriminates nothing"* on AES+COPY. That is not rhetoric: it is
+**1500 of 1500**, every wrong password, because noise passes through a COPY coder intact and one byte
+of noise is a valid byte. And on LZMA2 **five wrong passwords in fifteen hundred still clear a
+one-byte read even with the length check in place** — so the length check alone, which is the entire
+fix the review proposed, would have left a live hole at roughly one in three hundred.
+
+That is the measured justification for going past the review to a full read. It was reasoned from the
+review's own data at the time and is now a number: **0 of 3000 across both codecs.**
+
+Stated at its true strength and no higher. `0/1500` is not a proof of impossibility; it is a measured
+rate whose 95% upper bound is about `3/1500`. The mechanism behind it is a 32-bit CRC compared at end
+of stream, so the floor is on the order of `2^-32` per attempt, and the observed zero is consistent
+with that rather than evidence beyond it.
+
+### What specifically never ran
+
+Enumerated so the obligation is actionable rather than a feeling.
+
+**On `9175a28`:** whether `ui/password.rs:191`'s
+`.unwrap_or(false)` now presents a missing-codec or malformed-archive error to the user as three
+wrong-password attempts; whether the 1 MiB read bound holds on every path and what a wrong password
+costs in wall-clock on a solid block; regression on unencrypted and encrypted-header 7z and on the
+zip path; whether smallest-member is ever the wrong verification target; and all four clauses of
+`PXX-T3-014`'s residual as `extract`'s doc comment now asserts them.
+
+**On `05aa76a`:** the **7z and zip asymmetry** — `list_all` calls `list_7z` first for any 7z and only
+falls through to libarchive on `None`, so the 7z listing path never passes through `is_archive_root`,
+while the rebuild's new skip applies to every container. That is the question run 4 called *"the
+remaining structural question"* and died before reaching. Also unrun: an independent argument on
+whether the fix belongs in the rebuild loop or in `apply`'s re-list; a third party's sabotage of the
+gates; and the cancellation and read-error paths on a root entry.
+
+### A second hole closed rather than described
+
+Auditing what had actually been measured turned up a gap in this round's own verification — one the
+dead reviewers had not been asked about, because nobody had noticed it — and it was closed instead of
+written up as a residual. **Every measurement of the root skip — both gates and all
+five probes — used an empty task list.** That exercises the rebuild loop's alignment and nothing
+downstream, and an empty queue *structurally cannot* see a misaligned plan: with nothing renamed every
+`out_path` equals its source path, so a shift of `plan.source` looks exactly like no shift at all.
+`a_rooted_archive_survives_staged_renames_and_removes` now applies a rename, a remove and a directory
+rename that carries two children, over a `./`-rooted tar of four nine-byte members, asserting bytes by
+name. It fails with the root skip removed. Suite **405 → 406**.
+
+### The decision, and whose it is not
+
+**The fixes stay committed.** Reverting them restores two confirmed freeze-blocking defects — a wrong
+password truncating a destination file to zero, and `./`-rooted archives being silently rebuilt with
+their members shuffled — and the round has measured both. A known defect is worse than an unreviewed
+repair of it.
+
+**The obligation is carried open, not marked satisfied.** It appears in this document as an open item
+and nowhere as a discharged one.
+
+**This is not a waiver.** The maker waived one precondition in this round — `PXX.md:320`'s *"Phase 3
+does not begin until the sheet is clean"* — explicitly, and that waiver is recorded where it belongs.
+**He has not been asked about this one and must not be recorded as having granted it.** The
+distinction matters more here than usual, because the whole subject of the deviation is a check being
+skipped.
+
+**And the consequence for v2.5 is his call rather than this round's.** Cutting the release with two
+unreviewed freeze-blocking fixes in it is a decision about risk, and the alternative — waiting for the
+API to allow the reviews — costs only time. The recommendation from here is to wait: five failures in
+a row is an outage, not a verdict, and the one review that did run is the reason there is a fix worth
+reviewing at all.
+
+### The findings
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-C12-006` | this round's process | `9175a28` and `05aa76a` each close `freeze-blocking` findings and neither has the independent tier-3 verdict the round's own rule requires; five commissioned runs died to server-side API errors | **freeze-blocking (process)** | **open — the fix is two reviews** |
+
+**One new ID. Register 167 → 168.** Suite **405 → 406**.
+
+Filed as `freeze-blocking` deliberately, and it is the only finding in this register whose severity
+describes a missing *process* step rather than a defect in the tree. That is the honest label: the
+freeze cannot honestly close over it, and no test can ever close it either, because what is missing is
+a reader.
