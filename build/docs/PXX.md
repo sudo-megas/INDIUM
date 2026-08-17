@@ -5435,3 +5435,41 @@ it was wrong. It was all pointed at the archives the author had in mind.**
 own rule applies to it exactly as it applied to the two before it. Recorded as owed, not satisfied —
 filed as `PXX-C12-009`, with the same wording, for the same reason, and with the note that the
 practice has now paid for itself twice.
+
+## Phase 3 — addendum: `PXX-C12-008` was never assigned, and one consequence routed to the owed review
+
+Two short items, both of which would otherwise be found by whoever audits this register rather than
+by the round that made them.
+
+### The hole at `C12-008`
+
+The class-12 sequence runs `001`–`007`, then `009`. **`PXX-C12-008` was never issued to anything.**
+It was drafted for the structural-damage conflation found while writing `fa73bf8`'s own comment, and
+that item was then filed as `PXX-T3-036` instead — correctly, since it is a defect in a source
+sentence rather than in the record — but the class-12 counter had already moved.
+
+Recorded rather than renumbered, under rule 4: the ID appears in a committed message and P-documents
+are append-only. **A census reading `007 → 009` would otherwise report a lost finding**, which is the
+class-12 failure mode operating on the register that exists to catch it. The `T3` sequence is
+contiguous at `001`–`036`; this is the only gap in either.
+
+### One consequence of `fa73bf8` that is not yet traced
+
+`sevenz::list_all` answers `Err(WrongPassword)` for structural damage as well as for a wrong password
+— measured on a 64-byte stub, a half-truncation and a bit-flipped tail — so the hoisted block's
+`Err(ArchiveError::WrongPassword) => Ok(false)` arm swallows corruption. At the window that changes
+nothing: `ui/password.rs:191` flattens the alternative with `unwrap_or(false)` either way, which is
+`PXX-T3-034` and was measured.
+
+**`extract` is the path that was not traced.** Its `else if !verify_passphrase(path, secret)?` arm
+propagated `Err(Other("Seek error"))` for a damaged 7z before the fix and may now return
+`Err(WrongPassword)` — *"Wrong password"* for a corrupt file, on a CLI path with no popup in front of
+it. Whether that arm is reachable at all with a damaged archive, or whether the listing fails
+upstream first, is a measurement rather than an argument.
+
+**It is deliberately not settled here.** Reopening `fa73bf8` to chase an edge its own review has been
+commissioned to adjudicate is how a fix acquires the defect the review would have caught, and this
+round has already recorded two instances of exactly that. It is named in the review's brief as attack
+1, alongside the measured error shapes, so it is an assigned question rather than a loose end.
+
+No new IDs. Register unchanged at **186**; suite unchanged at **410**.
