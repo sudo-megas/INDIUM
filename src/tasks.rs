@@ -1340,6 +1340,18 @@ pub enum ApplyMsg {
 /// nothing ever renames over. It sits there rather than beside the archive so INDIUM
 /// leaves no litter in the user's folders, and so the session's own logout wipe clears
 /// whatever a crash leaves behind.
+///
+/// **That last clause is true of one of the two directories this can land in, and the
+/// correction is `PXX-C9-015`.** `lock_path_for` falls back to the cache directory when there
+/// is no runtime directory — the case the root paragraph above describes — and nothing sweeps
+/// that one. Locks are never removed either way, by design: unlinking one would hand two racing
+/// processes two inodes, which is the defect this whole structure exists to avoid. So the
+/// residue accumulates, and because `lock_name_for` is deliberately injective, it is a decodable
+/// list of every archive ever rebuilt. Measured on the maker's machine: **238** of them.
+///
+/// Recorded rather than fixed. Sweeping by age would need to decide a lock is unheld, and the
+/// only way to ask is to take it — after which unlinking it is the same race in a longer
+/// sentence. What can honestly change here is the sentence, and it has.
 pub struct Lock {
     _file: std::fs::File,
 }
@@ -1352,13 +1364,38 @@ impl Lock {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("could not make the lock directory: {e}"))?;
         }
-        let file = std::fs::File::options()
+        // The write bit is asked for and then given up, rather than skipped: `create` requires
+        // it, so it cannot simply be dropped — `std` refuses `read(true).create(true)` outright
+        // — but nothing here ever writes a byte. This file exists to have an inode that nothing
+        // renames over, and `flock` is granted on a read-only handle; that was measured, not
+        // assumed. So write access is not what makes the guard work, and demanding it costs the
+        // one case where it is absent: a lock file that already exists and that this account may
+        // not write refuses `Lock::take`, which refuses **every** Apply on that archive, for
+        // good, with a message naming nothing the user could act on.
+        //
+        // No attacker is needed to arrive there. `CORE.md:657` permits running INDIUM as root,
+        // and a root-run Apply leaves a root-owned lock in the user's own lock directory. The
+        // fallback is the difference between an archive that is briefly busy and one that can
+        // never be rebuilt again.
+        let opened = std::fs::File::options()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
-            .open(&path)
-            .map_err(|e| format!("could not open the lock file: {e}"))?;
+            .open(&path);
+        let file = match opened {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => std::fs::File::options()
+                .read(true)
+                .open(&path)
+                .map_err(|e| format!("could not open the lock file at {}: {e}", path.display()))?,
+            Err(e) => {
+                return Err(format!(
+                    "could not open the lock file at {}: {e}",
+                    path.display()
+                ))
+            }
+        };
 
         match file.try_lock() {
             Ok(()) => Ok(Lock { _file: file }),
@@ -2953,5 +2990,65 @@ mod tests {
         let here = lock_name_for(Path::new("/tmp/one/photos.7z"));
         let there = lock_name_for(Path::new("/tmp/two/photos.7z"));
         assert_ne!(here, there);
+    }
+
+    /// `PXX-C9-014`: a lock file this account cannot write is still a lock file.
+    ///
+    /// `flock` needs no write access — measured by a blind confirmer, on a read-only handle,
+    /// and again here — and this file never receives a byte. It exists only to have an inode
+    /// that nothing renames over. So asking for write access buys the guard nothing, and it
+    /// costs the case where the file exists and this account may not write it: `Lock::take`
+    /// then refuses, and it refuses *every* Apply on that archive, for good.
+    ///
+    /// No attacker is needed to reach it. `CORE.md:657` permits running INDIUM as root, and a
+    /// root-run Apply leaves a root-owned lock in the user's own lock directory — after which
+    /// the user's Applies on that archive are dead, with a message that named nothing they
+    /// could act on.
+    #[test]
+    fn a_lock_file_this_account_cannot_write_still_takes_the_lock() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let target = std::env::temp_dir().join(format!(
+            "indium-lock-ro-{}-{}.tar.gz",
+            std::process::id(),
+            line!()
+        ));
+        let path = lock_path_for(&target);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("could not make the lock directory");
+        }
+        std::fs::write(&path, b"").expect("could not create the lock file");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444))
+            .expect("could not close the lock file to writing");
+
+        // The precondition, stated rather than assumed: this handle really is refused.
+        let denied = std::fs::File::options().read(true).write(true).open(&path);
+        let unwritable = matches!(
+            &denied,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied
+        );
+        drop(denied);
+
+        let taken = Lock::take(&target);
+        let outcome = taken.as_ref().map(|_| ()).map_err(|e| e.clone());
+        drop(taken);
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644));
+        let _ = std::fs::remove_file(&path);
+
+        // Running as root, the file is writable anyway and there is no case to test. Say so
+        // rather than reporting a pass, and remember that this line is only visible under
+        // `cargo test -- --show-output`.
+        if !unwritable {
+            eprintln!(
+                "SKIPPED a_lock_file_this_account_cannot_write_still_takes_the_lock: a 0444 \
+                 file opened for writing here, so this is root and the case cannot be built."
+            );
+            return;
+        }
+        assert!(
+            outcome.is_ok(),
+            "an unwritable lock file must still lock, not refuse the archive for good: {:?}",
+            outcome.unwrap_err()
+        );
     }
 }
