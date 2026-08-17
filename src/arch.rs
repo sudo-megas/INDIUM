@@ -974,6 +974,64 @@ pub fn path_escapes(raw: &str) -> bool {
     p.split('/').any(|c| c == "..")
 }
 
+/// Create `rel` beneath `root`, refusing to descend through anything that is not already a real
+/// directory. **PXX-2-001.**
+///
+/// [`path_escapes`] judges the *stored* name, and by the time this runs nothing reaching it is
+/// lexically outside the destination. This closes the other half, which is not about the archive
+/// at all: **a link already on the disk.** `std::fs::create_dir_all` follows symlinks, so one
+/// symlinked component turns a vetted relative path into a write wherever the link points — and
+/// INDIUM plants such a link itself, because an ordinary tar carrying a symlink extracts with
+/// exit 0 and says "Extracted 1 entry."
+///
+/// So the descent is one component at a time, and [`std::fs::symlink_metadata`] is asked before
+/// each step precisely because it does **not** follow the last component: a symlink *to* a
+/// directory answers `is_dir() == false` here, which is exactly the case that has to be refused.
+///
+/// This matters only on the encrypted-header 7z branch, which never calls libarchive and so has
+/// no `SECURE_SYMLINKS` to run under. `CORE.md:102` says extraction runs under those flags; on
+/// that branch there are no flags, which is why the guard has to exist in Rust.
+///
+/// **What this does not close, said rather than implied.** Between the `symlink_metadata` and the
+/// `create_dir` there is a window in which a concurrent local writer could swap a component for a
+/// link. Closing it needs `openat2(RESOLVE_BENEATH)` and descriptor-relative writes throughout,
+/// which is a larger change than this branch; that race needs a hostile process already running
+/// as the user, where what this closes is an archive doing it alone.
+fn create_dir_under(root: &Path, rel: &Path) -> Result<(), ArchiveError> {
+    // `root` is the destination the *user* named, not anything the archive said, and the
+    // libarchive path creates it the same way. Only the components the archive names are
+    // descended strictly — refusing a destination the user reached through their own symlink
+    // would be the guard overreaching into their business.
+    std::fs::create_dir_all(root)
+        .map_err(|e| ArchiveError::Other(format!("could not create {root:?}: {e}")))?;
+
+    let mut cur = root.to_path_buf();
+    for part in rel.components() {
+        // `path_escapes` has already refused `..` and an absolute name. Anything that is not a
+        // plain component here is a shape it did not anticipate, and is refused rather than
+        // interpreted.
+        let std::path::Component::Normal(name) = part else {
+            return Err(ArchiveError::UnsafePath(rel.display().to_string()));
+        };
+        cur.push(name);
+        match std::fs::symlink_metadata(&cur) {
+            Ok(md) if md.is_dir() => {}
+            Ok(_) => {
+                return Err(ArchiveError::Other(format!(
+                    "refusing to extract through {cur:?}: it is already on the disk and is not a \
+                     directory"
+                )))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir(&cur)
+                    .map_err(|e| ArchiveError::Other(format!("could not create {cur:?}: {e}")))?;
+            }
+            Err(e) => return Err(ArchiveError::Other(format!("could not read {cur:?}: {e}"))),
+        }
+    }
+    Ok(())
+}
+
 /// Extract the selected entries into `dest`.
 ///
 /// Everything that can be known before a byte is written is settled first: traversal
@@ -1052,25 +1110,49 @@ pub fn extract(
     // above are untouched — the decoder changes where the bytes come from, never what is
     // allowed to be written.
     if headers_need_sevenz {
+        // The trait for `write_all`, brought in here as the two `Read` uses in this file are.
+        use std::io::Write as _;
+
         let mut written = 0usize;
         for entry in &selected {
             if cancel.load(Ordering::Relaxed) {
                 break;
             }
-            let target = dest.join(&entry.raw_path);
+            // Both halves of the name are needed: `rel` is what the archive said and is what
+            // gets descended a component at a time, `target` is where the bytes go.
+            let rel = Path::new(&entry.raw_path);
+            let target = dest.join(rel);
             if entry.is_dir {
-                std::fs::create_dir_all(&target).map_err(|e| {
-                    ArchiveError::Other(format!("could not create {target:?}: {e}"))
-                })?;
+                create_dir_under(dest, rel)?;
                 continue;
             }
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    ArchiveError::Other(format!("could not create {parent:?}: {e}"))
-                })?;
+            if let Some(parent) = rel.parent() {
+                create_dir_under(dest, parent)?;
             }
             let (bytes, _) = crate::sevenz::read_entry(path, &entry.path, usize::MAX, passphrase)?;
-            std::fs::write(&target, &bytes)
+            // Unlink first, then create. **The unlink is what severs a hardlink** — it removes
+            // the *name*, and `O_NOFOLLOW` would not have helped, because a hardlink is not a
+            // link the kernel resolves but a second name for one inode. `create_new` is
+            // `O_CREAT|O_EXCL`, so it then refuses anything that has reappeared at that name,
+            // including a dangling symlink, which `std::fs::write` followed and created through.
+            //
+            // Severing is not refusing. A destination holding a stale link is not a hostile
+            // archive, and the user asked for their files: the entry is replaced, not rejected.
+            match std::fs::remove_file(&target) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    return Err(ArchiveError::Other(format!(
+                        "could not clear {target:?} before writing it: {e}"
+                    )))
+                }
+            }
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&target)
+                .map_err(|e| ArchiveError::Other(format!("could not create {target:?}: {e}")))?;
+            file.write_all(&bytes)
                 .map_err(|e| ArchiveError::Other(format!("could not write {target:?}: {e}")))?;
             written += 1;
             if let Some(tx) = tx {
@@ -1842,6 +1924,96 @@ mod tests {
         // A filename that merely starts with dots is not a traversal.
         assert!(!path_escapes("..hidden.txt"));
         assert!(!path_escapes("sub/...weird"));
+    }
+
+    /// A scratch directory that removes itself, so a failing assertion cannot leave droppings.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(tag: &str) -> Scratch {
+            use std::sync::atomic::AtomicU32;
+            static COUNTER: AtomicU32 = AtomicU32::new(0);
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "indium-cdu-{}-{}-{}",
+                tag,
+                std::process::id(),
+                n
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).expect("a scratch directory");
+            Scratch(path)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// `create_dir_under` refuses a link and nothing else. **PXX-2-001.**
+    ///
+    /// The half that is easy to get wrong is not the refusal — it is everything below the
+    /// refusals here. A guard that returned `Err` for every input would pass
+    /// `a_link_planted_in_the_destination_cannot_redirect_an_encrypted_header_write` and break
+    /// every ordinary extraction, so the legitimate cases are asserted at greater length than
+    /// the hostile ones.
+    #[test]
+    fn create_dir_under_refuses_a_link_and_permits_everything_else() {
+        let s = Scratch::new("ok");
+        let root = &s.0;
+
+        // 1. A single fresh component.
+        assert!(create_dir_under(root, Path::new("d")).is_ok());
+        assert!(root.join("d").is_dir());
+
+        // 2. Nested fresh components, created in one descent.
+        assert!(create_dir_under(root, Path::new("a/b/c")).is_ok());
+        assert!(root.join("a/b/c").is_dir());
+
+        // 3. Idempotent: an existing real directory is descended, not refused.
+        assert!(create_dir_under(root, Path::new("a/b/c")).is_ok());
+
+        // 4. An empty relative path is a no-op, which is what a file at the top level gives:
+        //    `Path::new("f.txt").parent()` is `Some("")`.
+        assert!(create_dir_under(root, Path::new("")).is_ok());
+        assert!(create_dir_under(root, Path::new("f.txt").parent().unwrap()).is_ok());
+
+        // 5. A root that does not exist yet is created. The destination is the user's choice,
+        //    not the archive's, and the libarchive path creates it too.
+        let deeper = root.join("not/here/yet");
+        assert!(create_dir_under(&deeper, Path::new("x")).is_ok());
+        assert!(deeper.join("x").is_dir());
+
+        // 6. A *file* beside the path being created blocks nothing.
+        std::fs::write(root.join("a/f.txt"), b"x").unwrap();
+        assert!(create_dir_under(root, Path::new("a/sibling")).is_ok());
+        assert!(root.join("a/sibling").is_dir());
+
+        // ---- and now the three that must be refused ----
+        let s = Scratch::new("no");
+        let root = &s.0;
+        let outside = s.0.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+
+        // 7. A symlink to a directory. `symlink_metadata` answers `is_dir() == false` for it,
+        //    which is the whole reason that call is the right one.
+        std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+        assert!(create_dir_under(root, Path::new("link/inner")).is_err());
+        assert!(
+            !outside.join("inner").exists(),
+            "the descent went through the link and created a directory outside the root"
+        );
+
+        // 8. A dangling symlink, which `create_dir_all` would also have followed.
+        std::os::unix::fs::symlink(outside.join("nothing"), root.join("dangle")).unwrap();
+        assert!(create_dir_under(root, Path::new("dangle/inner")).is_err());
+
+        // 9. A plain file where a directory is needed. `create_dir_all` fails here too, but with
+        //    the OS's words rather than this program's, and the distinction is the message.
+        std::fs::write(root.join("plain"), b"x").unwrap();
+        assert!(create_dir_under(root, Path::new("plain/inner")).is_err());
     }
 
     /// The two fields `is_archive_root` reads. Everything else is filler.

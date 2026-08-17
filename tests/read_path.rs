@@ -872,6 +872,123 @@ fn an_encrypted_header_7z_extracts_after_the_prompt() {
     );
 }
 
+/// A link already on the disk cannot redirect an encrypted-header write. **PXX-2-001.**
+///
+/// The encrypted-header branch never reaches libarchive, so `SECURE_SYMLINKS` and
+/// `SECURE_NODOTDOT` — which `CORE.md:102` says extraction runs under — are not in play on it at
+/// all. `path_escapes` vets the *stored* name, and the only name here is `f.txt`, which escapes
+/// nothing: the vector is not a hostile path but a link already sitting in the destination, and
+/// INDIUM plants such a link itself, because an ordinary tar carrying one extracts with exit 0.
+///
+/// Both variants, because they fail differently and only one of them fails the obvious way.
+/// `O_NOFOLLOW` refuses the symlink and **opens the hardlink** — a hardlink is not a link the
+/// kernel resolves, it is a second name for one inode — so the write has to be unlink-then-create
+/// rather than open-with-a-flag. Severing is not refusing: extraction must still succeed, because
+/// a destination holding a stale link is not a hostile archive and the user asked for their files.
+#[test]
+fn a_link_planted_in_the_destination_cannot_redirect_an_encrypted_header_write() {
+    const PAYLOAD: &[u8] = b"INDIUM header-encrypted payload\n";
+
+    // ---- the symlink variant: the target does not exist, so a followed write creates it ----
+    let dir = TempDir::new("pxx2001-sym");
+    let dest = dir.path().join("dest");
+    let outside = dir.path().join("outside");
+    std::fs::create_dir_all(&dest).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let pwned = outside.join("pwned.txt");
+    std::os::unix::fs::symlink(&pwned, dest.join("f.txt")).unwrap();
+
+    let result = arch::extract(
+        &fixture("secret-headers.7z"),
+        &wanted(&["f.txt"]),
+        &dest,
+        Some(&Secret::from_text("indium")),
+        None,
+        &no_cancel(),
+    );
+
+    assert!(
+        !pwned.exists(),
+        "the payload was written through a symlink to {}, outside the destination",
+        pwned.display()
+    );
+    assert_eq!(
+        result.expect("severing a stale link is not a refusal — extraction must still succeed"),
+        1
+    );
+    assert_eq!(
+        std::fs::read(dest.join("f.txt")).expect("f.txt must be in the destination"),
+        PAYLOAD
+    );
+    assert!(
+        std::fs::symlink_metadata(dest.join("f.txt"))
+            .unwrap()
+            .is_file(),
+        "the destination entry must be a real file now, not still a link"
+    );
+
+    // ---- the hardlink variant: one inode, two names, and O_NOFOLLOW sees nothing wrong ----
+    let dir = TempDir::new("pxx2001-hard");
+    let dest = dir.path().join("dest");
+    let outside = dir.path().join("outside");
+    std::fs::create_dir_all(&dest).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let victim = outside.join("victim.txt");
+    const ALREADY: &[u8] = b"the file that was already here\n";
+    std::fs::write(&victim, ALREADY).unwrap();
+    std::fs::hard_link(&victim, dest.join("f.txt")).unwrap();
+
+    let result = arch::extract(
+        &fixture("secret-headers.7z"),
+        &wanted(&["f.txt"]),
+        &dest,
+        Some(&Secret::from_text("indium")),
+        None,
+        &no_cancel(),
+    );
+
+    assert_eq!(
+        std::fs::read(&victim).unwrap(),
+        ALREADY,
+        "the payload was written through a hardlink into {}, outside the destination",
+        victim.display()
+    );
+    assert_eq!(
+        result.expect("severing a stale link is not a refusal — extraction must still succeed"),
+        1
+    );
+    assert_eq!(
+        std::fs::read(dest.join("f.txt")).expect("f.txt must be in the destination"),
+        PAYLOAD
+    );
+
+    // ---- and a linked *directory* component, which is the same hole one level up ----
+    let dir = TempDir::new("pxx2001-dir");
+    let dest = dir.path().join("dest");
+    let outside = dir.path().join("outside");
+    std::fs::create_dir_all(&dest).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    // `d` inside the destination is a link to a directory outside it. Nothing the archive says
+    // is unsafe; `create_dir_all` would walk straight through this and write beyond `dest`.
+    std::os::unix::fs::symlink(&outside, dest.join("d")).unwrap();
+    let escaped = outside.join("f.txt");
+    let result = arch::extract(
+        &fixture("secret-headers.7z"),
+        &wanted(&["f.txt"]),
+        &dest.join("d"),
+        Some(&Secret::from_text("indium")),
+        None,
+        &no_cancel(),
+    );
+    // `dest/d` was named as the destination itself, which is the user's own choice and not the
+    // archive's — so this one is allowed, and is here to pin that the fix did not overreach into
+    // refusing a destination the user pointed at through their own link.
+    assert!(
+        result.is_ok() && escaped.exists(),
+        "a destination the *user* named through their own link must still work, got {result:?}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Names outside ASCII — P11
 // ---------------------------------------------------------------------------
