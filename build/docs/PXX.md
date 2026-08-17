@@ -2655,3 +2655,276 @@ confirmers alongside work again, and this will recur otherwise.
 **Both confirmers also reported the advisor tool returning "unavailable" when called.** Recorded
 because it matches what this session observed directly, and because a round that leans on review
 should say when a review channel was not available rather than let its absence be inferred.
+
+## Phase 3 — the freeze-blocking pair, and the guard that was reading the wrong question
+
+`PXX-C9-001` and `PXX-C9-002` sat in six lines of `tasks::apply`, and between them they
+described the whole shape of class 9: a write reached through a name INDIUM did not fully
+choose, guarded by two tests that each opened at exactly the input the guard existed for.
+
+```rust
+    let temp = temp_path_for(&input.target);
+    if let Some(name) = temp.file_name().and_then(|n| n.to_str()) {
+        if is_our_temp(name) && temp.exists() {
+            let _ = std::fs::remove_file(&temp);
+        }
+    }
+```
+
+Three clauses, and two of them were wrong in the same direction — **both fail open, and both
+fail open on the input that matters.**
+
+- **`temp.exists()` traverses.** For a dangling symlink at the temp's name it answers `false`,
+  so the removal is skipped for the one file shape that can turn a build into a write somewhere
+  else. A leftover *regular* file — the case the guard was written for, and the only case its
+  test covers — is the case where skipping it costs nothing, because libarchive truncates
+  whatever it opens.
+- **`to_str()` answers `None` for a name that is not UTF-8.** A Linux filename is a byte string
+  that promises no encoding. The code then did nothing at all, silently, about a file whose name
+  **it had constructed itself** two lines earlier.
+
+### What actually happens, measured
+
+Not modelled. Both tests were written first and run against the unfixed code:
+
+```
+thread 'a_dangling_link_at_the_apply_temp_is_unlinked_not_written_through' panicked:
+  the rebuild landed at /tmp/indium-write-apply-temp-link-141042-0/victim,
+  so the link was followed instead of unlinked
+
+thread 'a_target_whose_name_is_not_utf8_still_has_its_temp_cleared' panicked:
+  the rebuild landed at /tmp/indium-write-apply-temp-raw-141042-1/victim-raw,
+  so an undecodable name skipped the removal
+```
+
+And the consequence runs one step further than "a file was written." The temp is renamed onto
+the target at commit — and **`rename` moves the link, not what the link points at.** So the
+sequence is: the rebuild lands in the attacker's chosen file, and then the user's `.tar.gz`
+*becomes a symlink* to it. The archive is not corrupted; it is replaced by a pointer to
+somebody else's file, which is a worse outcome and a quieter one.
+
+### The open NEEDS-RUN, closed by running it
+
+A blind tier-2 confirmer predicted that `an_orphaned_temp_from_a_crashed_apply_is_overwritten_not_multiplied`
+would still pass with the removal deleted outright, because libarchive truncates independently
+of anything the Rust does. It filed that as a prediction and said it had not run it.
+
+**Run:** the entire removal block was replaced with a comment, and the test passed.
+
+That closes `PXX-C9-016` at `certain`. The orphan test cannot fail for the reason its name
+gives — it asserts the absence of named files, and every successful Apply renames the temp away
+regardless of what happened to the orphan's bytes. It has been green for its whole life without
+ever having been able to say anything.
+
+### The fix, and the one line of it that is a judgement call
+
+The removal is now unconditional, matching the form `estimate`'s scratch candidate has always
+used twenty lines from the code that got it wrong. `remove_file` unlinks a name and does not
+care whether it resolves, so testing first bought nothing and cost the case that mattered. The
+check moved to bytes as `is_our_temp_os`, with `is_our_temp` delegating to it, so the *"provably
+ours"* guarantee the comment claims now holds for every name a Linux filesystem can hold rather
+than for the subset Rust can decode.
+
+The judgement call is the third change: **a failed removal now refuses the Apply** where it used
+to be `let _ =` and proceed. Proceeding past a failed removal is the write-through with an extra
+step. Refusing costs the user nothing at that point — not one byte has been written and the
+original is untouched — and the message names the file, because a refusal nobody can act on is
+the exact fault this round filed against the lock file at `PXX-C9-014`.
+
+**And that is where a fix for one class nearly commits another.** `PXX-C9-014` is the finding
+that an unwritable lock file turns into a permanent, unexplained refusal of Apply. Making a
+failed unlink fatal *looks* like the same trap. It is not, and the reason is not about severity:
+
+> **Unlink permission belongs to the directory. Open-for-write permission belongs to the file.**
+
+Measured rather than asserted, and it comes out as a **double dissociation** — each permission
+succeeds exactly where the other fails, which is the strongest form this claim could take:
+
+| | `open` for write | `unlink` |
+|---|---|---|
+| file `0444` in a `0700` directory | **refused** — `Permission denied` | **succeeds** |
+| file `0666` in a `0500` directory | **succeeds** | **refused** — `Permission denied` |
+
+So in the user's own directory the unlink succeeds even against a leftover they cannot open —
+the right to remove a name comes from the directory holding it — and this therefore **cannot**
+become the permanent refusal the lock finding describes, where the failing operation needs
+permission on the file itself. The sticky bit does not disturb that for the ordinary case:
+measured at euid 1000, the owner of a file in a `1777` directory still unlinks it.
+
+In a sticky *shared* directory the unlink **can** fail — and there the leftover is a file this
+account may not remove, which is precisely the circumstance in which proceeding **is** the
+write-through. The asymmetry is what makes fatal right here and wrong at the lock, and it is
+written into the comment rather than left to be re-derived by whoever reads it next.
+
+### What this does not close, said in the code rather than assumed
+
+The temp is opened by libarchive or by the 7z writer, neither of which will take an `O_EXCL`.
+So a name re-planted **between** this unlink and that open is still followed.
+
+That is `PXX-3-009`'s mechanism — the one agent 3 filed as a TOCTOU race and which was
+dispositioned `document-only`. It keeps its row. What is closed here is the mechanism that needs
+no timing at all, which is the DIVERGENT half recorded two sections ago.
+
+**A comment claiming the symlink question was closed would have been worse than no comment**:
+it would be this round's class 5, committed inside the fix for class 9, and it would have
+flattened the DIVERGENT distinction the previous section was written to preserve.
+
+### Four gates, each broken alone
+
+| sabotage | who fails | who stays green |
+|---|---|---|
+| put `&& temp.exists()` back | both symlink gates | the refusal gate |
+| put `to_str()`/`is_our_temp` back | **only** the non-UTF-8 gate | the UTF-8 gate |
+| make the failed removal non-fatal | **only** the refusal gate | both symlink gates |
+| make the byte check fail open on undecodable names | **only** the unit case | — |
+
+The second row is the one worth reading twice: the two symlink tests share a body and differ in
+exactly one variable — whether the target's name happens to decode — so restoring the old
+`to_str()` guard fails one and leaves the other passing. That is what makes them a pair rather
+than a duplicate.
+
+The refusal gate carries a **loud skip**: it closes a directory to build its precondition, and if
+the process can still write into that directory it is root (`CORE.md:657` permits running as
+root), the precondition cannot exist, and the test prints why it did nothing rather than
+reporting a pass. A test that can skip silently is a gate that cannot fail, which is the class
+this round is auditing.
+
+Suite **387 → 391**, clippy clean, `cargo fmt --check` clean.
+
+### Tier 3 returned AMEND, and the most useful thing it found was a hundred lines away
+
+The verdict was **AMEND**, not ACCEPT — the fix is right in substance, and one specific thing had
+to change.
+
+**What it could not break, which is worth as much as what it could.** The reviewer went at the
+fatal arm hardest, because that is where a fix for one class most plausibly commits another, and
+**refuted its own headline hypothesis in five steps**: the arm can only fire on a non-`ENOENT`
+`unlink` error at `temp`; `temp` and the target share a parent; the commit ends in a `rename` in
+that parent; `rename` needs the **same** directory-modify permission `unlink` does; therefore
+every permission-shaped failure of the unlink implies the Apply would have failed at the commit
+anyway. It then walked sticky `/tmp`, append-only directories, `chattr +i`, SELinux
+`remove_name`, read-only mounts, `EBUSY` at a mountpoint, a readable-but-unwritable directory and
+root, and found no Apply that used to succeed and now fails. **No availability was lost.**
+
+It also measured the thing that makes the arm safe in ordinary use, which I had not: on ext4, an
+absent name in a `0500` directory returns **`ENOENT`, not `EACCES`** — Linux checks the negative
+dentry *before* `may_delete`'s permission check. So the everyday "nothing to clean up, directory
+not writable" Apply falls through the `NotFound` arm untouched.
+
+And it settled the byte-equivalence question by exhaustion rather than by argument: a standalone
+probe holding exact copies of both implementations, run over 22 hand-picked edge names, 7,644
+exhaustive short decodable names and 200,000 random ones — **207,644 names, zero disagreements.**
+The doc comment's claim that the two forms agree wherever both can speak is true as written.
+
+#### The AMEND: a refusal that described a file that was not there
+
+`unlink` reports **path-resolution and mount** failures before it ever looks for the name.
+`EROFS`, `ENOTDIR`, `ENAMETOOLONG`, `EACCES` for a missing search bit — all come back for a name
+that does not exist and never did. So an ordinary Apply onto a read-only mount, with nothing
+planted anywhere, reached the fatal arm and was told:
+
+> A leftover from an interrupted rebuild is in the way at `…/.out.tar.gz.indium-new` … Remove it
+> and try again.
+
+with `temp present = false` measured immediately before and after. **That is `PXX-C9-014`'s
+unactionable refusal wearing a friendlier face**, committed inside the fix whose own comment cites
+`PXX-C9-014` as the thing it is avoiding. Measured end to end on a read-only bind mount inside a
+user namespace.
+
+Fixed with one `stat` on an already-failing path, choosing between two sentences. The path is
+named in both, so the contract the commit set itself is kept either way.
+
+**And the gate for it needs no privileges at all.** The reviewer needed `unshare -Urm`; the same
+false premise reproduces through `ENAMETOOLONG`, because the temp name is the target's plus twelve
+bytes — so a 250-byte target yields a 262-byte temp name that cannot exist on ext4, with nothing
+planted anywhere. That is now `an_unclearable_workspace_does_not_claim_a_leftover_that_is_not_there`,
+and sabotaging the two-sentence split back to one fails it while leaving the true-premise gate
+green, which is the pair proving the sentences are actually separated.
+
+#### The sibling, in the same function, a hundred lines up
+
+The round's best finding, and it came from reviewing the fix rather than from the sweep that was
+looking for exactly this:
+
+```rust
+    // A new archive must never silently replace an existing file. `create_new` failing
+    // with `AlreadyExists` is the check, and it costs nothing.
+    if creating && input.target.exists() {
+```
+
+**`PXX-C9-001`'s mechanism, verbatim, in the same function as the fix for it.** A dangling symlink
+at the destination is not "an existing file" to `exists()`, so Create proceeds — and the commit
+`rename` replaces the link with a regular file, which is the silent replacement this guard exists
+to prevent, performed by the code refusing to perform it. Reproduced independently before fixing:
+`Ok(1)` where a refusal was required, and the link gone afterwards.
+
+Nothing of the user's is destroyed, because the link pointed at nothing. **What is destroyed is
+the guarantee**, and a guarantee that holds for every input except the one shaped to defeat it is
+not one.
+
+The comment above it was wrong in its own right: it credits `create_new` failing with
+`AlreadyExists` — an atomic, non-traversing check — for a guarantee delivered entirely by the
+line below it. Measured: **neither writer takes an `O_EXCL`.** `arch::Writer::create` and
+`sevenz::Writer::create` both followed a planted dangling link and created the file at the far
+end. The comment described a mechanism the code has never had.
+
+> **Class 9 has now been found four times in this round, and this is the second time the round's
+> own fix was one of them.** The sweep found three siblings. Tier 3 found a fourth, a hundred
+> lines from a fix for the same mechanism, written by a hand that had just spent a section on
+> `P15.md:75` — *"A sweep is not a habit."* The sweep looked at twenty-six write sites and did not
+> look up.
+
+#### Three corrections against the record, taken rather than argued with
+
+- **The precedent was half-cited.** The comment appealed to `estimate`'s scratch candidate to
+  justify unconditional-**and**-fatal. That one is unconditional and `let _ =`. It now says it is
+  borrowed for the unconditionality alone, because a half-cited precedent is worse than none.
+- **"Skips loudly" was false.** libtest captures the output of *passing* tests, so the skip
+  message printed nothing under `cargo test`. Measured with a `rustc --test` probe. The comment
+  now says the reason is visible under `--show-output`, and states the residual plainly: under
+  root the gate reports `ok` without having tested anything. Failing instead was considered and
+  rejected — `CORE.md:657` permits running as root, and turning a permitted configuration red is
+  not a gate, it is a complaint.
+- **A wrong implementation that all four gates pass exists.** Delete the `NotFound` arm — making
+  *every* ordinary Apply refuse, the most destructive one-line change available there — and all
+  four new gates stay green, because every one of them plants something at the temp path. The
+  suite does catch it, at `an_apply_with_no_tasks_reproduces_the_archive`. Recorded, not patched:
+  the honest statement is that these gates cover the planted cases and the identity test covers
+  the empty one.
+
+#### The eight findings
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-T3B-001` | `tasks.rs:1573-1600` | the refusal asserted a leftover that on `EROFS`/`ENAMETOOLONG`/`ENOTDIR`/no-search-`EACCES` does not exist, and told the user to remove it | fix-in-v2.5 | **fixed, `c9878b2`** |
+| `PXX-T3B-002` | `tasks.rs:1467` | the Create guard traverses, so a dangling symlink at the destination defeats "must never silently replace" | fix-in-v2.5 | **fixed, `c9878b2`** |
+| `PXX-T3B-003` | `tasks.rs:1465-1466` | that guard's comment credits `create_new`/`AlreadyExists`; neither writer takes an `O_EXCL` and the check is never performed | document-only | **fixed with 002** |
+| `PXX-T3B-004` | `write_path.rs:1086-1089` | "skips loudly" is false — libtest captures passing tests' output, so under root the gate vacates in silence | document-only | **fixed, `c9878b2`** |
+| `PXX-T3B-005` | `tasks.rs:1577` | deleting the `NotFound` arm makes every Apply refuse and all four new gates still pass | no-action | recorded |
+| `PXX-T3B-006` | `write_path.rs:1125` | the refusal gate's discriminating power rests entirely on one `contains`, since a fail-open still errors later at the rename | no-action | recorded |
+| `PXX-T3B-007` | `tasks.rs:1564` | `estimate`'s precedent is cited for unconditional-and-fatal; it is `let _ =` | document-only | **fixed, `c9878b2`** |
+| `PXX-T3B-008` | `tasks.rs:1574`, `ui/mod.rs:2996` | the guard cannot reject: all **1,885** names `temp_path_for` can produce are accepted, so "provably ours" is delivered by construction, not by the check | no-action | confirmed surviving |
+
+**The register stands at 144.** Suite **391 → 393**.
+
+#### What tier 3 has now cost and returned, twice
+
+`401c5d5` went in with two passing tests and a freeze-blocking regression behind them; tier 3
+returned REPLACE. `ba26617` went in with four sabotaged gates and a measured double dissociation
+behind it; tier 3 returned AMEND, and found a fourth class-9 sibling the sweep had walked past.
+
+**Neither defect was findable by the hand that wrote the fix**, and both were in the fix rather
+than in the diagnosis. The charter's line — *"the fix is the riskiest artifact in this round, not
+the finding"* — has now been paid for twice at full price, and the second time the fix was written
+by someone who had just finished writing that sentence down.
+
+One loose end recorded rather than dropped: under the reviewer's most destructive sabotage, a full
+`--test write_path` run hung past 400 seconds where the clean baseline finishes in about two. It
+is a sabotage artifact with no bearing on the shipped code — the load-bearing test ran alone and
+answered — but it is filed `unverified-hypothesis` rather than discarded, because a suite that can
+hang is worth knowing about even when only a deliberately broken build reaches it.
+
+Both the reviewer and both earlier confirmers disclosed, unprompted, that `MEMORY.md` had been
+injected into their context before their first action. **Three for three.** The reviewer added the
+detail the earlier two did not: it stated which entries it had been given and why none bore on the
+files it was judging.
