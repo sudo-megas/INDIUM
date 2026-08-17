@@ -2017,3 +2017,80 @@ produced. That review is commissioned and its outcome is not recorded here, beca
 returned. A class-9 sweep runs beside it over every other filesystem write in the tree, on the
 principle this project wrote down after fixing nineteen of something and finding the twentieth a
 milestone later: **a sweep is not a habit.**
+
+---
+
+## Phase 3 — two more CORE drafts, and one decision the round may not make
+
+### Draft 7 — §7's beta clause. Annotated, and the verdict withheld
+
+`CORE.md:509-522` carries the beta and its condition. Two of its sentences are now in play, and they
+are not in play the same way.
+
+**The first is simply false and can be annotated.** *"the gate is a testing round against a released
+build carrying it, and no such round has been run."* Such a round **has** now been run: the 158-step
+walk against the released `v2.1`, which returned 139 approvals and is recorded in this document. The
+annotation:
+
+> …the gate is a testing round against a released build carrying it. *(Run in PXX, against the
+> released `v2.1`: 158 steps walked, 139 approvals, every denial closed. The sentence above said "no
+> such round has been run" from P18 until then, and is annotated rather than rewritten so the road
+> reads as what happened.)*
+
+**The second is the maker's and this round will not touch it.** The same paragraph says, in its own
+words: *"**What "real hands" means is deliberately left undefined**: it is a decision the maker has
+not made, and recording the sentence is not the place to make it for him."*
+
+So the beta has a two-part condition, and **only one part is mechanical.** A testing round against a
+released build carrying P12's and P13's work — done, evidenced, checkable. Whether that round
+constitutes the design work having *been in real hands* — undefined by deliberate choice, reserved by
+name, and **rule 7's exact shape: a decision that is the maker's by category.**
+
+**This corrects the plan that commissioned this round.** That plan states *"§7 beta gate is met by the
+walk already done"* and *"v2.5 lifting the beta is therefore honest"*, and lists as a v2.5 commitment
+that *"the release notes drop the beta sentence and say in one line why."* The mechanical half
+supports it. The reserved half is not the plan's to answer, and CORE outranks a plan: `CORE.md:3-5`
+gives the document to one hand, and this paragraph puts this specific question in it explicitly.
+
+**So the round's output here is evidence and a question, not a lifted beta:**
+
+> The mechanical half of §7's beta condition is met and the evidence is in `PXX.md`. The half §7
+> reserves — whether that walk is the design work having been in real hands — is yours. If it is met,
+> the release notes drop the beta sentence with the walk named as the reason. If it is not, they keep
+> it, and the round records that the gate was reached and not passed. Either answer is a complete
+> outcome; the round taking the decision itself is not.
+
+A beta lifted by an agent reading a sentence that says the decision is not the agent's would be worse
+than a beta left standing.
+
+### Draft 8 — the road table's three new rows, and the shape the new gate permits
+
+The table stops at P22 / `v2.1`. Three tags exist beyond it — `v2.2` (`e4718e4`), `v2.3` (`d70cb0f`)
+and the unreached `v2.5` — and the road is where they get written down.
+
+**Before drafting the rows, the constraint, because the new test discovered it rather than the
+drafter.** `every_tag_core_seven_names_is_one_the_release_workflow_would_accept` reads the **last cell
+of each row** and parses it as one tag. A Tag cell holding two — `**`v2.2`** and **`v2.5`**` — does
+not parse as either, and the gate refuses the row. So **a row carries exactly one tag, or a held-tag
+em dash, and nothing else.** That is not a rule anybody wrote; it is what the table has always done
+and what is now enforced. A round that had written PXX's two tags into one cell would have found out
+at `cargo test` instead of at the push, which is the entire point of the gate existing.
+
+That forces the shape below — PXX takes two rows, because PXX carries two tags:
+
+> | PXX | The round that ends the beta: the suite run against what shipped, the instrument checked in, and 158 steps walked against the released `v2.1` | **`v2.2`** |
+> | P23 | The redesign the fifth project's study asked for: zones with corners, a cast measured rather than eyeballed, Caskaydia, the type scale named in one place, popups that move | **`v2.3`** |
+> | PXX Phase 3 | The hardening: eleven agents over thirty-four files, a tiered verification gate, and the write outside the destination that libarchive's flags were never in force on | **`v2.5`** |
+
+**Checked against both new gates by their own rules, before the maker applies anything.** All three
+are the two-numeral form with no revision, which is what `release.yml` writes at `pkgrel` 1 — so each
+parses, and none is the `v2.5.0-1` shape that no push can be accepted under. And the sequence
+`v2.1 → v2.2 → v2.3 → v2.5` is non-decreasing, so the ordering gate passes too. This is reasoned from
+the rule rather than executed, because executing it would mean writing into `CORE.md`; the mechanical
+confirmation arrives the instant the rows land, which is the correct division of labour and not a
+gap.
+
+**One thing deliberately not drafted.** Whether the third row is titled *"PXX Phase 3"* or given a
+name of its own is the maker's — he named PXX himself, and the plan that commissioned this round
+reserved the naming for him in as many words when it declined to invent one for the redesign. The row
+is drafted with a placeholder that says what it carries, and the title is his to set.
