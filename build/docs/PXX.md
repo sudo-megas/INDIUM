@@ -5213,3 +5213,225 @@ by their author, and turning any of them into gates belongs with the fixes they 
 Three of this section's five substantive items are corrections to text this round wrote and believed.
 That is the intended yield of an independent reader, and it is the argument for not marking
 `PXX-C12-006` satisfied on the strength of the evidence that existed before one arrived.
+
+## Phase 3 — the tier-3 verdict on `9175a28`: **AMEND**, and the fix had missed the class INDIUM writes
+
+The second owed review is delivered, and `PXX-C12-006`'s obligation is discharged in full: **both
+`freeze-blocking` fixes have now been read by someone who did not write them.** One returned ACCEPT
+and one returned AMEND, which is close to the best possible evidence that the rule was worth keeping.
+
+The verdict, verbatim:
+
+> **Why AMEND and not ACCEPT or REPLACE.** The mechanism is right and I could not break it where it
+> claims to work … What is wrong is a false doc sentence (measured false, in the data-loss
+> direction), a routing branch that was never added for the *other* archive class the commit's own
+> docs claim to cover, and one new false refusal the commit introduced.
+
+### The finding that matters most: the program refused the correct password on its own archives
+
+`9175a28` was written to close `PXX-2-002` — *"a correct password was refused on the commonest
+encrypted 7z there is"*. It closed that for `7z a -p`, the plaintext-header class. **It left the
+class INDIUM itself produces.**
+
+The branch sat *inside* the libarchive walk, after `next_entry()`. For an encrypted-header archive
+`next_entry()` answers `EncryptedHeaders`, and the arm above it returns `Ok(false)` before the branch
+is ever reached. `sevenz.rs:331` — `inner.set_encrypt_header(recipe.encrypt);` — ties header
+encryption to the same flag that turns AES on, so **every encrypted 7z INDIUM has ever written has
+ciphertext headers.** Re-measured here on the reviewer's preserved instrument:
+
+```
+INDIUM-written encrypted 7z: list RIGHT -> Ok(1)
+ui/password.rs gate: verify_passphrase RIGHT -> Ok(false)
+ui/password.rs gate: unwrap_or(false)  -> false
+but extract RIGHT   -> Ok(1)
+and head_of RIGHT   -> Ok((21, false))
+```
+
+Every read path worked. Only the gate in front of them said no — three times, then *"Wrong password
+three times. Cancelled — nothing was written."* — on six of the seven pending actions.
+
+**This is the same shape as the defect `9175a28` was written for, and it is the second time this
+round has found it.** `PXX-T3-012` recorded the first: *"Two blind readers studied those six lines
+four times between them and neither asked what calls them."* The fix that came out of that reasoning
+asked what calls it, corrected the routing, and then placed the corrected routing **behind a return
+it could not pass** for half the archives in scope. Class 9 again, and this time inside the repair
+for class 9.
+
+**Fixed in `fa73bf8`.** The branch is hoisted above `Reader::open`, so a 7z never enters the walk at
+all: it lists through `sevenz`, chooses through `verification_target`, reads through `read_entry`.
+
+### The second: two verification sites, one archive, opposite answers
+
+This one is not inherited. **`9175a28` wrote it.**
+
+`verification_target` picks the *smallest* encrypted member and its doc argues the case at length —
+*"first-wins would settle for the weaker read with the stronger one available"*. The 7z branch added
+to `verify_passphrase` in the same commit then took **the first member with bytes**. Measured:
+
+```
+verify_passphrase (first = 2 MiB AES+COPY) WRONG -> Ok(true)
+extract          (smallest = 4 KiB)        WRONG -> Err(WrongPassword)
+```
+
+The popup says "unlocked"; the extraction fails behind it with the popup, and its three-attempt
+counter, already dismissed and no way to retype. **The doc for the right rule and the code for the
+wrong one were written in one sitting, forty lines apart.** Also fixed in `fa73bf8`, and gated.
+
+### The third: a new false refusal the commit introduced
+
+The `else if !verify_passphrase(path, secret)?` fallback — added by `9175a28` for a selection holding
+no encrypted member with bytes — asks a function that could not answer for an encrypted-header
+archive. So a **correct** password was refused on a directory-only or empty-file-only selection, and
+the comment beside it promising *"An archive whose every encrypted member is empty still passes"* was
+false for exactly that class. CLI-reachable through `cli.rs:478`, which calls `arch::extract` with no
+popup in front of it. Closed by the same hoist.
+
+### The fourth: a residual sentence false in the data-loss direction
+
+`extract`'s doc, written by `9175a28`, said: *"No file's contents are written and nothing existing is
+overwritten; empty directories are left behind."*
+
+```
+extract WRONG -> Err(WrongPassword)
+clause: nothing existing overwritten? seeded=100000 after=0 identical=false
+```
+
+**A hundred thousand bytes, gone, from a refused wrong password.** A member with no data stream
+returns `Ok` to any key without decrypting anything (`sevenz.rs`'s early return), so a zero-length
+member in the selection is unlinked-and-created *before* the oversized member's CRC refuses the key.
+
+This is the sentence a reviewer accepts the residual on, which is why the review filed the sentence as
+`freeze-blocking` and the code fix as `fix-in-v2.5`. That split is right and it is honoured: the
+clause is corrected in `1da62ac`; extracting through a temporary directory and renaming on success is
+not a freeze-round change.
+
+### And the mechanism underneath it, which the review did not isolate and this round now owns
+
+The measurement above has a detail worth more than the clause it corrects. On that archive there is
+exactly **one** member with bytes, so smallest-and-first are the same member and the chooser is not
+what let the wrong password through. **The bound is.**
+
+`verify_cap` caps at 1 MiB. `decode_reached_target(1 MiB, 1 MiB, 2 MiB)` is true, so a 2 MiB member
+returns `Ok` from a capped read — and a capped read stops **before end of stream, which is the only
+place `sevenz-rust2` compares the member's CRC.** On a COPY coder a wrong key's noise arrives at
+exactly the stated length, so the length test passes too.
+
+**That is precisely the argument this round already made about a one-byte read, left standing at one
+mebibyte.** The deviation record's own table:
+
+| fixture | cleared a **one-byte** read | cleared the **pre-flight** |
+|---|---|---|
+| `probe-p3` AES + **COPY** | **1500 / 1500** | 0 / 1500 |
+
+The reasoning that produced the second column — *"noise passes through a COPY coder intact and one
+byte of noise is a valid byte"* — does not stop being true at 2²⁰. It was written as an argument
+about **one byte** when it was an argument about **any prefix**, and the fix built on it inherited
+the narrower reading. `0/1500` in that table is a measurement of members *below* the bound.
+
+Filed as `PXX-T3-030` and **deliberately not fixed**: closing it means an unbounded read of an
+untrusted member, which is the OOM hazard the plan already flags for `arch.rs`. That is a cost
+question rather than a routing one, and bundling it into a freeze-round fix is how a correct
+diagnosis acquires a wrong patch. It is now stated plainly in `verify_cap`'s own doc.
+
+### The sabotage matrix, and the arm that had no gate
+
+Four reversions of the fix, each run against the whole lib suite:
+
+| sabotage | caught by |
+|---|---|
+| the 7z branch is not hoisted (pre-fix routing) | **4 gates**, including the content-encryption gate from `9175a28` — the hoist correctly subsumes the branch it replaces |
+| first-wins instead of smallest | 2 gates |
+| a failed listing read as success | 1 gate |
+| the empty-target arm answers `false` | **nothing — 309 passed** |
+
+The last row is the one worth recording. Flipping `Ok(true)` to `Ok(false)` on the
+`verification_target == None` arm means a plain 7z's correct password is refused, and **not one test
+in the suite noticed.** A gate was written for it and the matrix is now 4 of 4.
+
+**The two arms either side of it were each caught immediately.** The survivor is the one whose
+behaviour reads as too obvious to assert — and this round has now produced that shape twice, the
+first being `min_by_key` → `next` surviving the five-way matrix on this same commit. *A gate exists
+for the arms that look like they need one; this is the other kind.*
+
+### One sentence in the fix was false when written
+
+Written into the hoisted block: *"A missing codec, a malformed archive, a truncation: not a verdict on
+the password, and not this function's to swallow into `false`."* Measured immediately afterwards:
+
+```
+64-byte stub:    sevenz::list_all -> Err(WrongPassword)
+truncated half:  sevenz::list_all -> Err(WrongPassword)
+tail bit-flip:   sevenz::list_all -> Err(WrongPassword)
+```
+
+`sevenz-rust2` answers `WrongPassword` for structural damage too, so the arm is wider than its name
+and the comment describing it was wrong the moment it was typed. For **encrypted headers** the
+conflation is honest and unavoidable — a wrong key and a corrupt header fail the same decrypt. For
+plaintext headers it is a real conflation. Corrected in place before the commit rather than after,
+which is the only reason this is a paragraph and not a finding against a shipped sentence.
+
+### Tier 0 on the report itself
+
+One citation drifted: the report cites `sevenz.rs:332` for `set_encrypt_header`; it is at **`:331`**,
+which is where this record already had it. Re-grepped and corrected here. **Seven mechanism-or-citation
+corrections have now been made to commissioned reports this round, and not one has touched a
+conclusion.**
+
+### What the review disclosed about itself
+
+Two things, both unprompted, and both worth the space.
+
+It reported that **its advisor tool was unavailable** — *"so this review has no second opinion in
+it."* That is a material limitation on a `freeze-blocking` verdict and it volunteered it. It also
+disclosed the injected `MEMORY.md`, itemised all thirteen entries, and stated which two changed its
+behaviour: *"measure before recommending against"* (it built fixtures instead of arguing from crate
+source) and the storage note (it deleted 25 MB of timing scratch afterwards). **Seven agents for
+seven have now disclosed their injected context without being asked.**
+
+It also left the tree exactly as found, preserved its probe file outside the repository so every
+measurement is re-runnable, and confirmed `CORE.md:494` untouched without being told which line that
+was. Every number in this section was re-measured here on that preserved instrument.
+
+### The severity asymmetry, named rather than harmonised
+
+`PXX-T3-026` is filed `freeze-blocking`; `PXX-T3-021` — Apply failing on the same archive class — is
+filed `fix-in-v2.5`. **Same underlying condition, two different labels.** The defensible reason is
+cost and reach: one was a six-line routing change blocking six of seven actions, the other is a
+rebuild-path rewrite that fails loudly and destroys nothing.
+
+It is recorded as an asymmetry rather than smoothed in either direction, **under rule 7**, because a
+severity dispute of this kind is the maker's by category and the temptation to harmonise it after the
+cheap one is already fixed is exactly the pressure that would make it dishonest.
+
+### The findings
+
+| id | site | what | severity | state |
+|---|---|---|---|---|
+| `PXX-T3-026` | `arch.rs` `verify_passphrase`; `sevenz.rs:331` | the window refused the correct password on every encrypted 7z INDIUM writes, because the 7z branch sat behind a return `EncryptedHeaders` takes first | **freeze-blocking** | **fixed in `fa73bf8`, gated, sabotage-checked** |
+| `PXX-T3-027` | `arch.rs` `verify_passphrase` vs `verification_target` | the gate took the first member with bytes where the pre-flight takes the smallest, so the two accepted and refused the same password on one archive | fix-in-v2.5 | **fixed in `fa73bf8`, gated** |
+| `PXX-T3-028` | `arch.rs`'s `else if` fallback | a correct password refused on an empty-only or directory-only selection from a header-encrypted archive; CLI-reachable | fix-in-v2.5 | **fixed in `fa73bf8`, gated** |
+| `PXX-T3-029` | `arch.rs` `extract`'s doc | *"nothing existing is overwritten"* is false: a zero-length member is written before the refusal, destroying a 100 000-byte file | document-only (sentence) | **corrected in `1da62ac`; the code fix — temp dir and rename — is deferred, not done** |
+| `PXX-T3-030` | `arch.rs` `verify_cap` | a capped read never reaches the CRC, so **any AES+COPY member above 1 MiB clears the pre-flight with any password** — the one-byte argument, unchanged at one mebibyte | fix-in-v2.5 | **confirmed by measurement, deliberately unfixed; stated in the doc** |
+| `PXX-T3-031` | `sevenz.rs` | `read_entry`'s doc block attached to `decode_reached_target`, leaving the public function undocumented | document-only | **fixed in `1da62ac`** |
+| `PXX-T3-032` | `arch.rs` `verify_cap`'s doc | *"what a wrong password costs in time"* bounds bytes delivered, not work done; a member in a solid block costs the block ahead of it | document-only | **fixed in `1da62ac`** |
+| `PXX-T3-033` | `sevenz-rust2`'s `if file.has_crc` | a member with **no stored CRC** is verified by nothing at any size; the whole full-read argument is conditional on a bit the archive supplies | fix-in-v2.5 | confirmed from crate source; **reachability unverified** — no writer INDIUM or 7-Zip uses omits substream CRCs |
+| `PXX-T3-034` | `ui/password.rs:191`; `arch.rs`'s `list_7z` doc | `unwrap_or(false)` flattens a missing codec and a malformed archive into three wrong-password attempts, so the doc's codec promise is true of the CLI and false at the window | document-only | **corrected in `1da62ac`**; not a regression |
+| `PXX-T3-035` | `arch.rs` `verify_passphrase`'s empty-target arm | flipping it refused a plain 7z's correct password and **309 tests passed** | test-gap (class 4) | **fixed — gate added, matrix now 4 of 4** |
+| `PXX-T3-036` | `arch.rs`'s hoisted block | `sevenz-rust2` answers `WrongPassword` for a stub, a truncation and a bit-flip, so the arm is wider than the comment claimed | document-only | **corrected before the commit** |
+
+**Eleven new IDs here, and a twelfth below. Register 174 → 186.** Suite **406 → 410** — four gates,
+one of which exists only because a sabotage survived.
+
+### `PXX-C12-006`, and the obligation this creates
+
+**Both owed reviews are discharged. The count goes 2 → 0**, and the finding is closed with the
+observation that made it worth filing: one of the two returned ACCEPT and the other returned AMEND
+with a `freeze-blocking` defect in it. The evidence that existed before the reviews arrived — a
+five-of-five sabotage matrix, a preserved proof-of-concept, a 3000-password sweep — was substantial,
+entirely consistent with the fix being correct, and would not have found `PXX-T3-026`. **Nothing in
+it was wrong. It was all pointed at the archives the author had in mind.**
+
+**And `fa73bf8` now owes a review of its own.** It closes a `freeze-blocking` finding, so the round's
+own rule applies to it exactly as it applied to the two before it. Recorded as owed, not satisfied —
+filed as `PXX-C12-009`, with the same wording, for the same reason, and with the note that the
+practice has now paid for itself twice.
