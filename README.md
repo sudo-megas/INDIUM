@@ -12,8 +12,8 @@
 </p>
 
 <p align="center">
-  <img alt="Arch Linux package" src="https://img.shields.io/badge/Arch%20Linux-9.80%20MB-1793D1?style=for-the-badge&logo=archlinux&logoColor=white">
-  <img alt="Debian package"     src="https://img.shields.io/badge/Debian%20-6.92%20MB-A80030?style=for-the-badge&logo=debian&logoColor=white">
+  <img alt="Arch Linux package" src="https://img.shields.io/badge/Arch%20Linux-10.12%20MB-1793D1?style=for-the-badge&logo=archlinux&logoColor=white">
+  <img alt="Debian package"     src="https://img.shields.io/badge/Debian%20-7.10%20MB-A80030?style=for-the-badge&logo=debian&logoColor=white">
   <img alt="Version"            src="https://img.shields.io/badge/version-2.5.0-ADEBB3?style=for-the-badge">
 </p>
 

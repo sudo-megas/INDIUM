@@ -6995,3 +6995,83 @@ than a mechanism:
   `~/.config/indium/settings.toml` was read and not written**, verified by checksum after the run.
 
 **Both `PXX-10-007` and the walk are now closed. Nothing in this document is waiting on anyone.**
+
+---
+
+## Phase 3 — the release, and what certifying it against the real download found
+
+`v2.5` is published: <https://github.com/sudo-megas/INDIUM/releases/tag/v2.5>, author **sudo-megas**,
+three artefacts, run `32112480748` green in all four jobs. The ritual ran in the order the gate
+requires and the record predicted.
+
+### The rehearsal earned its place
+
+`release.yml`'s own header argues for a dispatch before the tag, because *"a typo in the rustup line
+or in an apt package name would burn it on a red run"* and a tag is pushed exactly once. Run
+`32111381896` on `master`: `arch`, `deb`, `verify` green, **`publish` skipped** — correctly, it is
+tag-guarded. Its artefacts were then used for something the plan asks for by name: the two glibc
+floors in the release notes were **measured from what the containers built**, not copied forward.
+Arch `GLIBC_2.43`, Debian `GLIBC_2.35`, both exactly as the notes already claimed. The check mattered
+because `archlinux:base-devel` rolls — at `v2.1` it was on 2.44 while the binary topped out at 2.43.
+
+### `v2.2` and `v2.3` ended red, and that is the gate working
+
+Runs `32112374770` and `32112426559`: `arch`, `deb` and `verify` **green in both**, `publish` failed
+in both. That is the whole of the failure, and it is `PXX-7-006` reproducing in production — the
+publish job fills a draft and never creates one, because a release's author is fixed at creation and
+`GITHUB_TOKEN` would author it `github-actions[bot]`, which CORE §8 forbids. The maker ruled those
+two tags carry no release; so they have no draft; so `publish` refuses. **`release.yml` was not
+softened to make them green**, per rule 6.
+
+### Certification against the published download
+
+The plan reserves this for exactly one moment — *"certification against a real download happens
+once, at v2.5"* — and it is the only run of it that will ever be honest, because at the unreleased
+tags there is no published artefact to point at.
+
+`verify.sh` with `INDIUM_PKG`/`INDIUM_DEB` aimed at the downloads: **41 passed, 0 failed, 0 skipped.**
+Zero skips was the stated bar. It covers the `.deb`'s ar member order, every control field, `md5sums`
+hash-for-hash against the extracted tree, the zeroed gzip MTIME, CORE §2's toolkit-free/PIE/BIND_NOW
+gate — and the copyright naming `CaskaydiaMonoNerdFontMono`, which is the check that exists because a
+`.deb` named JetBrains for a Fira face across three releases.
+
+### Every ignored test has now been run, and the count that shipped is wrong
+
+**426 of 426.** The 416 that always run, plus all ten that do not:
+
+- **Eight** in `package_path.rs`, against the published downloads — passed.
+- **One** in `clipboard.rs`, `offer_reaches_the_wayland_clipboard`, against a live Wayland session —
+  passed.
+- **One** in `estimate.rs`, the eight candidates over a real input in release mode — passed, and it
+  prints its measurements rather than asserting on a remembered figure.
+
+**And that accounting shows a sentence this release shipped is not true.** The tag annotation and
+the `2.5.0-1` changelog stanza both say *"ten more wait on a published package."* **Eight do.** The
+other two wait on a live compositor and on a release build, neither of which is a package. The
+number ten is right; what it counts is not. This is class 2 — *a number nothing can check* — and it
+reached a published artefact, in the round whose charter names class 2 as the one this project has
+never beaten.
+
+**It is recorded and not repaired, deliberately.** The tag annotation is inside an annotated tag
+object that is now pushed; the stanza is inside a `.deb` that is now downloadable. Changing either
+would make the repository disagree with what shipped, which is a worse fault than the one being
+fixed and is the opposite of what append-only means. The correct repair is a sentence in the next
+round's changelog, and this paragraph is the note that asks for it.
+
+### The two badges, filled from the artefacts and not from arithmetic
+
+`README.md:15-16` read `9.80 MB` / `6.92 MB` — v2.1-era, and deliberately left alone all round
+because they are measurements off a *published* artefact. They now read **`10.12 MB`** and
+**`7.10 MB`**, taken from the published assets: `10 607 647` and `7 448 176` bytes.
+
+**The unit was derived rather than assumed**, by measuring v2.1's still-published assets against
+v2.1's own badge: its `.pkg.tar.zst` is `10 319 410` bytes — **9.84 MiB** or 10.32 MB — against a
+badge reading `9.80`; its `.deb` is `7 282 304` — **6.94 MiB** or 7.28 MB — against `6.92`. Only the
+MiB column is anywhere near, so **the badges have always been MiB wearing an `MB` label**, and the
+new numbers follow that convention rather than silently changing it mid-release.
+
+That mislabel is worth one line to the maker rather than a unilateral fix: GitHub's own release page
+will show these assets as **10.6 MB** and **7.4 MB**, so a reader comparing the badge to the page it
+links to sees two different numbers for one file. Changing the label is a presentation decision and
+`README.md`'s header is his — he restyled it by hand three days before this release. **Recorded, not
+taken.**
