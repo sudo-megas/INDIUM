@@ -84,12 +84,17 @@ and still by hand before a release, which is the one of the four that proves not
 own. §7 lists this as V1.4's gate and records that it was brought forward to P15; this
 sentence went on saying *"until V1.4 wires it into CI"* for three releases after it had.
 
-Bundled assets, not dependencies: Fira Mono Nerd Font Mono, regular and bold, embedded in
-the binary, with the SIL Open Font Licence 1.1 alongside the GPL in `LICENSES/`. Fira Mono
-carries **no ligatures at all**, which is the property that matters here — a filename
-holding `->` must render as the two characters the archive stores, and a face that cannot
-form the ligature cannot get that wrong. `Mono` is the single-cell icon cut, so a glyph in
-a name never widens a table column.
+Bundled assets, not dependencies: CaskaydiaMono Nerd Font Mono, regular and bold, embedded
+in the binary, with the SIL Open Font Licence 1.1 alongside the GPL in `LICENSES/`. A
+filename holding `->` must render as the two characters the archive stores, and the
+**`Mono` cut** is what makes that true — Cascadia's programming ligatures live in the Code
+cut, not in this one. The guarantee is deliberately not stated as *"the face carries no
+ligatures"*: both shipped faces do carry `calt` and `rlig` in GSUB, and egui shapes through
+harfrust with `calt` on by default, so the claim that matters is the narrower one — this cut
+defines no substitution for the sequences a filename can hold, and
+`a_filename_is_the_characters_it_holds` holds it across twenty-nine of them in both weights
+rather than leaving it asserted in a comment. `Mono` is also the single-cell icon cut, so a
+glyph in a name never widens a table column.
 
 ---
 
