@@ -517,6 +517,9 @@ repair to it.
 | P20 | The yazi plugin, in a repository of its own because `contrib/` could never have been installed, and the description settled in all four places that state one | **`v1.2.0-4`** |
 | P21 | V2.0, the live estimator: eight real candidates on the real CPU, exact under its budget and marked above it, the popup made re-openable so there is something to measure, and — once it had been seen on screen — a tenth popup to draw the figures in | **`v2.0`** |
 | P22 | Files first and *Create* last: a draft to put them in, entries brought across from the archive as copies, and an archive you can close — with §1 amended so that opening another takes this window | **`v2.1`** |
+| PXX | The round that ends the beta: the suite run against what shipped, the instrument checked in, and 158 steps walked against the released `v2.1` | **`v2.2`** |
+| P23 | The redesign the fifth project's study asked for: zones with corners, a cast measured rather than eyeballed, Caskaydia, the type scale named in one place, popups that move | **`v2.3`** |
+| PXX Phase 3 | The hardening: eleven agents over thirty-four files, a tiered verification gate, and the write outside the destination that libarchive's flags were never in force on | **`v2.5`** |
 
 The P-table is a plan, not scripture; P-documents may split or merge steps, but scope
 only moves *out* of v1.0 by the maker's decision recorded here.
