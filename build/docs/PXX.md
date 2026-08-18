@@ -4388,7 +4388,7 @@ not. Listed in the previous section's rule-8 row for that reason.
 
 | id | site | what | severity | state |
 |---|---|---|---|---|
-| `PXX-10-007` | `build/screenshot.png`, `-new.png`, `-extract.png`, `-about.png`; `P22.md:315` | all four screenshots predate the redesign by 40 commits to `theme.rs` and `ui/`; the bump list says two, inheriting a P22 sentence that was true when written and closed by `0d5c002` | fix-in-v2.5 | confirmed — **the maker's to retake (rule 8)**, and `-about.png` strictly after the version bump |
+| `PXX-10-007` | `build/screenshot.png`, `-new.png`, `-extract.png`, `-about.png`; `P22.md:315` | all four screenshots predate the redesign by 40 commits to `theme.rs` and `ui/`; the bump list says two, inheriting a P22 sentence that was true when written and closed by `0d5c002` | fix-in-v2.5 | confirmed — **the maker's to retake (rule 8)**, and `-about.png` strictly after the version bump · **closed 2026-08-18: he delegated the retake — *"You take screenshot yourself now. Then i 100 125 150 walk."* Rule 8 reserves the *verdict a test cannot render* to his eye, not the mechanical act of capturing; he kept the walk and handed over the shutter. All four retaken against the 2.5.0 binary, `-about.png` after the bump as required. See the closing section** |
 
 **One new ID. Register 164 → 165.** Suite unchanged at **405** — and a count of image files against
 a redesign is not a thing a test can reach, which is the whole reason it survived four commits and a
@@ -6916,13 +6916,82 @@ moment the ritual starts. Cited rather than restated, so this list cannot drift 
    Confirmed to behave as the ritual assumes by `PXX-7-006` (`:1090`) — the gate was read, not
    assumed. Pushing the tag first burns three build jobs and ends red.
 
-4. **The four screenshots are the maker's to retake** (`PXX-10-007`, `:4391`, rule 8). All four
-   predate the redesign. `screenshot-about.png` was blocked on the version bump and **is now
-   unblocked** — the bump landed at `3df75b0`, so the window prints `2.5.0` and `2026-08-18` and the
-   shot can be taken in the same sitting as the 100/125/150 % walk.
+4. ~~**The four screenshots are the maker's to retake**~~ — **discharged 2026-08-18, and by his
+   hand differently than written.** He delegated the capture and kept the walk: *"You take
+   screenshot yourself now. Then i 100 125 150 walk."* All four are retaken against the 2.5.0
+   binary and land in the same commit as this line. The closing section below records what the
+   retake cost, because it was not nothing.
 
 5. **The beta ending is one choice, and the release body carries both.** Draft 7 asks the question
    and it is unanswered. Ending (A) keeps the beta; ending (B) lifts it and **additionally asserts a
    walk of the shipped window that has not happened** — so (B) is not shippable until it has. The
    condition is stated on each ending inside the draft itself, in comments that are deleted along
    with the unused half.
+
+   **Settled 2026-08-18: (A) ships.** One of (B)'s three conditions has since been met — the walk
+   happened and came back green — but the other two have not, and neither is mine to meet. (B)
+   requires the maker to judge the v2.1 walk to be the *"real hands"* §7 asks for, and it requires
+   `CORE.md` §7 to be annotated **in the same breath, by his hand**, or the document and the release
+   say opposite things about the same clause. `CORE.md` is untouched at `62e5ec5`. So the release
+   ships the wording every release since `v1.0.0-4` has carried, which is what §7 requires while its
+   condition is unmet — **and lifting the beta stays available to him at any later tag, at the cost
+   of one CORE edit and one line of release notes.** A beta lifted by an agent's inference from a
+   green walk would be exactly the "claim rather than a record" the plan warned against.
+
+---
+
+## Phase 3 — the last two gates, closed on 2026-08-18
+
+Both of the items this document has spent the round calling "the maker's" closed on the same day,
+and one of them closed by being handed back.
+
+### The walk: green
+
+**His verdict, in his words: *"100 125 150 tested green."*** That is the check rule 8 reserves to
+his eye — `P21.md:550`, *"a test cannot tell anyone that text got sharper"* — run against the window
+this release ships, at the three scalings, and returned clean. It is the last thing Deviation 3
+above was waiting on: the waiver dropped the 25-row roster and kept exactly this check, on the
+argument that the two silent risks of the redesign (`SB_ROW`, and a non-`Mono` cut breaking
+alignment invisibly) are both **metrics** risks and a scaling sweep is what surfaces metrics risks.
+It surfaced nothing. The argument is not proved by one green run, but the risk it was aimed at is
+now measured rather than reasoned about.
+
+### The screenshots: delegated, and the harness had rotted underneath them
+
+*"You take screenshot yourself now."* So `PXX-10-007` closes by capture rather than by his hand.
+Rule 8 was read narrowly and deliberately: it reserves **a verdict a test cannot render**, which is
+a judgement, not the mechanical act of pressing a shutter. He kept the judgement and handed over the
+mechanism.
+
+**What made this worth recording is that the capture harness carried a measured fact that had
+expired, and every probe still passed.** A note written six days earlier says, from measurement:
+*"`spectacle -a` returns **client-area** pixels, not screen pixels."* It does not any more. Today it
+returns **frame + KDE decoration + 65px of shadow** — the first capture came out `1634x1024` where
+`1504x866` was asked for, and the window geometry was not the reason: KWin reported `frame
+1504x894@170,20`, `client 1504x866@170,48`, exactly as instructed. The harness was right about the
+geometry and wrong about what the camera does with it, and **the failure was visible only because
+the output was measured against the artefact it was replacing.** Had the shots merely been eyeballed
+they would have shipped with a titlebar in them.
+
+This is class 7 — *modelled versus measured* — with a twist the class list does not have a row for:
+the measurement was correct **when taken**, and rotted without anything in this repository changing.
+The counter-rule the project already carries covers it exactly: **ask the program, not the record of
+it.** The fix is not a better note; it is that the crop is now computed from each capture's own
+opaque bounding box rather than from a remembered shadow width.
+
+Three further things the retake had to decide, each recorded because each is a judgement rather
+than a mechanism:
+
+- **The fixture is `git archive` of the tracked tree**, not the working tree. `build/` now holds
+  111 MB of gitignored build output; an honest `indium-src.tar.zst` is the source. 133 entries, 13
+  directories, 11.8 MiB — where v2.1's shot showed 101 and 6.0 MiB. **The numbers moved because the
+  repository did**, and the shots say so rather than reproducing a stale figure.
+- **The fixture sat in `~/Documents` for the duration and was removed after.** v2.5's status bar
+  prints the archive's containing directory where v2.1's did not, so the capture path is now visible
+  in the artefact; a `.claude/jobs/…` path would have been the harness leaking onto the front page.
+- **The app ran against a throwaway `XDG_CONFIG_HOME`.** His real store holds bookmarks from his own
+  testing — `hagda`, `dfeara`, `dagfadfasd` — and an `indium-test` extract path, and the Extract
+  popup draws them. The throwaway config seeds the three standard folders v2.1's shot showed. **His
+  `~/.config/indium/settings.toml` was read and not written**, verified by checksum after the run.
+
+**Both `PXX-10-007` and the walk are now closed. Nothing in this document is waiting on anyone.**
