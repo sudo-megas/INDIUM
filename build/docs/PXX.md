@@ -5854,8 +5854,11 @@ twenty-two documents deep.
    **What the waiver costs, stated rather than minimised.** Stage 2 moved every glyph in the window
    and every zone corner: the typeface changed to Caskaydia Mono, `R_ZONE` went 0 → 6, and the type
    scale was re-cut. The 25 rows would have re-checked those by eye. What still covers them is the
-   suite at 410 — including `SB_ROW` now pinned in **both** directions, which the plan named as *"the
-   silent one"* — the icon and tofu gates that parse both faces at test time, and the check he kept.
+   suite at 410 *(410 when this was written; **416** at the freeze — the six added since are
+   write-path permission gates and bear on none of the redesign coverage this paragraph is about,
+   so the argument is unchanged and only the number moved)* — including `SB_ROW` now pinned in
+   **both** directions, which the plan named as *"the silent one"* — the icon and tofu gates that
+   parse both faces at test time, and the check he kept.
 
    **And the check he kept is the well-aimed one.** The plan's own risk list names two silent risks
    for this redesign, `SB_ROW` and a non-`Mono` cut breaking alignment invisibly. Both are metrics
@@ -5869,6 +5872,29 @@ twenty-two documents deep.
 4. **The v2.5 scope decision was taken by the round, at the maker's delegation.** Thirteen
    `fix-in-v2.5` findings; three fixed, nine recorded below, one queued for an agent. Every line of
    it is reversible by him and none of it touches `CORE.md`.
+
+13. **The tier-3 obligation was tracked by habit, and the habit missed one.** The rule, stated as
+   the addendum below prescribes it: **a commit that closes a `freeze-blocking` finding opens its
+   own `PXX-C12-nnn` row in the same commit, before the fix is described as done.**
+
+   *(Numbered 13 and not 5. The two headings in this section split one ledger by kind rather than
+   starting two lists — Process runs 1–4, Recorded limitations 5–12 — and deviation numbers are
+   cited from source: `table.rs:211` and `extract.rs:8` both cite "P1 Deviation 5", `theme.rs:463`
+   cites "P5 Deviation 6". So a thirteenth is appended to the sequence rather than inserted into it,
+   which would have renumbered eight entries to save one from reading out of order.)*
+
+   It is recorded here as a deviation because for most of this round there was no rule — there was
+   a memory. Three obligations were opened three different ways: `-006` as a register row at
+   `freeze-blocking`, `-009` in prose with no row until the moment it was discharged, and `-002` as
+   a row at `fix-in-v2.5` that a clerk found retrospectively. A fourth was not opened at all, and
+   the document said in plain words that every freeze-blocking fix had been reviewed while one had
+   not. **The escape was not a forgotten row; it was the absence of anywhere a row was owed.**
+
+   Written into this section rather than built into machinery, because a freeze is not the round to
+   add machinery to — and written *here*, in the section the next round inherits, because the
+   addendum that prescribed it said it had been and it had not. That sentence stood for two commits.
+   It is class 5 — the record describing behaviour it lacks — inside the sentence prescribing the
+   repair for class 12, found by a reader of the commit rather than by any gate.
 
 ### Recorded limitations, carried into v2.5 unfixed
 
@@ -6805,7 +6831,11 @@ walked again before it went out. The line is what it says it is.
 ### The `v2.5` tag annotation, drafted
 
 Shaped after `v2.1`'s, `v2.2`'s and `v2.3`'s. Its count of reviews was drafted at four, corrected
-to six when the chain closed.
+to six when the chain closed. **Its closing test count was drafted at 415 and corrected to 416**
+— the changelog's copy of the same figure was caught and fixed before the bump landed, and this
+one was not, because it sits in a draft no gate reads. Two sentences, one number, one of them
+checked by `the_date_about_prints_is_the_one_the_changelog_stamped`'s neighbourhood and the other
+by nothing: the round's own class 2, surviving into the artefact that announces the round.
 
 ```
 INDIUM 2.5 — the hardening, and the fix that was read by someone who did not write it
@@ -6856,5 +6886,43 @@ root — a 7z member is identified by its name after normalisation, and two memb
 normalise to the same name — and addressing it properly is not work for the week before a
 freeze.
 
-415 tests pass, ten more wait on a published package.
+416 tests pass, ten more wait on a published package.
 ```
+
+---
+
+### Before the ritual runs — five things the drafts above cannot carry themselves
+
+Every one of these is already recorded somewhere in this document. The point of repeating them here
+is that "somewhere" is spread across 5,800 lines, and the moment they are all needed at once is the
+moment the ritual starts. Cited rather than restated, so this list cannot drift from its sources.
+
+1. **The date is one figure in two files, and they move together.** `build/package/deb/changelog.Debian`'s
+   newest stanza and `about.rs:28`'s `RELEASE_DATE` are pinned to each other by
+   `the_date_about_prints_is_the_one_the_changelog_stamped` (§`:1888-1890`). Both currently read
+   **`2026-08-18`**. **If the calendar moves before the tag is cut, both are re-stamped in the same
+   commit and the suite is re-run** — changing one alone reds the gate, which is the gate working
+   rather than an obstacle. This rule is the only line in this section not already written down
+   elsewhere: it was held in a conversation, which is how the Phase 3 fleet was nearly lost.
+
+2. **The two package-size badges are not filled from here.** `README.md:15-16` carry `9.80 MB` /
+   `6.92 MB`, v2.1-era, deliberately not guessed (`:1899-1900`). They are measurements off the
+   **published** artefacts, so they are read from what `release.yml` built, at release time. For
+   scale, v2.3's local build was 10.12 MiB / 7.09 MiB — close enough that a guess would look right
+   and be wrong, which is exactly the class this round hunts and exactly why it is not made here.
+
+3. **The draft is opened before the tag is pushed.** `release.yml`'s `publish` job runs a step that
+   `exit 1`s when `gh release view` finds no waiting draft, and it must be **sudo-megas**'s.
+   Confirmed to behave as the ritual assumes by `PXX-7-006` (`:1090`) — the gate was read, not
+   assumed. Pushing the tag first burns three build jobs and ends red.
+
+4. **The four screenshots are the maker's to retake** (`PXX-10-007`, `:4391`, rule 8). All four
+   predate the redesign. `screenshot-about.png` was blocked on the version bump and **is now
+   unblocked** — the bump landed at `3df75b0`, so the window prints `2.5.0` and `2026-08-18` and the
+   shot can be taken in the same sitting as the 100/125/150 % walk.
+
+5. **The beta ending is one choice, and the release body carries both.** Draft 7 asks the question
+   and it is unanswered. Ending (A) keeps the beta; ending (B) lifts it and **additionally asserts a
+   walk of the shipped window that has not happened** — so (B) is not shippable until it has. The
+   condition is stated on each ending inside the draft itself, in comments that are deleted along
+   with the unused half.
