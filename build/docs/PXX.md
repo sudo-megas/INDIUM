@@ -7166,3 +7166,38 @@ They are findings with identifiers, not clauses of the design, and §10 says whe
 and that `PXX.md` holds them. Promoting all of them would have made the section a defect list
 wearing a design document's numbering — and the count would have gone stale at the next round,
 which is the class this project has never beaten.
+
+### Three checks run after the push, because the edits could have created what they closed
+
+**1. Does `PXX-C12-014` exist?** Asked because Deviation 13's rule is unconditional — *"a commit
+that closes a `freeze-blocking` finding opens its own `PXX-C12-nnn` row in the same commit"* — and
+`dd088ac` closes `PXX-10-006`, which is `freeze-blocking`. The register runs 001–013, so a
+fourteenth row would be next.
+
+**No row is owed, and the register said so before the question was asked.** `:1309`, written in
+the merge pass: *"**`PXX-10-006` owes the maker's hand, not a re-derivation.** It is a CORE
+self-contradiction, and tier 0 was the right and only mechanical gate for it."* The C12 rule
+tracks a **tier-3 obligation** — a fix owing review by an agent that did not write it — and this
+finding was dispositioned at **tier 0** on the record, weeks before today. Rule 6 is not bent by
+that; nothing was softened to make it pass. The gate simply was never raised over this finding.
+
+Recorded anyway, because the row above describing `dd088ac` as closing a freeze-blocker will make
+the next reader ask exactly this, and an answer that lives only in a section fifty-eight hundred
+lines up is an answer that gets re-derived.
+
+**2. Does anything else still call INDIUM a beta?** `5e88dc9` made CORE say the beta is over.
+Nothing in the suite could catch a contradiction of it: all eleven doc-as-tests anchor on
+structural lists, and **none reads prose** — which is class 1's standing gap, named in this
+round's own hunt list. Swept by hand across `README.md`, `src/`, `assets/` and `build/package/`.
+**Clean.** Every hit is a fixture filename — `beta.txt`, in alpha/beta/gamma triples — and not one
+is a status claim. The published `v2.5` notes still say *"Still a beta"*, which is the ordering
+`5e88dc9` records in CORE rather than repairs.
+
+**3. Does §2's newly-cited test exist?** `dd088ac` wrote
+`a_filename_is_the_characters_it_holds` into CORE by name, and **nothing gates a prose citation
+in CORE** — the round's own seeded finding was precisely a `///`-cited identifier resolving to no
+`fn`. Resolves: `src/theme.rs:3205`.
+
+The first two of these three were not on any checklist. They exist because the question *"what
+could today's edits have broken that today's edits also made unfalsifiable?"* is the only version
+of reach-not-depth that works on a document no test reads.
