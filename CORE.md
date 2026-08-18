@@ -524,7 +524,9 @@ repair to it.
 The P-table is a plan, not scripture; P-documents may split or merge steps, but scope
 only moves *out* of v1.0 by the maker's decision recorded here.
 
-**The `1.0` line is a beta, and this is the condition for it stopping.** Every release
+**The `1.0` line was a beta, and this was the condition for it stopping. The condition is
+met and the beta is over** — ruled 2026-08-18, after `v2.5`. The paragraph is annotated
+rather than rewritten, so the road reads as what happened. Every release
 from `v1.0.0-4` onward has said so in its own notes, in these words: *"the `1.0` line stays
 one until the design work it is named for has been in real hands."* `v1.0.0-3` announced
 the beta before it, in different words, and every release since has carried it unchanged.
@@ -535,9 +537,19 @@ quotes it and P16 and P17 paraphrase it in their closing steps, but until P18 wr
 it appeared in **no governing document** — not CORE, not the README — so the project's own
 next state change was a condition a reader had to reconstruct from release prose and the
 rounds that happened to repeat it. The design work it names is P12's and P13's, shipped at `v1.0.0-4`; the gate is a
-testing round against a released build carrying it, and no such round has been run. **What
+testing round against a released build carrying it, and no such round has been run. *(Run in
+PXX, against the released `v2.1`: 158 steps walked, 139 approvals, every denial closed. The
+sentence before this one was true from P18 until then and stands unrewritten, because a
+condition is not made more met by editing the record of it being unmet.)* **What
 "real hands" means is deliberately left undefined**: it is a decision the maker has not
-made, and recording the sentence is not the place to make it for him.
+made, and recording the sentence is not the place to make it for him. *(Made 2026-08-18, by
+his hand, and recorded here because this sentence says that is where it belongs: that walk
+is the design work having been in real hands. Two things about the order, stated rather than
+tidied. `v2.5` shipped before the ruling and its notes still read "Still a beta: the `1.0`
+line stays one until the design work it is named for has been in real hands" — that release
+is not edited, and the next one's notes carry the reason instead. And the round that reached
+this gate deliberately declined to pass it: a beta lifted by an agent reading a sentence
+that reserves the decision would have been worse than a beta left standing.)*
 
 ### After v1.0
 
