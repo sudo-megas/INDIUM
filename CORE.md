@@ -689,6 +689,49 @@ This list is authored by the maker, not derived. Items enter and leave only by h
 
 ---
 
+## 10. DEVIATIONS
+
+Where the program departs from what the sections above describe, recorded rather than
+quietly repaired. A bounded guarantee stated as an unbounded one is the fault this project
+has paid for most often, and a limitation named is worth more than a limitation assumed
+closed.
+
+Opened 2026-08-18, and the reason it did not exist until then is itself the kind of thing
+this section is for: two written drafts, a plan instruction and a round's own recorded
+limitations had all been addressed to *"CORE Deviations"*, and CORE had nine sections and no
+such place. Filed by PXX as `PXX-C12-010`.
+
+**The 7z secure-write guarantee is real against the archive, and bounded against a
+concurrent local process.** §3's `arch` row says the header-encrypted 7z branch earns the
+secure-flag guarantee in its own code. It earns it against the archive: no name the archive
+supplies, and no link already sitting at the destination, can redirect a write outside it.
+It does not earn it against a hostile process running as the same user at the same moment,
+which could swap a directory component for a link in the window between the check and the
+creation. Closing that needs `openat2(RESOLVE_BENEATH)` and descriptor-relative writes
+through the whole branch. Recorded because the guarantee is real and bounded, and stating a
+bounded one as unbounded is exactly the class the round that found it was hunting.
+
+**`cli`'s terminal handling declares `struct termios` and three C constants by hand** rather
+than binding them, because a `-sys` crate is not wanted in this tree. Six compile-time
+assertions guard the layout, and they are honest about less than they look: they catch a
+field reorder, which is what they were added for, but `NCCS` at 32, 33, 34 and 35 all
+produce the same sixty-byte layout and the assertions cannot tell those four apart; and
+`ECHO` and `TCSAFLUSH` are preprocessor values transcribed as ordinary integers, which
+nothing in the build ever reads a header to check. The transcription is correct against the
+installed glibc, verified by compiling a C program against those headers rather than by
+reading them. What holds it is the ship platform: `PKGBUILD` pins `x86_64`, both release
+containers are glibc, and the binary links `tcgetattr@GLIBC_2.2.5`. On a libc whose struct
+is larger than sixty bytes the failure would be silent and memory-unsafe, and nothing here
+would catch it.
+
+The two above are the ones written out for this document. PXX's hardening round recorded
+further limitations against its own register rather than here — they are findings with
+identifiers, not clauses of the design — and `PXX.md` holds them with the reasoning for
+each. A deviation is promoted into this section when it describes what INDIUM *is* rather
+than what one round found.
+
+---
+
 Copyright © sudo-megas
 
 *Built with Reason and Passion.*
