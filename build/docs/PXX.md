@@ -7075,3 +7075,94 @@ will show these assets as **10.6 MB** and **7.4 MB**, so a reader comparing the 
 links to sees two different numbers for one file. Changing the label is a presentation decision and
 `README.md`'s header is his — he restyled it by hand three days before this release. **Recorded, not
 taken.**
+
+---
+
+## Phase 3 — the drafts applied, and the two decisions that were never the round's
+
+**2026-08-18.** The maker's instruction: *"make restatements on CORE.md on what we have done
+so far and we say it is done."* That is the order rule 3 describes — *"an ordered CORE edit is
+written out in full, committed alone"* — and it is the hand `CORE.md:3-5` reserves the document
+for, reaching through an order rather than through a keyboard. **CORE.md had been untouched at
+`62e5ec5` for the whole round. It is not any more, and every change below was written before it
+was asked for.**
+
+### Three decisions were put to him first, because CORE's own text reserves them
+
+Not caution. Each of the three is a sentence in CORE or PXX saying, in as many words, that this
+particular question belongs to him.
+
+| asked | his ruling |
+|---|---|
+| §7's beta — lift, or annotate and leave standing? | **Lift.** The walk is the design work having been in real hands |
+| Does CORE gain a Deviations section? (`PXX-C12-010` says the question is his) | **Yes** — a new §10 after §9 |
+| Draft 8's third row title | **"PXX Phase 3"**, as drafted |
+
+The first is the one the round refused to take for itself, and the refusal is why there was
+something to ask. Its own words at `:2063`: *"a beta lifted by an agent reading a sentence that
+says the decision is not the agent's would be worse than a beta left standing."* The round
+reached the gate, proved the mechanical half, and stopped. He passed it.
+
+### The nine commits
+
+Each stages `CORE.md` alone. Suite re-run green after every one; `cargo fmt --check` and
+`cargo clippy --all-targets -- -D warnings` clean at the end.
+
+| commit | draft | § | closes |
+|---|---|---|---|
+| `dd088ac` | 1 | §2 — the typeface, and the guarantee restated as the true narrow one | **`PXX-10-006`** — the round's only freeze-blocker |
+| `dee4e4f` | 2 | §3 — threading: at most one *task*, not "one worker" | `PXX-1-006` |
+| `2bf2718` | 3b | §3 — the `arch` row earns the 7z branch its guarantee | — (3a superseded, not applied) |
+| `98d0d45` | 4 | §3 — the `tasks` row: the lock name and the temp-file window | `PXX-3-002`, `PXX-3-003` |
+| `0656838` | 5 | §3 — the `cli` row names exit codes 0, 1, 2 | — |
+| `f60841b` | 9 | §3 and §2 — the `sevenz` rows name both directions | `PXX-C12-005` |
+| `0716c3a` | 8 | §7 — the road table gains PXX, P23, PXX Phase 3 | — |
+| `5e88dc9` | 7 | §7 — the beta condition met, the `1.0` line no longer one | — |
+| `72ff43c` | 3c + 6 | **§10 opens** | `PXX-C12-010` |
+
+**Draft 3a is the one draft deliberately not applied.** It described the 7z write path as an
+unfixed hole. The hole is fixed, so applying it would have made CORE describe a defect the
+program no longer has — the same class-5 error that kept 3b out of the tree for weeks, pointing
+the other way. Draft 3's own split anticipated exactly this and said which half dies.
+
+### Draft 8's gate, executed at last — and made to fail on purpose first
+
+Draft 8 checked its three rows against `every_tag_core_seven_names_is_one_the_release_workflow_would_accept`
+**by reasoning**, and said so plainly: *"this is reasoned from the rule rather than executed,
+because executing it would mean writing into `CORE.md`."* It was right, and it is now executed.
+
+Passing was not accepted as proof. The gate would pass identically if it could not see the new
+rows at all, which is class 4 — *a test weaker than its name*, six rounds and six escapes. So the
+v2.5 cell was deliberately broken to `v2.5.0-1`, the shape draft 8 predicted no push can be
+accepted under, and the gate named the row that this round had just written:
+
+> CORE §7's row for PXX Phase 3 names a tag release.yml would refuse: "v2.5.0-1" names revision
+> 1, which the workflow never writes: at `pkgrel` 1 it takes the other branch and writes the
+> two-numeral form
+
+Reverted, suite green. The gate reads these rows.
+
+### What §7 now says, and the two orderings it does not tidy
+
+The beta paragraph is **annotated, not rewritten**, which is `:583`'s convention for the same
+section — *"it stays listed here so the road reads as what happened."* The sentence reading *"no
+such round has been run"* stands, with the walk recorded beside it, because a condition is not
+made more met by editing the record of it being unmet.
+
+Two orderings are stated in CORE rather than smoothed:
+
+1. **`v2.5` shipped before the ruling**, and its published notes still read *"Still a beta: the
+   `1.0` line stays one until the design work it is named for has been in real hands."* Verified
+   against the live release body, not against this document's memory of it. That release is not
+   edited; the next one's notes carry the reason. Same principle as the *"ten more wait"* stanza:
+   what shipped, shipped.
+2. **The round declined the decision and the record says so**, so that a later reader finds the
+   refusal rather than inferring the round simply never got there.
+
+### One thing this section is careful not to claim
+
+Nine further limitations were recorded against this round's own register and are **not** in §10.
+They are findings with identifiers, not clauses of the design, and §10 says where that line falls
+and that `PXX.md` holds them. Promoting all of them would have made the section a defect list
+wearing a design document's numbering — and the count would have gone stale at the next round,
+which is the class this project has never beaten.
