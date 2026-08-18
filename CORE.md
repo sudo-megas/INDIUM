@@ -116,9 +116,19 @@ One binary crate, `indium`, with modules. No workspace, no premature abstraction
 | `secret` | The password buffer: the only thing in the program that *carries* one, because every path that takes a password takes a `Secret`. It overwrites its bytes on drop through `write_volatile` behind a compiler fence, so the optimiser cannot decide the wipe is dead; it refuses to print itself; and the two copies it cannot follow are written down rather than papered over — the NUL-terminated string libarchive keeps for the reader's lifetime, and the plain `String` the prompt's text field must type into before the value can become a `Secret` at all, which is cleared on submit and on cancel but not overwritten. |
 | `util` | The hand-written helpers §2 refuses a crate for: the CRC32 table and its streaming form, byte and ratio formatting, the hex view's row arithmetic, the mode string, a civil date from a unix timestamp, the path normalisation every stored name passes through before it is shown, the middle elision §4 requires of a path, and the byte sniffer the Inspector decides content with — which is the classifier §6 means above when it refuses a glyph that would decide by extension instead. Nothing here may grow a dependency. |
 
-Threading: the UI thread and one worker. The worker opens, lists, extracts, and rebuilds;
-it reports progress over a channel and honours a cancellation flag. egui runs in reactive
-mode — an idle INDIUM repaints nothing and costs nothing, on any refresh rate.
+Threading: the UI thread, and at most one **task** at a time. A task is an extraction or a
+rebuild — the thing that carries the progress row, the proportion bar and Cancel — and it
+runs on a worker thread that reports over a channel and honours a cancellation flag; nothing
+may start a second task while one runs. Around the task, short-lived readers come and go on
+threads of their own: the listing streams entries while the table fills, a Preview reads one
+member's head, the estimator measures — and the estimator alone is preempted rather than
+waited for when a task starts, because advisory work does not get to hold up real work. Every
+blocking wait on another program — the portal's picker, the clipboard's owner, the file
+manager being handed a folder, a child window being reaped — happens on a thread of its own,
+never the UI's.
+
+egui runs in reactive mode — an idle INDIUM repaints nothing and costs nothing, on any
+refresh rate.
 
 Passwords are requested at the moment of use, passed down, and zeroed when the operation
 ends. They are never written to settings, recents, or anywhere else.
