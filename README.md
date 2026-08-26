@@ -1,5 +1,5 @@
 <p align="center" width="100%">
-    <img width="33%" src="build/icons/indium-512.png">
+    <img width="100%" src="build/icons/banner.png">
 </p>
 
 <h1 align="center">INDIUM</h1>
